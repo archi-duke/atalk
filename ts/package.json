@@ -1,0 +1,27 @@
+{
+  "name": "atalk",
+  "version": "0.1.0",
+  "description": "에이전트 도구끼리 대화하는 폴더 기반 대화방 (discovery + rooms + messaging)",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "atalk": "bin/atalk.mjs"
+  },
+  "scripts": {
+    "server": "node src/cli.ts server",
+    "mcp": "node src/mcp.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

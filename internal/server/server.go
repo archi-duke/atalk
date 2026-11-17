@@ -1,0 +1,480 @@
+// Package server 는 ATalk 데몬의 HTTP 계층이다. REST + SSE + long-poll wait.
+// API 는 docs/DESIGN.md 6장과 TypeScript 구현(ts/src/server.ts)과 동일하다.
+package server
+
+import (
+	"context"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"slices"
+	"strconv"
+	"sync"
+	"time"
+
+	"atalk/internal/core"
+)
+
+//go:embed viewer.html
+var viewerHTML []byte
+
+type Options struct {
+	Root       string
+	Addr       string // 기본 127.0.0.1:7420
+	AwayGrace  time.Duration
+	SweepEvery time.Duration
+}
+
+type Server struct {
+	Core   *core.Atalk
+	http   *http.Server
+	ln     net.Listener
+	stop   chan struct{}
+	stopMu sync.Once
+}
+
+func New(opts Options) (*Server, error) {
+	c, err := core.New(core.Options{Root: opts.Root, AwayGrace: opts.AwayGrace})
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{Core: c, stop: make(chan struct{})}
+	if opts.Addr == "" {
+		opts.Addr = "127.0.0.1:7420"
+	}
+	s.http = &http.Server{Addr: opts.Addr, Handler: s.routes()}
+	every := opts.SweepEvery
+	if every == 0 {
+		every = 10 * time.Second
+	}
+	go func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if err := c.Sweep(); err != nil {
+					log.Printf("sweep 실패: %v", err)
+				}
+			case <-s.stop:
+				return
+			}
+		}
+	}()
+	return s, nil
+}
+
+// Listen 은 포트를 열고 실제 포트를 돌려준다 (Addr 의 포트가 0 이면 임의 포트).
+func (s *Server) Listen() (int, error) {
+	ln, err := net.Listen("tcp", s.http.Addr)
+	if err != nil {
+		return 0, err
+	}
+	s.ln = ln
+	go func() {
+		if err := s.http.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("http: %v", err)
+		}
+	}()
+	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+func (s *Server) Close() error {
+	s.stopMu.Do(func() { close(s.stop) })
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := s.http.Shutdown(ctx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return s.http.Close()
+	}
+	return err
+}
+
+// ───────────────────────── 라우팅 ─────────────────────────
+
+type handler func(w http.ResponseWriter, r *http.Request) (any, error)
+
+// skip 은 핸들러가 응답을 직접 쓴 경우 (SSE, HTML).
+type skip struct{}
+
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+	h := func(pattern string, fn handler) {
+		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
+			out, err := fn(w, r)
+			if err != nil {
+				writeErr(w, err)
+				return
+			}
+			if _, ok := out.(skip); ok {
+				return
+			}
+			writeOK(w, out)
+		})
+	}
+	c := s.Core
+
+	// ── 디스커버리 ──
+	h("GET /health", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]any{"root": c.Root, "pid": os.Getpid()}, nil
+	})
+	h("GET /agents", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		a, err := c.ListAgents(r.URL.Query().Get("status"), r.URL.Query().Get("kind"))
+		return map[string]any{"agents": a}, err
+	})
+	h("POST /agents", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var in core.RegisterInput
+		if err := readBody(r, &in); err != nil {
+			return nil, err
+		}
+		return c.Register(in)
+	})
+	h("GET /agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		a, err := c.GetAgent(r.PathValue("id"))
+		return map[string]any{"agent": a}, err
+	})
+	h("PATCH /agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var p core.CardPatch
+		if err := readBody(r, &p); err != nil {
+			return nil, err
+		}
+		a, err := c.UpdateCard(r.PathValue("id"), p)
+		return map[string]any{"agent": a}, err
+	})
+	h("DELETE /agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return struct{}{}, c.Unregister(r.PathValue("id"))
+	})
+	h("POST /agents/{id}/away", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Reason string `json:"reason"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		if err := c.MarkAway(r.PathValue("id"), b.Reason); err != nil {
+			return nil, err
+		}
+		a, err := c.GetAgent(r.PathValue("id"))
+		return map[string]any{"agent": a}, err
+	})
+	h("POST /agents/{id}/leave", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Reason string `json:"reason"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		if err := c.Leave(r.PathValue("id"), b.Reason); err != nil {
+			return nil, err
+		}
+		a, err := c.GetAgent(r.PathValue("id"))
+		return map[string]any{"agent": a}, err
+	})
+	h("POST /agents/{id}/takeover", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			From string `json:"from"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		rec, err := c.Takeover(r.PathValue("id"), b.From)
+		return map[string]any{"recovery": rec}, err
+	})
+	h("GET /agents/{id}/unread", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return c.Unread(r.PathValue("id"), boolQ(r, "ack"))
+	})
+	h("POST /agents/{id}/ack", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Seq int `json:"seq"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		cur, err := c.Ack(r.PathValue("id"), b.Seq)
+		return map[string]any{"cursor": cur}, err
+	})
+	h("GET /agents/{id}/pending", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return c.Pending(r.PathValue("id"))
+	})
+	h("GET /agents/{id}/wait", s.wait)
+	h("GET /agents/{id}/stream", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		id := r.PathValue("id")
+		if _, err := c.GetAgent(id); err != nil {
+			return nil, err
+		}
+		s.serveSSE(w, r, func(e core.Event) bool { return slices.Contains(e.To, id) })
+		return skip{}, nil
+	})
+
+	// ── 대화방 ──
+	h("GET /rooms", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		rooms, err := c.ListRooms(boolQ(r, "include_closed"))
+		return map[string]any{"rooms": rooms}, err
+	})
+	h("POST /rooms", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent       string `json:"agent"`
+			RoomID      string `json:"room_id"`
+			Title       string `json:"title"`
+			MaxMessages int    `json:"max_messages"`
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		room, err := c.CreateRoom(b.Agent, b.RoomID, b.Title, b.MaxMessages)
+		return map[string]any{"room": room}, err
+	})
+	h("GET /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		room, err := c.GetRoom(r.PathValue("r"))
+		return map[string]any{"room": room}, err
+	})
+	h("POST /rooms/{r}/invites", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct{ Agent, Target string }
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		room, err := c.Invite(b.Agent, r.PathValue("r"), b.Target)
+		return map[string]any{"room": room}, err
+	})
+	h("POST /rooms/{r}/invites/respond", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent  string `json:"agent"`
+			Accept *bool  `json:"accept"`
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		room, err := c.RespondInvite(b.Agent, r.PathValue("r"), b.Accept == nil || *b.Accept)
+		return map[string]any{"room": room}, err
+	})
+	h("POST /rooms/{r}/requests", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct{ Agent, Note string }
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		room, err := c.RequestJoin(b.Agent, r.PathValue("r"), b.Note)
+		return map[string]any{"room": room}, err
+	})
+	h("POST /rooms/{r}/requests/respond", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent   string `json:"agent"`
+			Target  string `json:"target"`
+			Approve *bool  `json:"approve"`
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		room, err := c.RespondRequest(b.Agent, r.PathValue("r"), b.Target, b.Approve == nil || *b.Approve)
+		return map[string]any{"room": room}, err
+	})
+	h("GET /rooms/{r}/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		msgs, err := c.ReadMessages(r.PathValue("r"), intQ(r, "after", 0), intQ(r, "limit", 200))
+		return map[string]any{"messages": msgs}, err
+	})
+	h("POST /rooms/{r}/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent string `json:"agent"`
+			core.PostInput
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		msg, err := c.Post(b.Agent, r.PathValue("r"), b.PostInput)
+		return map[string]any{"message": msg}, err
+	})
+	h("GET /rooms/{r}/logs", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		logs, err := c.ReadLogs(r.PathValue("r"), r.URL.Query().Get("agent"))
+		return map[string]any{"logs": logs}, err
+	})
+	h("POST /rooms/{r}/logs", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent string `json:"agent"`
+			Seq   int    `json:"seq"`
+			State string `json:"state"`
+			Note  string `json:"note"`
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		e, err := c.Log(b.Agent, r.PathValue("r"), b.Seq, b.State, b.Note)
+		return map[string]any{"log": e}, err
+	})
+
+	// ── 뷰어 ──
+	h("GET /events", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		s.serveSSE(w, r, func(core.Event) bool { return true })
+		return skip{}, nil
+	})
+	h("GET /{$}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		w.Header().Set("content-type", "text/html; charset=utf-8")
+		_, _ = w.Write(viewerHTML)
+		return skip{}, nil
+	})
+	h("/", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return nil, &core.Error{Status: 404, Code: "no_route", Message: r.Method + " " + r.URL.Path}
+	})
+	return mux
+}
+
+// wait: 나에게 온 메시지가 생기거나, 초대/신청/멤버십 이벤트가 오거나, 타임아웃까지 대기 (long-poll).
+func (s *Server) wait(w http.ResponseWriter, r *http.Request) (any, error) {
+	c, id := s.Core, r.PathValue("id")
+	if _, err := c.GetAgent(id); err != nil {
+		return nil, err
+	}
+	timeout := time.Duration(min(max(intQ(r, "timeout", 60), 1), 600)) * time.Second
+	ack := boolQ(r, "ack")
+	result := func(reason string) (any, error) {
+		u, err := c.Unread(id, ack)
+		if err != nil {
+			return nil, err
+		}
+		p, err := c.Pending(id)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"reason": reason, "room": u.Room, "cursor": u.Cursor, "messages": u.Messages, "pending": p}, nil
+	}
+	// 구독을 먼저 걸고 확인해야 그 사이에 온 이벤트를 놓치지 않는다
+	ch := c.Subscribe()
+	defer c.Unsubscribe(ch)
+	if c.HasWork(id) {
+		return result("message")
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case e := <-ch:
+			if !slices.Contains(e.To, id) {
+				continue
+			}
+			if e.Type != "message" {
+				return result(e.Type)
+			}
+			if c.HasWork(id) {
+				return result("message")
+			}
+		case <-timer.C:
+			return result("timeout")
+		case <-r.Context().Done():
+			return skip{}, nil
+		case <-s.stop:
+			return result("shutdown")
+		}
+	}
+}
+
+func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, filter func(core.Event) bool) {
+	fl, _ := w.(http.Flusher)
+	w.Header().Set("content-type", "text/event-stream; charset=utf-8")
+	w.Header().Set("cache-control", "no-cache")
+	w.Header().Set("connection", "keep-alive")
+	w.WriteHeader(200)
+	_, _ = io.WriteString(w, ": connected\n\n")
+	if fl != nil {
+		fl.Flush()
+	}
+	ch := s.Core.Subscribe()
+	defer s.Core.Unsubscribe(ch)
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case e := <-ch:
+			if !filter(e) {
+				continue
+			}
+			b, _ := json.Marshal(e.Data)
+			_, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", e.Type, b)
+			if err != nil {
+				return
+			}
+		case <-ping.C:
+			if _, err := io.WriteString(w, ": ping\n\n"); err != nil {
+				return
+			}
+		case <-r.Context().Done():
+			return
+		case <-s.stop:
+			return
+		}
+		if fl != nil {
+			fl.Flush()
+		}
+	}
+}
+
+// ───────────────────────── 요청/응답 헬퍼 ─────────────────────────
+
+func readBody(r *http.Request, v any) error {
+	b, err := io.ReadAll(io.LimitReader(r.Body, 1_000_001))
+	if err != nil {
+		return err
+	}
+	if len(b) > 1_000_000 {
+		return &core.Error{Status: 413, Code: "too_large", Message: "요청 본문이 너무 큼 (최대 1MB)"}
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(b, v); err != nil {
+		return &core.Error{Status: 400, Code: "bad_json", Message: "JSON 본문을 해석할 수 없음: " + err.Error()}
+	}
+	return nil
+}
+
+func readActor(r *http.Request, v any, agent *string) error {
+	if err := readBody(r, v); err != nil {
+		return err
+	}
+	if *agent == "" {
+		return &core.Error{Status: 400, Code: "missing_agent", Message: "요청 본문에 agent(내 agent id)가 필요함"}
+	}
+	return nil
+}
+
+func boolQ(r *http.Request, k string) bool {
+	v := r.URL.Query().Get(k)
+	return v == "1" || v == "true"
+}
+
+func intQ(r *http.Request, k string, def int) int {
+	if n, err := strconv.Atoi(r.URL.Query().Get(k)); err == nil {
+		return n
+	}
+	return def
+}
+
+func writeOK(w http.ResponseWriter, out any) {
+	// 결과 객체를 펼쳐서 {"ok":true, ...} 로 만든다
+	b, err := json.Marshal(out)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var m map[string]json.RawMessage
+	if json.Unmarshal(b, &m) != nil || m == nil {
+		m = map[string]json.RawMessage{}
+	}
+	m["ok"] = json.RawMessage("true")
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(m)
+}
+
+func writeErr(w http.ResponseWriter, err error) {
+	var ce *core.Error
+	if !errors.As(err, &ce) {
+		log.Printf("internal error: %v", err)
+		ce = &core.Error{Status: 500, Code: "internal", Message: err.Error()}
+	}
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	w.WriteHeader(ce.Status)
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]string{"code": ce.Code, "message": ce.Message}})
+}

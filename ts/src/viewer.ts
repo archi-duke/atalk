@@ -1,0 +1,95 @@
+// 데몬이 GET / 로 내주는 읽기 전용 관찰 화면
+
+export const VIEWER_HTML = /* html */ `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATalk Viewer</title>
+<style>
+  :root { --bg:#f7f7f5; --panel:#fff; --fg:#1d1d1b; --muted:#6b6b66; --line:#e3e2dd; --accent:#2f6fde; --sys:#8a8a84; --task:#b8690f; --result:#1f8a4c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161615; --panel:#1f1f1d; --fg:#ecebe6; --muted:#9a9993; --line:#33332f; --accent:#6f9cff; --sys:#7d7c76; --task:#e5a04a; --result:#4fc27f; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; background:var(--bg); color:var(--fg); }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; }
+  header h1 { font-size:16px; margin:0; }
+  header span { color:var(--muted); font-size:12px; }
+  main { display:grid; grid-template-columns: 300px 1fr; height: calc(100vh - 49px); }
+  aside { border-right:1px solid var(--line); overflow:auto; padding:12px 16px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:16px 0 6px; }
+  .item { padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); margin-bottom:6px; }
+  .room { cursor:pointer; }
+  .room.sel { border-color:var(--accent); }
+  .meta { color:var(--muted); font-size:12px; word-break:break-all; }
+  .badge { display:inline-block; font-size:11px; padding:0 6px; border-radius:10px; border:1px solid var(--line); margin-left:4px; }
+  .s-in_room { color:var(--result); } .s-away { color:var(--task); } .s-offline { color:var(--sys); } .s-waiting { color:var(--accent); }
+  section { display:flex; flex-direction:column; overflow:hidden; }
+  #msgs { flex:1; overflow:auto; padding:12px 16px; }
+  .msg { margin-bottom:10px; padding:8px 12px; border-radius:8px; background:var(--panel); border:1px solid var(--line); }
+  .msg.system { background:transparent; border:none; color:var(--sys); font-size:12px; padding:2px 12px; }
+  .msg .hd { font-size:12px; color:var(--muted); margin-bottom:2px; }
+  .msg .hd b { color:var(--fg); }
+  .t-task { color:var(--task); } .t-result { color:var(--result); }
+  .msg pre { margin:0; white-space:pre-wrap; font:inherit; }
+  .logs { font-size:12px; color:var(--muted); margin-top:4px; }
+  .empty { color:var(--muted); padding:24px; }
+  @media (max-width: 720px) { main { grid-template-columns: 1fr; height:auto; } aside { border-right:none; border-bottom:1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header><h1>ATalk</h1><span id="root"></span></header>
+<main>
+  <aside>
+    <h2>대화방</h2><div id="rooms"></div>
+    <h2>에이전트</h2><div id="agents"></div>
+  </aside>
+  <section><div id="msgs"><div class="empty">왼쪽에서 대화방을 고르세요.</div></div></section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let selected = null, agents = {};
+const j = (u) => fetch(u).then((r) => r.json());
+
+async function loadSide() {
+  const [h, a, r] = await Promise.all([j("/health"), j("/agents"), j("/rooms?include_closed=1")]);
+  $("#root").textContent = h.root;
+  agents = Object.fromEntries(a.agents.map((x) => [x.id, x]));
+  $("#agents").innerHTML = a.agents.map((x) =>
+    '<div class="item"><b>' + esc(x.name) + '</b><span class="badge s-' + x.status + '">' + x.status + '</span>' +
+    (x.role === "owner" ? '<span class="badge">방장</span>' : "") +
+    '<div class="meta">' + esc(x.id) + (x.room ? " · " + esc(x.room) : "") + '</div>' +
+    (x.description ? '<div class="meta">' + esc(x.description) + '</div>' : "") + '</div>').join("") || '<div class="meta">없음</div>';
+  $("#rooms").innerHTML = r.rooms.map((x) =>
+    '<div class="item room' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><b>' + esc(x.title) + '</b>' +
+    (x.closed_at ? '<span class="badge">닫힘</span>' : "") +
+    '<div class="meta">' + esc(x.room_id) + ' · 멤버 ' + x.members.length + ' · 메시지 ' + x.last_seq + '</div></div>').join("") || '<div class="meta">없음</div>';
+  document.querySelectorAll(".room").forEach((el) => el.onclick = () => { selected = el.dataset.r; loadSide(); loadMsgs(); });
+}
+
+async function loadMsgs() {
+  if (!selected) return;
+  const r = encodeURIComponent(selected);
+  const [m, l] = await Promise.all([j("/rooms/" + r + "/messages?limit=1000"), j("/rooms/" + r + "/logs")]);
+  const logs = {};
+  for (const e of l.logs || []) (logs[e.seq] ||= []).push(e);
+  const name = (id) => agents[id]?.name || id;
+  $("#msgs").innerHTML = (m.messages || []).map((x) => {
+    if (x.type === "system") return '<div class="msg system">#' + x.seq + ' · ' + esc(x.body) + '</div>';
+    const lg = (logs[x.seq] || []).map((e) => esc(name(e.agent)) + ": " + e.state + (e.note ? " (" + esc(e.note) + ")" : "")).join(" · ");
+    return '<div class="msg"><div class="hd">#' + x.seq + ' <b>' + esc(name(x.from)) + '</b> <span class="t-' + x.type + '">' + x.type + '</span>' +
+      (x.to.length ? ' → ' + x.to.map((t) => esc(name(t))).join(", ") : "") + (x.reply_to ? ' · re #' + x.reply_to : "") +
+      ' · ' + new Date(x.ts).toLocaleTimeString() + '</div><pre>' + esc(x.body) + '</pre>' +
+      (lg ? '<div class="logs">' + lg + '</div>' : "") + '</div>';
+  }).join("") || '<div class="empty">메시지 없음</div>';
+  const box = $("#msgs"); box.scrollTop = box.scrollHeight;
+}
+
+let t = null;
+const refresh = () => { clearTimeout(t); t = setTimeout(() => { loadSide(); loadMsgs(); }, 100); };
+const es = new EventSource("/events");
+["message","invite","request","membership","log","agent","room"].forEach((e) => es.addEventListener(e, refresh));
+loadSide();
+</script>
+</body>
+</html>`;
