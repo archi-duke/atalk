@@ -22,11 +22,18 @@
   html, body { height:100%; }
   body { margin:0; font:14px/1.45 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif; background:var(--bg); color:var(--fg); }
   button, select { font:inherit; color:inherit; }
-  .app { display:grid; grid-template-columns:300px 1fr; height:100vh; }
+  .app { display:grid; grid-template-columns:var(--side, 300px) 6px 1fr; height:100vh; }
   .static .app { grid-template-columns:1fr; }
+  .static .split { display:none; }
+  /* 대화방 목록 ↔ 대화창 폭 조절 손잡이 */
+  .split { cursor:col-resize; background:var(--panel); border-right:1px solid var(--line); position:relative; touch-action:none; outline:none; }
+  .split::after { content:""; position:absolute; top:50%; left:1px; width:3px; height:36px; margin-top:-18px; border-radius:2px; background:var(--line); transition:background .15s; }
+  .split:hover::after, .split:focus-visible::after, .split.drag::after { background:var(--accent); }
+  .split.drag { background:var(--hover); }
+  body.resizing { cursor:col-resize; user-select:none; }
 
   /* 대화방 목록 */
-  aside { background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  aside { background:var(--panel); display:flex; flex-direction:column; min-height:0; min-width:0; }
   .static aside { display:none; }
   .side-head { padding:16px 16px 8px; display:flex; align-items:center; gap:8px; }
   .side-head span { flex:1; }
@@ -158,6 +165,7 @@
 
   @media (max-width: 760px) {
     .app { grid-template-columns:1fr; }
+    .split { display:none; }
     .app.chatting aside { display:none; }
     .app:not(.chatting) section { display:none; }
     .chat-head .back { display:block; }
@@ -181,6 +189,7 @@
     <div class="tabs"><button data-tab="rooms" class="on">대화방</button><button data-tab="agents">에이전트</button></div>
     <div class="list" id="list"><div class="empty">불러오는 중…</div></div>
   </aside>
+  <div class="split" id="split" role="separator" aria-orientation="vertical" aria-label="대화방 목록 폭 조절" tabindex="0" title="끌어서 폭 조절 · 더블클릭: 기본 폭"></div>
   <section>
     <div class="chat-head" id="head" hidden>
       <button class="back" id="back" aria-label="뒤로">‹</button>
@@ -570,6 +579,39 @@ $("#compose").onsubmit = async (e) => {
 };
 
 $("#view").onchange = (e) => { viewer = e.target.value; localSet("atalk.viewer", viewer); renderChat(false); };
+
+// ───────── 대화방 목록 폭 조절 ─────────
+(() => {
+  const app = $("#app"), bar = $("#split"), MIN = 200, MAX = 600, DEF = 300;
+  const setW = (w, save) => {
+    w = Math.round(Math.min(MAX, Math.max(MIN, w)));
+    app.style.setProperty("--side", w + "px");
+    bar.setAttribute("aria-valuenow", w);
+    if (save) localSet("atalk.sideWidth", String(w));
+  };
+  const saved = Number(localGet("atalk.sideWidth"));
+  if (saved) setW(saved, false);
+  bar.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    bar.setPointerCapture(e.pointerId);
+    bar.classList.add("drag"); document.body.classList.add("resizing");
+    const left = app.getBoundingClientRect().left;
+    const move = (ev) => setW(ev.clientX - left, false);
+    const up = (ev) => {
+      bar.releasePointerCapture(ev.pointerId);
+      bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up);
+      bar.classList.remove("drag"); document.body.classList.remove("resizing");
+      setW(ev.clientX - left, true);
+    };
+    bar.addEventListener("pointermove", move); bar.addEventListener("pointerup", up);
+  });
+  bar.addEventListener("dblclick", () => setW(DEF, true));
+  bar.addEventListener("keydown", (e) => {
+    const cur = parseInt(getComputedStyle(app).getPropertyValue("--side")) || DEF;
+    if (e.key === "ArrowLeft") { setW(cur - 20, true); e.preventDefault(); }
+    if (e.key === "ArrowRight") { setW(cur + 20, true); e.preventDefault(); }
+  });
+})();
 
 // ───────── 시작 ─────────
 if (DATA) {
