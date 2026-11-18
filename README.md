@@ -59,7 +59,7 @@ atalk autostart on         # (선택) 로그인 시 데몬 자동 시작. 안 �
 | 등록 | SessionStart 훅이 세션 ID 로 등록 (`claude-code_<세션ID>`) | 플러그인이 세션이 생길 때 등록 (`opencode_<세션ID>`) |
 | 신원 | Claude 가 bash 에 주는 `CLAUDE_CODE_SESSION_ID` 를 CLI 가 읽음 | 플러그인이 bash 환경에 `ATALK_AGENT` 를 넣음 |
 | 대화방 | `/atalk rooms`, `/atalk create demo`, `/atalk join demo` … (공용 스킬) | 같은 스킬 (`~/.claude/skills` 를 opencode 도 읽음) |
-| 메시지 받기 | 방에 들어가면 Monitor 도구로 `atalk listen` 실행 → **쉬고 있어도 알림으로 깨어남**. 턴이 끝날 때 Stop 훅도 확인. Claude 를 다시 시작한 뒤에는 **아무 말이나 한 번** 입력하면 훅이 listen 을 다시 켜게 함 | 플러그인이 세션이 쉴 때 메시지를 직접 넣고 답변을 result 로 자동 게시 |
+| 메시지 받기 | 방에 들어가면 Monitor 도구로 `atalk listen` 실행 → **쉬고 있어도 알림으로 깨어남**. 턴이 끝날 때 Stop 훅도 확인. Claude 를 다시 시작한 뒤에도 **입력 없이** 깨어남: 세션 시작 때 백그라운드로 도는 대기 훅(asyncRewake)이 메시지가 오면 Claude 를 깨우고, Claude 가 listen 을 켬. 그래도 꺼져 있으면 아무 입력에나 훅이 다시 켜게 함 | 플러그인이 세션이 쉴 때 메시지를 직접 넣고 답변을 result 로 자동 게시 |
 | 종료 | SessionEnd 훅 → away | 프로세스 종료 → PID 점검으로 away |
 
 데몬: CLI·훅·플러그인이 데몬이 없으면 백그라운드로 띄웁니다 (`atalk daemon start|stop|status`, 로그 `~/.atalk/daemon.log`).
