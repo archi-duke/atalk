@@ -225,8 +225,7 @@ func main() {
 	case "server":
 		root := a.str("root")
 		if root == "" {
-			home, _ := os.UserHomeDir()
-			root = envOr("ATALK_ROOT", filepath.Join(home, ".atalk"))
+			root = daemon.DefaultRoot()
 		}
 		graceMin := a.num("grace-min", 0)
 		if graceMin == 0 {
@@ -246,8 +245,15 @@ func main() {
 		fmt.Printf("ATalk 데몬 실행 중: http://127.0.0.1:%d  (데이터: %s, away 유예 %d분)\n", p, srv.Core.Root, graceMin)
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-		<-sig
-		_ = srv.Close()
+		select {
+		case <-sig:
+			_ = srv.Close()
+		case <-srv.Restart: // 설정 화면에서 데이터 폴더를 옮김 → 새 위치로 다시 띄우고 끝낸다
+			_ = srv.Close()
+			release()
+			fmt.Println("데이터 폴더가 바뀌어 데몬을 다시 시작합니다:", daemon.DefaultRoot())
+			check(daemon.Start(strconv.Itoa(p)))
+		}
 
 	case "mcp":
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

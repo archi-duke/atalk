@@ -103,6 +103,9 @@ func (c *Atalk) guard(fn func() error) (err error) {
 // ───────────────────────── 이벤트 구독 ─────────────────────────
 
 // Subscribe 는 모든 이벤트를 받는 채널을 돌려준다. 다 쓰면 Unsubscribe 해야 한다.
+// Exclusive 는 다른 요청이 파일을 쓰지 못하게 잠근 채로 fn 을 실행한다 (데이터 폴더 복사 등).
+func (c *Atalk) Exclusive(fn func() error) error { return c.guard(fn) }
+
 func (c *Atalk) Subscribe() chan Event {
 	ch := make(chan Event, 256)
 	c.subMu.Lock()

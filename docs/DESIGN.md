@@ -12,6 +12,9 @@
 
 ## 2. 폴더 구조
 
+데이터 폴더(`<ATALK_ROOT>`) 위치: `ATALK_ROOT` 환경 변수 → 위치 파일(`%APPDATA%\atalk\root.txt`, `ATALK_CONFIG_DIR` 로 바꿀 수 있음) → `~/.atalk`.
+위치 파일은 데이터 폴더 바깥에 있어야 데몬·로그인 자동 시작·CLI·훅이 같은 위치를 찾는다.
+
 ```
 <ATALK_ROOT>/
 ├── agents/
@@ -115,6 +118,10 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | GET / POST | `/rooms/:r/messages` | 읽기 `?after=&limit=` / 쓰기 `{agent, type?, to?, reply_to?, body}` |
 | GET / POST | `/rooms/:r/logs` | 처리 기록 읽기 `?agent=` / 쓰기 `{agent, seq, state, note?}` |
 | GET / PUT | `/config` | 이 PC 설정 `{user, away_grace_min, offline_ttl_hours}` (사용자 별칭 기본값, 자동 퇴장까지 분, 오프라인 카드 자동 삭제까지 시간 / 0=안 함) |
+| GET | `/admin/info` | 데이터 폴더, PID, 포트, 자동 시작, 위치 파일 경로, 데이터 크기 |
+| PUT | `/admin/autostart` | `{on}` 로그인 시 자동 시작 |
+| GET | `/admin/dirs?path=` | 폴더 탐색 (설정 화면). 빈 path 는 드라이브 목록(Windows) |
+| POST | `/admin/move-root` | `{path, mode: move\|switch}` → 위치 파일 저장 후 데몬이 새 폴더로 다시 시작. move 는 빈 폴더에만, 원래 폴더는 남김 |
 | GET | `/names` | 지금 있는 카드 + 지운 카드의 `{id: 이름}` (지난 대화 표시용) |
 | GET | `/events` | SSE (전체 이벤트, 뷰어용) |
 | GET | `/rooms/:r/export` | 방 대화를 메신저 형식 HTML 파일 하나로 (`?download=1` 이면 첨부 파일로). 뷰어 HTML 에 `window.ATALK_DATA` 로 데이터를 넣은 것 |

@@ -40,6 +40,8 @@ type Server struct {
 	ln     net.Listener
 	stop   chan struct{}
 	stopMu sync.Once
+	// Restart 는 데이터 폴더를 옮긴 뒤 데몬을 새 위치로 다시 띄워야 할 때 신호를 받는다 (main 이 처리).
+	Restart chan struct{}
 }
 
 func New(opts Options) (*Server, error) {
@@ -47,7 +49,7 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Core: c, stop: make(chan struct{})}
+	s := &Server{Core: c, stop: make(chan struct{}), Restart: make(chan struct{}, 1)}
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:7420"
 	}
@@ -177,6 +179,7 @@ func (s *Server) routes() http.Handler {
 		rec, from, err := c.ResumePrevious(r.PathValue("id"))
 		return map[string]any{"recovery": rec, "from": from}, err
 	})
+	s.adminRoutes(h)
 	h("GET /names", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		names, err := c.Names()
 		return map[string]any{"names": names}, err
