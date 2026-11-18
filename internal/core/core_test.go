@@ -468,3 +468,38 @@ func TestHumanToSelf(t *testing.T) {
 	_, err := c.Say(a, "w", "@없음 hi")
 	nok(t, err, "없음")
 }
+
+func TestRoomRenameDelete(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "x", "처음 제목", 0))
+	ok(c.Invite(a, "x", b))
+	ok(c.RespondInvite(b, "x", true))
+
+	v := ok(c.RenameRoom("x", "  새 제목 ", ""))
+	if v.Title != "새 제목" {
+		t.Fatalf("rename: %q", v.Title)
+	}
+	_, err := c.RenameRoom("x", "a\nb", "")
+	nok(t, err, "제목")
+
+	trash := ok(c.DeleteRoom("x"))
+	if _, err := os.Stat(filepath.Join(trash, "messages.jsonl")); err != nil {
+		t.Fatalf("trash 에 기록 없음: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, "rooms", "x")); !os.IsNotExist(err) {
+		t.Fatal("방 폴더가 남아 있음")
+	}
+	if ok(c.GetAgent(a)).Status != "waiting" || ok(c.GetAgent(b)).Room != nil {
+		t.Fatal("멤버가 방에서 나오지 않음")
+	}
+	_, err = c.GetRoom("x")
+	nok(t, err, "x")
+	// 같은 ID 로 다시 만들 수 있고, 재시작해도 지운 방은 다시 나타나지 않는다
+	ok(c.CreateRoom(b, "x", "", 0))
+	c2 := e.core()
+	if r := ok(c2.GetRoom("x")); *r.Owner != b || len(r.Members) != 1 {
+		t.Fatalf("재생성/재시작: %+v", r)
+	}
+}

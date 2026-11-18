@@ -269,6 +269,23 @@ func (c *Client) CreateRoom(agent, roomID, title string) (core.RoomView, error) 
 	return r.Room, err
 }
 
+func (c *Client) RenameRoom(agent, room, title string) (v core.RoomView, err error) {
+	var out struct {
+		Room core.RoomView `json:"room"`
+	}
+	err = c.call("PATCH", "/rooms/"+esc(room), map[string]string{"agent": agent, "title": title}, &out, 0)
+	return out.Room, err
+}
+
+// DeleteRoom 은 방을 지우고 대화 기록을 옮긴 trash 폴더 경로를 돌려준다.
+func (c *Client) DeleteRoom(room string) (string, error) {
+	var out struct {
+		Trash string `json:"trash"`
+	}
+	err := c.call("DELETE", "/rooms/"+esc(room), nil, &out, 0)
+	return out.Trash, err
+}
+
 func (c *Client) Invite(agent, room, target string) error {
 	return c.call("POST", "/rooms/"+esc(room)+"/invites", map[string]string{"agent": agent, "target": target}, nil, 0)
 }

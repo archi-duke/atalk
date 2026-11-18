@@ -28,7 +28,8 @@
   /* 대화방 목록 */
   aside { background:var(--panel); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
   .static aside { display:none; }
-  .side-head { padding:16px 16px 8px; display:flex; align-items:baseline; justify-content:space-between; }
+  .side-head { padding:16px 16px 8px; display:flex; align-items:center; gap:8px; }
+  .side-head span { flex:1; }
   .side-head h1 { font-size:18px; margin:0; }
   .side-head span { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; margin-left:12px; direction:rtl; }
   .tabs { display:flex; gap:4px; padding:0 12px 8px; }
@@ -47,6 +48,26 @@
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .st-in_room { background:#2fb36b; } .st-away { background:#e0a526; } .st-waiting { background:#7aa2ff; } .st-offline { background:#9aa0a8; }
   .empty { color:var(--muted); padding:24px 16px; text-align:center; }
+
+  /* 새 대화방 */
+  .side-head .new { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:3px 10px; font-size:12px; cursor:pointer; flex:none; }
+  .newroom { margin:0 12px 10px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); display:flex; flex-direction:column; gap:6px; font-size:12px; }
+  .newroom label { display:flex; flex-direction:column; gap:2px; color:var(--muted); }
+  .newroom input, .newroom select { font:inherit; font-size:13px; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 7px; }
+  .newroom .hint { color:var(--muted); font-size:11px; }
+  .newroom .acts { display:flex; gap:6px; justify-content:flex-end; }
+  .newroom button { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:4px 12px; cursor:pointer; }
+  .newroom button.primary { background:var(--mine); color:var(--mine-fg); border-color:transparent; font-weight:700; }
+  .err { color:var(--fail); font-size:12px; }
+  .err:empty { display:none; }
+
+  /* 방 메뉴 */
+  .menu-wrap { position:relative; }
+  .menu { position:absolute; right:0; top:calc(100% + 4px); background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 6px 24px rgba(0,0,0,.15); padding:4px; min-width:150px; z-index:10; }
+  .menu button, .menu a { display:block; width:100%; text-align:left; border:0; background:none; padding:7px 10px; border-radius:6px; cursor:pointer; font-size:13px; color:var(--fg); text-decoration:none; }
+  .menu button:hover, .menu a:hover { background:var(--hover); }
+  .menu .danger { color:var(--fail); }
+  .title-edit { font:inherit; font-size:16px; font-weight:700; width:100%; max-width:360px; border:1px solid var(--accent); border-radius:6px; padding:1px 6px; background:var(--panel); color:var(--fg); }
 
   /* 대화창 */
   section { display:flex; flex-direction:column; min-height:0; min-width:0; background:var(--chat); }
@@ -143,7 +164,15 @@
 <body>
 <div class="app" id="app">
   <aside>
-    <div class="side-head"><h1>ATalk</h1><span id="root"></span></div>
+    <div class="side-head"><h1>ATalk</h1><span id="root"></span><button class="new" id="newBtn" title="새 대화방 만들기">+ 새 대화방</button></div>
+    <form class="newroom" id="newRoom" hidden>
+      <label>제목<input id="nrTitle" maxlength="100" placeholder="예: API 리팩터링" required></label>
+      <label>방 ID<input id="nrId" maxlength="64" placeholder="자동 (문자·숫자·-·_)"></label>
+      <label>방장 에이전트<select id="nrOwner"></select></label>
+      <div class="hint" id="nrHint"></div>
+      <div class="err" id="nrErr"></div>
+      <div class="acts"><button type="button" id="nrCancel">취소</button><button type="submit" class="primary">만들기</button></div>
+    </form>
     <div class="tabs"><button data-tab="rooms" class="on">대화방</button><button data-tab="agents">에이전트</button></div>
     <div class="list" id="list"><div class="empty">불러오는 중…</div></div>
   </aside>
@@ -152,7 +181,13 @@
       <button class="back" id="back" aria-label="뒤로">‹</button>
       <div class="grow"><h2 id="title"></h2><div class="sub" id="sub"></div></div>
       <select id="view" title="누구의 시점으로 볼지 (오른쪽 말풍선)"></select>
-      <a class="btn" id="export" title="이 대화를 HTML 파일로 저장">내보내기</a>
+      <div class="menu-wrap" id="menuWrap"><button class="btn" id="menuBtn" title="방 메뉴" aria-haspopup="true">⋯</button>
+        <div class="menu" id="menu" hidden>
+          <button id="mRename">제목 변경</button>
+          <a id="export">내보내기 (HTML 파일)</a>
+          <button id="mDelete" class="danger">방 삭제…</button>
+        </div>
+      </div>
     </div>
     <div class="members" id="members"></div>
     <div id="msgs"><div class="empty">왼쪽에서 대화방을 고르세요.</div></div>
@@ -274,6 +309,11 @@ async function loadChat(scroll) {
     if (!selected) return;
     const r = encodeURIComponent(selected);
     const [room, m, l] = await Promise.all([j("/rooms/" + r), j("/rooms/" + r + "/messages?limit=1000"), j("/rooms/" + r + "/logs")]);
+    if (!room.ok) { // 다른 곳에서 방이 지워짐
+      selected = null; chat = null; $("#head").hidden = true; $("#compose").hidden = true; $("#targets").hidden = true; $("#presence").innerHTML = "";
+      $("#msgs").innerHTML = '<div class="empty">이 방은 더 이상 없습니다.</div>';
+      return;
+    }
     let messages = m.messages || [];
     while (messages.length && messages.length % 1000 === 0) { // 1000개씩 끊어 읽기
       const more = (await j("/rooms/" + r + "/messages?limit=1000&after=" + messages[messages.length - 1].seq)).messages || [];
@@ -295,7 +335,7 @@ function renderChat(scroll) {
   $("#members").innerHTML = room.members.map((m) => '<span><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
   renderCompose(room);
   renderPresence(room, chat.logs || []);
-  if (DATA) $("#export").style.display = "none";
+  if (DATA) $("#menuWrap").style.display = "none";
   else $("#export").href = "/rooms/" + encodeURIComponent(room.room_id) + "/export?download=1";
 
   // 시점 선택: 사람 / 각 에이전트
@@ -348,6 +388,83 @@ function renderChat(scroll) {
   }));
   if (scroll || atBottom) box.scrollTop = box.scrollHeight;
 }
+// ───────── 방 만들기 / 제목 변경 / 삭제 ─────────
+const slug = (t) => t.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 64);
+let idEdited = false;
+function ownerOptions() {
+  // 방에 없는(대기) 에이전트를 먼저: 이미 방에 있는 에이전트를 고르면 그 방에서 나오게 되므로
+  const live = Object.values(agents).filter((a) => a.status === "waiting" || a.status === "in_room").sort((p, q) => !!p.room - !!q.room);
+  $("#nrOwner").innerHTML = live.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + (a.room ? " (지금 " + esc(a.room) + " 방)" : "") + "</option>").join("") ||
+    '<option value="">켜져 있는 에이전트 없음</option>';
+  ownerHint();
+}
+function ownerHint() {
+  const a = agents[$("#nrOwner").value];
+  $("#nrHint").textContent = a?.room ? a.name + " 은(는) " + a.room + " 방에서 나와 새 방의 방장이 됩니다 (세션 하나 = 방 하나)." : "";
+}
+$("#newBtn").onclick = () => {
+  const f = $("#newRoom");
+  f.hidden = !f.hidden;
+  if (!f.hidden) { idEdited = false; $("#nrTitle").value = ""; $("#nrId").value = ""; $("#nrErr").textContent = ""; ownerOptions(); $("#nrTitle").focus(); }
+};
+$("#nrCancel").onclick = () => { $("#newRoom").hidden = true; };
+$("#nrTitle").oninput = () => { if (!idEdited) $("#nrId").value = slug($("#nrTitle").value); };
+$("#nrId").oninput = () => { idEdited = true; };
+$("#nrOwner").onchange = ownerHint;
+async function send(method, url, body) {
+  const res = await fetch(url, { method, headers: body ? { "content-type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined }).then((r) => r.json());
+  if (!res.ok) throw new Error(res.error?.message || "실패");
+  return res;
+}
+$("#newRoom").onsubmit = async (e) => {
+  e.preventDefault();
+  const title = $("#nrTitle").value.trim(), id = $("#nrId").value.trim() || slug(title), agent = $("#nrOwner").value;
+  $("#nrErr").textContent = "";
+  try {
+    if (!agent) throw new Error("방장이 될 에이전트가 없습니다. 에이전트를 먼저 실행하세요.");
+    await send("POST", "/rooms", { agent, room_id: id, title });
+    $("#newRoom").hidden = true;
+    await loadSide();
+    openRoom(id);
+  } catch (err) { $("#nrErr").textContent = String(err.message || err); }
+};
+
+$("#menuBtn").onclick = (e) => { e.stopPropagation(); $("#menu").hidden = !$("#menu").hidden; };
+document.addEventListener("click", (e) => { if (!$("#menuWrap").contains(e.target)) $("#menu").hidden = true; });
+$("#mRename").onclick = () => {
+  $("#menu").hidden = true;
+  const h = $("#title"), old = chat.room.title || chat.room.room_id;
+  h.innerHTML = '<input class="title-edit" maxlength="100">';
+  const inp = h.querySelector("input");
+  inp.value = old; inp.focus(); inp.select();
+  let done = false;
+  const finish = async (save) => {
+    if (done) return; done = true;
+    const v = inp.value.trim();
+    if (save && v && v !== old) {
+      try { await send("PATCH", "/rooms/" + encodeURIComponent(chat.room.room_id), { title: v }); }
+      catch (err) { alert("제목을 바꾸지 못함: " + (err.message || err)); }
+    }
+    loadSide(); loadChat(false);
+  };
+  inp.onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) finish(true); if (e.key === "Escape") finish(false); };
+  inp.onblur = () => finish(true);
+};
+$("#mDelete").onclick = async () => {
+  $("#menu").hidden = true;
+  const r = chat.room;
+  if (!confirm("'" + (r.title || r.room_id) + "' 방을 삭제할까요?\n\n멤버 " + r.members.length + "명은 모두 방에서 나옵니다.\n대화 기록은 지워지지 않고 데이터 폴더의 trash/ 로 옮겨집니다.")) return;
+  try {
+    await send("DELETE", "/rooms/" + encodeURIComponent(r.room_id));
+    selected = null; chat = null;
+    history.replaceState(null, "", location.pathname);
+    $("#head").hidden = true; $("#compose").hidden = true; $("#targets").hidden = true; $("#presence").innerHTML = ""; $("#members").innerHTML = "";
+    $("#msgs").innerHTML = '<div class="empty">방을 삭제했습니다.</div>';
+    $("#app").classList.remove("chatting");
+    loadSide();
+  } catch (err) { alert("삭제하지 못함: " + (err.message || err)); }
+};
+
 // ───────── 참여 에이전트 상태 ─────────
 // 작업중: 처리 기록상 받았거나(received) 처리 중(working)인데 아직 끝나지 않은 메시지가 있음
 // 대기: 방에 있고 처리 중인 메시지 없음 · 비활성: 자리 비움(에이전트가 꺼짐)

@@ -589,6 +589,74 @@ func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v Room
 	return
 }
 
+// RenameRoom 은 방 제목을 바꾼다 (방 ID 는 폴더 이름이라 바꾸지 않음). by 는 바꾼 에이전트, 사람이 화면/CLI 에서 바꾸면 "".
+func (c *Atalk) RenameRoom(r, title, by string) (v RoomView, err error) {
+	err = c.guard(func() error {
+		room, err := c.requireRoom(r, false)
+		if err != nil {
+			return err
+		}
+		title = strings.TrimSpace(title)
+		if title == "" || len([]rune(title)) > 100 || strings.ContainsAny(title, "\r\n") {
+			return bad("invalid_title", "제목은 1~100자, 줄바꿈 불가")
+		}
+		if old := room.Title; old != title {
+			room.Title = title
+			c.saveRoom(room)
+			who := ""
+			if by != "" {
+				who = " (" + c.nameOf(by) + ")"
+			}
+			c.systemMessage(r, fmt.Sprintf("제목 변경: %s → %s%s", old, title, who), false)
+			c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "rename", "title": title}})
+		}
+		v = c.roomView(room)
+		return nil
+	})
+	return
+}
+
+// DeleteRoom 은 방을 지운다. 멤버는 모두 방에서 나오고(대기 상태), 방 폴더는 <root>/trash/<방>-<시각> 으로 옮겨진다.
+// 대화 기록은 trash 에서 되살릴 수 있다 (폴더를 rooms/ 로 다시 옮기고 데몬 재시작).
+func (c *Atalk) DeleteRoom(r string) (trash string, err error) {
+	err = c.guard(func() error {
+		room, err := c.requireRoom(r, false)
+		if err != nil {
+			return err
+		}
+		now := c.ts()
+		var members []string
+		for _, e := range c.membersOf(r) {
+			members = append(members, e.agent)
+			delete(c.memberships, e.agent)
+			c.logMembership(MembershipEvent{TS: now, Agent: e.agent, Room: r, Event: "room_deleted", Detail: "방 삭제"})
+		}
+		c.saveMemberships()
+		must(ensureDir(filepath.Join(c.Root, "trash")))
+		trash = filepath.Join(c.Root, "trash", r+"-"+c.now().UTC().Format("20060102-150405"))
+		var mv error
+		for i := 0; i < 20; i++ { // Windows 에서 다른 프로세스가 잠깐 파일을 열고 있으면 실패할 수 있어 다시 시도
+			if mv = os.Rename(c.roomDir(room.RoomID), trash); mv == nil {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		if mv != nil {
+			must(mv)
+		}
+		delete(c.rooms, r)
+		delete(c.lastSeq, r)
+		delete(c.cursors, r)
+		c.logMembership(MembershipEvent{TS: now, Agent: "-", Room: r, Event: "delete", Detail: trash})
+		for _, a := range members {
+			c.emit(Event{Type: "membership", To: []string{a}, Data: map[string]any{"agent": a, "room": r, "action": "leave", "reason": "방 삭제"}})
+		}
+		c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "delete"}})
+		return nil
+	})
+	return
+}
+
 func (c *Atalk) GetRoom(r string) (v RoomView, err error) {
 	err = c.guard(func() error {
 		room, err := c.requireRoom(r, false)

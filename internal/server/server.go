@@ -291,6 +291,21 @@ func (s *Server) routes() http.Handler {
 		room, err := c.GetRoom(r.PathValue("r"))
 		return map[string]any{"room": room}, err
 	})
+	h("PATCH /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent string `json:"agent"` // 바꾼 에이전트 (사람이 화면에서 바꾸면 비움)
+			Title string `json:"title"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		room, err := c.RenameRoom(r.PathValue("r"), b.Title, b.Agent)
+		return map[string]any{"room": room}, err
+	})
+	h("DELETE /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		trash, err := c.DeleteRoom(r.PathValue("r"))
+		return map[string]any{"trash": trash}, err
+	})
 	h("POST /rooms/{r}/invites", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct{ Agent, Target string }
 		if err := readActor(r, &b, &b.Agent); err != nil {

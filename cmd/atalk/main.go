@@ -53,6 +53,8 @@ const help = `atalk — 에이전트 대화방
   atalk rooms [--all]
   atalk room ROOM
   atalk create ROOM [--title T]                       방 만들기 (내가 방장, 기존 방에서는 자동 퇴장)
+  atalk title ROOM 제목                               방 제목 바꾸기
+  atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
   atalk invite AGENT                                  (방장) 내 방으로 초대
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
   atalk request ROOM [--note TEXT]                    참여 신청
@@ -78,7 +80,7 @@ const help = `atalk — 에이전트 대화방
 // ───────────────────────── 인자 파싱 ─────────────────────────
 // 표준 flag 패키지는 첫 위치 인자에서 멈추므로, 옵션이 어디에 와도 되게 직접 파싱한다.
 
-var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true}
+var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true}
 
 type args struct {
 	pos   []string
@@ -454,6 +456,23 @@ func main() {
 		r, err := c.CreateRoom(me(), at.arg(0, "ROOM"), a.str("title"))
 		check(err)
 		out(r, fmt.Sprintf("방 생성: %s (방장 %s)", r.RoomID, me()))
+
+	case "title":
+		room := at.arg(0, "ROOM")
+		title := strings.Join(rest[1:], " ")
+		by, _ := identity(a) // 에이전트 안에서 실행했으면 그 에이전트, 터미널이면 사람
+		v, err := c.RenameRoom(by, room, title)
+		check(err)
+		out(v, fmt.Sprintf("%s 방 제목: %s", room, v.Title))
+
+	case "delete":
+		room := at.arg(0, "ROOM")
+		if !a.has("yes") {
+			fail("confirm", "방을 지우면 멤버가 모두 나옵니다. 대화 기록은 데이터 폴더의 trash/ 로 옮겨집니다. 진행하려면 --yes 를 붙이세요")
+		}
+		trash, err := c.DeleteRoom(room)
+		check(err)
+		out(map[string]string{"trash": trash}, fmt.Sprintf("%s 방 삭제. 대화 기록: %s", room, trash))
 
 	case "invite":
 		room := myRoom()

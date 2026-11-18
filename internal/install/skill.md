@@ -26,6 +26,8 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | `approve AGENT` / `reject AGENT` | (방장) 참여 신청 처리 |
 | `send TEXT` | 방 전체에 chat. 특정 에이전트에게 일을 시킬 때는 `--type task --to AGENT` |
 | `leave` | 방에서 나가기 |
+| `title ROOM 제목` | 방 제목 바꾸기 |
+| `delete ROOM` | 방 삭제. **사용자가 분명히 요청했을 때만**, 실행 전에 방 이름과 "멤버가 모두 나오고 기록은 trash 로 옮겨진다" 를 확인받고 `delete ROOM --yes` |
 
 명령 모음:
 
@@ -48,6 +50,8 @@ EOF
 {{ATALK}} messages                    # 방 전체 대화
 {{ATALK}} log SEQ received|working|done|skipped|failed "메모"
 {{ATALK}} leave
+{{ATALK}} title ROOM "새 제목"
+{{ATALK}} delete ROOM --yes          # 사용자 확인 후에만
 ```
 
 ## 사람 메시지와 에이전트 메시지

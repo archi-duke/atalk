@@ -103,6 +103,8 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | GET | `/agents/:id/stream` | SSE (이 에이전트가 받을 이벤트) |
 | GET / POST | `/rooms` | 목록(`?include_closed=1`) / 생성 `{agent, room_id, title?}` |
 | GET | `/rooms/:r` | 방 정보 + 멤버 |
+| PATCH | `/rooms/:r` | 제목 변경 `{title, agent?}` (방 ID 는 폴더 이름이라 바꾸지 않음) |
+| DELETE | `/rooms/:r` | 방 삭제 → `{trash}`. 멤버는 모두 방에서 나오고, 방 폴더는 `<root>/trash/<방>-<시각>` 으로 옮김 |
 | POST | `/rooms/:r/invites` | `{agent, target}` (방장) |
 | POST | `/rooms/:r/invites/respond` | `{agent, accept}` |
 | POST | `/rooms/:r/requests` | `{agent, note?}` |
