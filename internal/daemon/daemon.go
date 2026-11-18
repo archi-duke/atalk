@@ -38,6 +38,21 @@ func Lock(root string) (release func(), err error) {
 	return release, nil
 }
 
+// ListenLockFile 은 에이전트 하나당 atalk listen 이 하나만 돌게 하는 잠금 파일.
+func ListenLockFile(agent string) string {
+	return filepath.Join(os.TempDir(), "atalk-listen-"+agent+".lock")
+}
+
+// ListenRunning 은 그 에이전트의 atalk listen 이 실행 중인지 본다 (잠금을 잡아 보고 바로 놓는다).
+func ListenRunning(agent string) bool {
+	release, err := TryLock(ListenLockFile(agent))
+	if err != nil {
+		return true
+	}
+	release()
+	return false
+}
+
 // TryLock 은 파일 잠금을 기다리지 않고 잡는다. 프로세스가 죽으면 OS 가 잠금을 푼다.
 func TryLock(path string) (release func(), err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
