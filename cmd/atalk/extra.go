@@ -45,6 +45,28 @@ func identity(a args) (string, *core.RegisterInput) {
 	return "", nil
 }
 
+// actorID 는 이 명령을 실행한 에이전트 id (다시 연 세션이면 이어받은 새 id). 터미널(사람)이면 "".
+func actorID(c *client.Client, a args) string {
+	id, derived := identity(a)
+	if id != "" && derived != nil {
+		id = followRetired(c, id)
+	}
+	return id
+}
+
+// followRetired 는 카드가 다른 카드에 이어받아졌으면(retired_by) 그 끝까지 따라간다.
+// Claude Code 를 다시 열면 Bash 의 CLAUDE_CODE_SESSION_ID 는 예전 ID 인데 훅은 새 ID 로 등록하기 때문이다.
+func followRetired(c *client.Client, id string) string {
+	for i := 0; i < 5; i++ {
+		v, err := c.Agent(id)
+		if err != nil || v.RetiredBy == nil || *v.RetiredBy == "" || *v.RetiredBy == id {
+			return id
+		}
+		id = *v.RetiredBy
+	}
+	return id
+}
+
 func runDaemon(c *client.Client, a args) {
 	switch a.arg(0, "start|stop|status") {
 	case "start":

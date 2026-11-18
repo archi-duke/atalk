@@ -92,6 +92,9 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 - **복귀**: 같은 agent id 로 다시 등록하면 away → in_room. 응답으로 놓친 메시지와 미완료 작업(마지막 기록이 received/working)을 준다.
 - **이어받기(takeover)**: 세션 ID 가 바뀐 경우. 같은 kind, 같은 cwd, 이전 세션이 away(또는 pid 죽음, 또는 새 세션과 같은 pid = 같은 프로세스의 이전 세션), 새 세션은 방 없음일 때만 허용한다.
   멤버십, cursor, 방장, 처리 기록을 옮기고, 새 세션이 기본 이름이면 이전 세션의 이름/설명/능력/사람 별칭도 넘겨받는다. 이전 카드는 `retired_by` 가 붙어 offline 으로 보인다.
+- **같은 프로세스의 세션 ID 바뀜(Claude 다시 열기)**: 훅에는 새 세션 ID 가 오지만 Bash 의 `CLAUDE_CODE_SESSION_ID` 는 예전 ID 로 남는다.
+  claude-code 카드를 등록할 때 같은 PID 의 다른 claude-code 카드가 방에 없으면 `retired_by` = 새 카드로 표시하고(방에 있으면 아래 자동 이어받기가 처리),
+  CLI 는 환경 변수에서 정한 ID 가 retired 면 `retired_by` 를 끝까지 따라간다. opencode 는 프로세스 하나에 세션이 여럿이라 제외.
 - **자동 이어받기(resume)**: 에이전트가 새 세션으로 시작하면(Claude SessionStart 훅, opencode 플러그인) `POST /agents/:id/resume` 으로 위 조건의 이전 세션 중 가장 최근 것을 자동으로 이어받는다.
 - **시작 시 점검**: 카드나 방이 없는 멤버십을 지우고, 방장이 없는 방은 방장을 다시 정한다.
 - **오프라인 카드 정리**: 10초 점검 때 방에 없는 카드가 offline(pid 죽음 또는 retired)이면 `offline_since` 를 적고, 다시 살아나면 지운다.
