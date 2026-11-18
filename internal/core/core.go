@@ -1152,7 +1152,11 @@ func (c *Atalk) appendMessage(r string, msg Message) Message {
 	}
 	must(appendJSONL(c.messagesFile(r), msg))
 	c.lastSeq[r] = msg.Seq
-	c.emit(Event{Type: "message", To: c.memberIDs(r, msg.From), Data: msg})
+	to := c.memberIDs(r, msg.From)
+	if msg.Human != "" && slices.Contains(msg.To, msg.From) {
+		to = append(to, msg.From)
+	}
+	c.emit(Event{Type: "message", To: to, Data: msg})
 	return msg
 }
 
@@ -1209,6 +1213,65 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 		return nil
 	})
 	return
+}
+
+// SplitMentions 는 본문 앞쪽의 "@이름" 토큰들을 떼어 낸다. "@오프1 @오프2 안녕" → [오프1 오프2], "안녕".
+func SplitMentions(text string) (mentions []string, body string) {
+	rest := strings.TrimSpace(text)
+	for strings.HasPrefix(rest, "@") {
+		end := strings.IndexAny(rest, " \t\r\n")
+		if end < 0 {
+			end = len(rest)
+		}
+		for _, m := range strings.Split(rest[1:end], ",") {
+			if m = strings.TrimSpace(strings.TrimPrefix(m, "@")); m != "" {
+				mentions = append(mentions, m)
+			}
+		}
+		rest = strings.TrimSpace(rest[end:])
+	}
+	return mentions, rest
+}
+
+// Say 는 사람이 agent 를 통해 room 에 직접 쓴 말을 올린다. 앞쪽 "@이름"(이름 또는 id)은 받는 대상.
+func (c *Atalk) Say(agent, room, text string) (Message, error) {
+	mentions, body := SplitMentions(text)
+	if body == "" {
+		return Message{}, bad("empty_body", "보낼 내용이 없음")
+	}
+	var to []string
+	if len(mentions) > 0 {
+		err := c.guard(func() error {
+			var members []string
+			for _, e := range c.membersOf(room) {
+				members = append(members, e.agent)
+			}
+			for _, want := range mentions {
+				found := ""
+				for _, id := range members {
+					if n := c.nameOf(id); id == want || n == want || strings.EqualFold(n, want) {
+						found = id
+						break
+					}
+				}
+				if found == "" {
+					var list []string
+					for _, id := range members {
+						if id != agent {
+							list = append(list, fmt.Sprintf("%s(%s)", c.nameOf(id), id))
+						}
+					}
+					return bad("unknown_mention", "%s 방에 @%s 가 없음. 멤버: %s", room, want, strings.Join(list, ", "))
+				}
+				to = append(to, found)
+			}
+			return nil
+		})
+		if err != nil {
+			return Message{}, err
+		}
+	}
+	return c.Post(agent, room, PostInput{Type: "chat", To: to, Body: body, Human: true})
 }
 
 // humanOf 는 에이전트를 쓰는 사람의 별칭: 카드 human → config.json user → "사용자".
@@ -1311,7 +1374,9 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 	must(err)
 	msgs := []InboxMessage{}
 	for _, x := range all {
-		if x.Seq > cursor && x.From != agent {
+		// 보통 내가 보낸 메시지는 받지 않지만, 내 사람이 나를 지정해 쓴 말(대장@나 → 나)은 받는다
+		toSelf := x.From == agent && x.Human != "" && slices.Contains(x.To, agent)
+		if x.Seq > cursor && (x.From != agent || toSelf) {
 			forMe := x.Type != "system" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 			msgs = append(msgs, InboxMessage{Message: x, ForMe: forMe})
 		}

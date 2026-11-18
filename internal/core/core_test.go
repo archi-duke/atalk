@@ -442,3 +442,29 @@ func TestGraceConfig(t *testing.T) {
 	_, err := c.SetConfig(Config{AwayGraceMin: i(-1)})
 	nok(t, err, "away_grace_min")
 }
+
+func TestHumanToSelf(t *testing.T) {
+	c := newEnv(t).core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "w", "", 0))
+	ok(c.Invite(a, "w", b))
+	ok(c.RespondInvite(b, "w", true))
+	ok(c.Ack(a, ok(c.GetRoom("w")).LastSeq))
+	// 웹에서 "@A 해 줘" (통로 = A) → A 자신도 받는다
+	m := ok(c.Say(a, "w", "@A 해 줘"))
+	if m.Human == "" || len(m.To) != 1 || m.To[0] != a {
+		t.Fatalf("say: %+v", m)
+	}
+	u := ok(c.Unread(a, false))
+	if len(u.Messages) != 1 || !u.Messages[0].ForMe {
+		t.Fatalf("A 가 자기 사람의 메시지를 못 받음: %+v", u.Messages)
+	}
+	// 에이전트가 자기에게 보낸 일반 메시지는 여전히 받지 않는다
+	ok(c.Ack(a, m.Seq))
+	ok(c.Post(a, "w", PostInput{Body: "혼잣말", To: []string{a}}))
+	if u := ok(c.Unread(a, false)); len(u.Messages) != 0 {
+		t.Fatalf("에이전트 자기 메시지를 받음: %+v", u.Messages)
+	}
+	_, err := c.Say(a, "w", "@없음 hi")
+	nok(t, err, "없음")
+}

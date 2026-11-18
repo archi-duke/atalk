@@ -17,6 +17,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,7 +51,7 @@ func New(opts Options) (*Server, error) {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:7420"
 	}
-	s.http = &http.Server{Addr: opts.Addr, Handler: s.routes()}
+	s.http = &http.Server{Addr: opts.Addr, Handler: localOnly(s.routes())}
 	every := opts.SweepEvery
 	if every == 0 {
 		every = 10 * time.Second
@@ -329,6 +330,18 @@ func (s *Server) routes() http.Handler {
 		room, err := c.RespondRequest(b.Agent, r.PathValue("r"), b.Target, b.Approve == nil || *b.Approve)
 		return map[string]any{"room": room}, err
 	})
+	// 사람이 직접 쓴 말 (웹 뷰어 입력창, atalk say, 입력창의 ">> 말")
+	h("POST /rooms/{r}/say", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Agent string `json:"agent"`
+			Text  string `json:"text"`
+		}
+		if err := readActor(r, &b, &b.Agent); err != nil {
+			return nil, err
+		}
+		msg, err := c.Say(b.Agent, r.PathValue("r"), b.Text)
+		return map[string]any{"message": msg}, err
+	})
 	h("GET /rooms/{r}/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		msgs, err := c.ReadMessages(r.PathValue("r"), intQ(r, "after", 0), intQ(r, "limit", 200))
 		return map[string]any{"messages": msgs}, err
@@ -535,6 +548,37 @@ func writeOK(w http.ResponseWriter, out any) {
 	m["ok"] = json.RawMessage("true")
 	w.Header().Set("content-type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(m)
+}
+
+// localOnly 는 브라우저를 통한 공격을 막는다.
+//   - Host 가 127.0.0.1/localhost/::1 이 아니면 거부 (DNS 리바인딩: 남의 도메인이 127.0.0.1 로 풀리는 경우)
+//   - 쓰기 요청(GET/HEAD 외)에 다른 출처의 Origin 이 붙어 있으면 거부 (다른 웹사이트가 데몬에 메시지/작업을 몰래 보내는 것)
+//
+// CLI/훅/플러그인/브리지는 Origin 을 보내지 않으므로 영향이 없다.
+func localOnly(next http.Handler) http.Handler {
+	isLocal := func(host string) bool {
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLocal(r.Host) {
+			writeErr(w, &core.Error{Status: 403, Code: "forbidden_host", Message: "로컬 주소로만 접근할 수 있음"})
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if o := r.Header.Get("Origin"); o != "" && o != "null" {
+				u, err := url.Parse(o)
+				if err != nil || !isLocal(u.Host) {
+					writeErr(w, &core.Error{Status: 403, Code: "forbidden_origin", Message: "다른 출처에서 온 쓰기 요청은 받지 않음"})
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func writeErr(w http.ResponseWriter, err error) {

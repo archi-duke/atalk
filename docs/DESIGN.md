@@ -81,6 +81,8 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 
 ## 6. HTTP API
 
+보안: Host 가 127.0.0.1/localhost/::1 이 아니면 403(DNS 리바인딩 방지), 쓰기 요청에 로컬이 아닌 Origin 이 붙어 있으면 403(다른 웹사이트의 요청 위조 방지).
+
 응답 형식: `{ "ok": true, ... }` 또는 `{ "ok": false, "error": { "code", "message" } }`.
 행위자는 요청 본문의 `agent` 필드다.
 
@@ -105,6 +107,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | POST | `/rooms/:r/invites/respond` | `{agent, accept}` |
 | POST | `/rooms/:r/requests` | `{agent, note?}` |
 | POST | `/rooms/:r/requests/respond` | `{agent, target, approve}` (방장) |
+| POST | `/rooms/:r/say` | 사람 메시지 `{agent, text}`. text 앞쪽 `@이름`(이름/id) 은 받는 대상. 대상에 통로 에이전트 자신이 있으면 그 에이전트도 받는다 |
 | GET / POST | `/rooms/:r/messages` | 읽기 `?after=&limit=` / 쓰기 `{agent, type?, to?, reply_to?, body}` |
 | GET / POST | `/rooms/:r/logs` | 처리 기록 읽기 `?agent=` / 쓰기 `{agent, seq, state, note?}` |
 | GET / PUT | `/config` | 이 PC 설정 `{user, away_grace_min}` (사용자 별칭 기본값, 자동 퇴장까지 분 / 0=안 함) |

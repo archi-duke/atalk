@@ -100,6 +100,31 @@
   .flash { animation:flash 1.2s; }
   @keyframes flash { 0%,40% { box-shadow:0 0 0 3px var(--accent); } 100% { box-shadow:none; } }
 
+  /* 참여 에이전트 상태 (대화창 아래) */
+  .presence { display:flex; flex-wrap:wrap; gap:4px 12px; padding:5px 14px; font-size:11.5px; color:var(--muted); background:var(--chat); border-top:1px solid var(--line); }
+  .presence:empty { display:none; }
+  .presence .p { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
+  .presence .p b { font-weight:600; color:var(--fg); }
+  .pd { width:7px; height:7px; border-radius:50%; flex:none; }
+  .pd.idle { background:#2fb36b; }
+  .pd.busy { background:#e08a1e; animation:pulse 1.2s ease-in-out infinite; }
+  .pd.off { background:transparent; border:1.5px solid #9aa0a8; }
+  .presence .off-txt { opacity:.7; }
+  @keyframes pulse { 50% { opacity:.35; } }
+
+  /* 입력창 */
+  .compose { display:flex; align-items:flex-end; gap:8px; padding:8px 12px; background:var(--panel); border-top:1px solid var(--line); }
+  .targets { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 12px 0; background:var(--panel); border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
+  .targets button { border:1px solid var(--line); background:var(--bg); border-radius:12px; padding:1px 9px; font-size:12px; cursor:pointer; color:var(--fg); }
+  .targets button.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
+  .compose { border-top:0; }
+  .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; max-height:160px; outline:none; }
+  .compose textarea:focus { border-color:var(--accent); }
+  .compose button { border:0; border-radius:10px; padding:8px 14px; background:var(--mine); color:var(--mine-fg); font-weight:700; cursor:pointer; flex:none; }
+  .compose button:disabled { opacity:.5; cursor:default; }
+  .send-err { color:var(--fail); font-size:12px; padding:0 12px 6px; background:var(--panel); }
+  .send-err:empty { display:none; }
+
   @media (max-width: 760px) {
     .app { grid-template-columns:1fr; }
     .app.chatting aside { display:none; }
@@ -126,6 +151,13 @@
     </div>
     <div class="members" id="members"></div>
     <div id="msgs"><div class="empty">왼쪽에서 대화방을 고르세요.</div></div>
+    <div class="presence" id="presence"></div>
+    <div class="targets" id="targets" hidden></div>
+    <form class="compose" id="compose" hidden>
+      <textarea id="text" rows="1" placeholder="메시지 입력"></textarea>
+      <button type="submit" id="send">전송</button>
+    </form>
+    <div class="send-err" id="sendErr"></div>
   </section>
 </div>
 <script>
@@ -213,6 +245,7 @@ document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
 let chat = null; // { room, messages, logs }
 function openRoom(r) {
   selected = r;
+  if (!DATA && location.hash !== "#" + encodeURIComponent(r)) history.replaceState(null, "", "#" + encodeURIComponent(r));
   $("#app").classList.add("chatting");
   renderSide();
   loadChat(true);
@@ -245,6 +278,8 @@ function renderChat(scroll) {
   $("#title").textContent = room.title || room.room_id;
   $("#sub").textContent = "멤버 " + room.members.length + (room.closed_at ? " · 닫힌 방" : "") + (DATA ? " · " + new Date(DATA.exported_at).toLocaleString("ko-KR") + " 내보냄" : "");
   $("#members").innerHTML = room.members.map((m) => '<span><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
+  renderCompose(room);
+  renderPresence(room, chat.logs || []);
   if (DATA) $("#export").style.display = "none";
   else $("#export").href = "/rooms/" + encodeURIComponent(room.room_id) + "/export?download=1";
 
@@ -298,6 +333,86 @@ function renderChat(scroll) {
   }));
   if (scroll || atBottom) box.scrollTop = box.scrollHeight;
 }
+// ───────── 참여 에이전트 상태 ─────────
+// 작업중: 처리 기록상 받았거나(received) 처리 중(working)인데 아직 끝나지 않은 메시지가 있음
+// 대기: 방에 있고 처리 중인 메시지 없음 · 비활성: 자리 비움(에이전트가 꺼짐)
+function renderPresence(room, logs) {
+  const last = {}; // agent → seq → 마지막 상태
+  for (const e of logs) (last[e.agent] ||= {})[e.seq] = e.state;
+  const items = room.members.map((m) => {
+    const open = Object.entries(last[m.agent] || {}).filter(([, st]) => st === "received" || st === "working").map(([seq]) => Number(seq));
+    const owner = m.role === "owner" ? " (방장)" : "";
+    if (m.state === "away")
+      return '<span class="p off-txt" title="자리 비움: 에이전트가 꺼져 있음"><span class="pd off"></span><b>' + esc(m.name) + "</b>" + owner + " 비활성</span>";
+    if (open.length)
+      return '<span class="p" title="처리 중인 메시지: #' + open.join(", #") + '"><span class="pd busy"></span><b>' + esc(m.name) + "</b>" + owner + " 작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : "") + "</span>";
+    return '<span class="p"><span class="pd idle"></span><b>' + esc(m.name) + "</b>" + owner + " 대기</span>";
+  });
+  $("#presence").innerHTML = DATA ? "" : items.join("");
+}
+
+// ───────── 입력 (사람 메시지) ─────────
+// 웹에서 쓴 말은 "별칭@방장" 사람 메시지로 보낸다 (방장이 없으면 방에 있는 첫 멤버를 통해).
+// 받는 대상: 앞에 "@이름" 이 있으면 그 에이전트, 없으면 방장.
+let alias = "사용자", via = null, ownerId = null;
+function renderCompose(room) {
+  const form = $("#compose"), bar = $("#targets");
+  const live = room.members.filter((m) => m.state === "in_room");
+  form.hidden = bar.hidden = !!DATA || !!room.closed_at || !live.length;
+  if (form.hidden) return;
+  const owner = live.find((m) => m.role === "owner");
+  ownerId = owner ? owner.agent : null;
+  via = (owner || live[0]).agent;
+  const target = currentTarget();
+  bar.innerHTML = '<span>' + esc(alias) + ' →</span>' + live.map((m) =>
+    '<button type="button" data-name="' + esc(/\s/.test(m.name) ? m.agent : m.name) + '" class="' + (m.agent === target ? "on" : "") + '">' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</button>").join("");
+  bar.querySelectorAll("button").forEach((b) => (b.onclick = () => {
+    ta.value = "@" + b.dataset.name + " " + ta.value.replace(/^(@\S+\s*)+/, "");
+    ta.focus(); grow(); renderTargets();
+  }));
+  ta.placeholder = (target ? nameOf(target) + "에게" : "방 전체에") + " 보내기 · @이름 으로 대상 변경";
+  ta.title = "@이름 으로 받는 에이전트 지정 (없으면 방장) · Enter 보내기, Shift+Enter 줄바꿈";
+}
+// 입력 내용 앞의 @이름 → 대상 에이전트 id (없으면 방장)
+function currentTarget() {
+  const m = (ta.value.match(/^@(\S+)/) || [])[1];
+  if (!m) return ownerId;
+  const hit = (chat?.room.members || []).find((x) => x.agent === m || x.name === m || x.name.toLowerCase() === m.toLowerCase());
+  return hit ? hit.agent : null;
+}
+function renderTargets() { if (chat) renderCompose(chat.room); }
+async function loadAlias() {
+  if (DATA) return;
+  try { alias = (await j("/config")).config?.user || "사용자"; } catch {}
+}
+const ta = $("#text");
+const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
+ta.addEventListener("input", () => { grow(); renderTargets(); });
+ta.addEventListener("keydown", (e) => {
+  // 한글 입력 조합 중의 Enter 는 글자 확정이므로 보내지 않는다
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $("#compose").requestSubmit(); }
+});
+$("#compose").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = ta.value.trim();
+  if (!text || !chat) return;
+  $("#send").disabled = true; $("#sendErr").textContent = "";
+  try {
+    const res = await fetch("/rooms/" + encodeURIComponent(chat.room.room_id) + "/say", {
+      method: "POST", headers: { "content-type": "application/json" },
+      // @ 가 없으면 방장에게 (방장 id 를 앞에 붙임)
+      body: JSON.stringify({ agent: via, text: text.startsWith("@") || !ownerId ? text : "@" + ownerId + " " + text }),
+    }).then((r) => r.json());
+    if (!res.ok) throw new Error(res.error?.message || "보내지 못함");
+    ta.value = ""; grow(); renderTargets();
+    await loadChat(true);
+  } catch (err) {
+    $("#sendErr").textContent = String(err.message || err);
+  } finally {
+    $("#send").disabled = false; ta.focus();
+  }
+};
+
 $("#view").onchange = (e) => { viewer = e.target.value; localSet("atalk.viewer", viewer); renderChat(false); };
 
 // ───────── 시작 ─────────
@@ -310,7 +425,10 @@ if (DATA) {
   const refresh = () => { clearTimeout(t); t = setTimeout(() => { loadSide(); if (selected) loadChat(false); }, 150); };
   const es = new EventSource("/events");
   ["message", "invite", "request", "membership", "log", "agent", "room", "config"].forEach((e) => es.addEventListener(e, refresh));
+  es.addEventListener("config", () => loadAlias());
+  loadAlias();
   loadSide();
+  if (location.hash.length > 1) openRoom(decodeURIComponent(location.hash.slice(1))); // http://127.0.0.1:7420/#방이름
 }
 </script>
 </body>
