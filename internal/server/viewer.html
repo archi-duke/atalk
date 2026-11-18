@@ -679,19 +679,20 @@ function renderCompose(room) {
   ownerId = owner ? owner.agent : null;
   via = (owner || live[0]).agent;
   const target = currentTarget();
-  bar.innerHTML = '<span>' + esc(alias) + ' →</span>' + live.map((m) =>
+  bar.innerHTML = '<span>' + esc(alias) + ' →</span><button type="button" data-name="모두" class="' + (target === "ALL" ? "on" : "") + '">모두</button>' + live.map((m) =>
     '<button type="button" data-name="' + esc(/\s/.test(m.name) ? m.agent : m.name) + '" class="' + (m.agent === target ? "on" : "") + '">' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</button>").join("");
   bar.querySelectorAll("button").forEach((b) => (b.onclick = () => {
     ta.value = "@" + b.dataset.name + " " + ta.value.replace(/^(@\S+\s*)+/, "");
     ta.focus(); grow(); renderTargets();
   }));
-  ta.placeholder = (target ? nameOf(target) + "에게" : "방 전체에") + " 보내기 · @이름 으로 대상 변경";
-  ta.title = "@이름 으로 받는 에이전트 지정 (없으면 방장) · Enter 보내기, Shift+Enter 줄바꿈";
+  ta.placeholder = (target && target !== "ALL" ? nameOf(target) + "에게" : "방 전체에") + " 보내기 · @이름 으로 대상 변경 (@모두 = 방 전체)";
+  ta.title = "@이름 으로 받는 에이전트 지정 (없으면 방장, @모두 는 방 전체) · Enter 보내기, Shift+Enter 줄바꿈";
 }
 // 입력 내용 앞의 @이름 → 대상 에이전트 id (없으면 방장)
 function currentTarget() {
   const m = (ta.value.match(/^@(\S+)/) || [])[1];
   if (!m) return ownerId;
+  if (["모두", "전체", "all", "everyone"].includes(m.toLowerCase())) return "ALL"; // 방 전체
   const hit = (chat?.room.members || []).find((x) => x.agent === m || x.name === m || x.name.toLowerCase() === m.toLowerCase());
   return hit ? hit.agent : null;
 }

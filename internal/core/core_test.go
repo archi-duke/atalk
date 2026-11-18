@@ -619,3 +619,19 @@ func TestSettingsConfig(t *testing.T) {
 		t.Fatalf("7일 지났는데 휴지통에 남음: %d", n)
 	}
 }
+
+func TestSayAll(t *testing.T) {
+	c := newEnv(t).core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "w", "", 0))
+	ok(c.Invite(a, "w", b))
+	ok(c.RespondInvite(b, "w", true))
+	for _, txt := range []string{"@모두 안녕", "@all 안녕", "@B @모두 안녕"} {
+		if m := ok(c.Say(a, "w", txt)); len(m.To) != 0 || m.Body != "안녕" {
+			t.Fatalf("%q → to=%v body=%q", txt, m.To, m.Body)
+		}
+	}
+	if m := ok(c.Say(a, "w", "@B 너만")); len(m.To) != 1 || m.To[0] != b {
+		t.Fatalf("한 명: %v", m.To)
+	}
+}

@@ -1413,11 +1413,27 @@ func SplitMentions(text string) (mentions []string, body string) {
 	return mentions, rest
 }
 
+// IsAllMention 은 방 전체를 뜻하는 @이름 인지 본다.
+func IsAllMention(m string) bool {
+	switch strings.ToLower(m) {
+	case "모두", "전체", "all", "everyone":
+		return true
+	}
+	return false
+}
+
 // Say 는 사람이 agent 를 통해 room 에 직접 쓴 말을 올린다. 앞쪽 "@이름"(이름 또는 id)은 받는 대상.
 func (c *Atalk) Say(agent, room, text string) (Message, error) {
 	mentions, body := SplitMentions(text)
 	if body == "" {
 		return Message{}, bad("empty_body", "보낼 내용이 없음")
+	}
+	// @모두 / @all → 방 전체 (다른 대상과 같이 쓰면 방 전체가 이긴다)
+	for _, m := range mentions {
+		if IsAllMention(m) {
+			mentions = nil
+			break
+		}
 	}
 	var to []string
 	if len(mentions) > 0 {
