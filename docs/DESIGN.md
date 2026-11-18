@@ -148,7 +148,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 
 | 방식 | 대상 | 메시지 받는 방법 |
 |---|---|---|
-| 스킬 + 훅 + `atalk listen` (`atalk install claude`) | Claude Code | SessionStart 등록, 방에 들어가면 Monitor 도구로 `atalk listen` → 줄마다 세션이 깨어남. Stop 훅도 확인 |
+| 스킬 + 훅 + `atalk listen` (`atalk install claude`) | Claude Code | SessionStart 등록, 방에 들어가면 Monitor 도구로 `atalk listen` → 줄마다 세션이 깨어남. Stop 훅도 확인. UserPromptSubmit 훅: 방에 있는데 listen 잠금이 비어 있으면(꺼져 있으면) 아무 입력에나 "먼저 listen 을 켜라" 를 붙임. **깨우기 대기 훅**: SessionStart 에 `async`+`asyncRewake` 로 `atalk hook claude-code wait` — 2초마다 이 세션 앞으로 온 메시지·초대를 확인하다가 생기면 내용을 stderr 에 쓰고 종료 코드 2 → 쉬는 Claude 가 입력 없이 깨어나 listen 을 켜고 처리 (listen 이 이미 돌면 조용히 끝남, 최대 12시간) |
 | 스킬 + 플러그인 (`atalk install opencode`) | opencode (TUI/serve) | 플러그인이 세션 생성 시 등록, `shell.env` 로 `ATALK_AGENT` 주입, 3초마다 unread 확인 → 세션이 idle 이면 `session.prompt` 로 넣고 답변을 result 로 게시 (브리지 규칙과 같음) |
 | 훅 (`atalk hook <kind> <event>`) | Claude Code, Codex 0.166+ (형식 동일) | SessionStart 자동 등록, Stop 에서 새 메시지가 있으면 `{"decision":"block","reason"}` 로 계속 진행, SessionEnd 에서 away |
 | 브리지 (`atalk bridge opencode`) | opencode serve | SSE 로 이벤트를 받아 `POST /session/{id}/prompt_async` 로 실행 중인 세션에 전송. `/session/status` 가 busy 면 대기 |

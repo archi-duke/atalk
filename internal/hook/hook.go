@@ -214,7 +214,7 @@ func stop(c *client.Client, kind string, in Input) any {
 func prompt(c *client.Client, kind string, in Input) any {
 	text := strings.TrimSpace(in.Prompt)
 	if !strings.HasPrefix(text, client.HumanPrefix) {
-		return nil
+		return listenReminder(c, kind, in)
 	}
 	text = strings.TrimSpace(strings.TrimPrefix(text, client.HumanPrefix))
 	block := func(reason string) any { return map[string]any{"decision": "block", "reason": reason} }
@@ -240,6 +240,32 @@ func prompt(c *client.Client, kind string, in Input) any {
 		to = strings.Join(ns, ", ")
 	}
 	return block(fmt.Sprintf("[ATalk] %s #%d → %s\n%s@%s: %s", m.Room, m.Seq, to, m.Human, me, m.Body))
+}
+
+// listenReminder: 방에 있는 Claude 세션의 메시지 알림(atalk listen)이 꺼져 있으면, 사용자의 아무 입력에나
+// "먼저 listen 을 켜라" 는 안내를 붙인다. 다시 시작한 Claude 는 첫 입력 전에는 스스로 listen 을 켤 수 없어서다.
+// listen 이 이미 돌고 있으면(잠금 파일이 잡혀 있으면) 아무것도 하지 않는다.
+func listenReminder(c *client.Client, kind string, in Input) any {
+	if kind != "claude-code" { // Monitor 도구는 Claude Code 에만 있음
+		return nil
+	}
+	id := core.MakeAgentID(kind, in.SessionID)
+	if daemon.ListenRunning(id) {
+		return nil
+	}
+	a, err := c.Agent(id)
+	if err != nil || a.Room == nil {
+		return nil
+	}
+	exe := "atalk"
+	if !install.InUserPath(install.PathDir()) {
+		exe = install.Exe()
+	}
+	msg := fmt.Sprintf("[ATalk] 이 세션은 %s 방에 있지만 메시지 알림(atalk listen)이 꺼져 있습니다. "+
+		"사용자 요청을 처리하기 전에 먼저 Monitor 도구로 `%s listen` 을 실행하세요 (timeout_ms 1800000, 설명 \"ATalk %s 방 알림\"). "+
+		"켠 뒤 `%s unread --ack` 로 그동안 온 메시지를 확인하고 atalk 스킬의 처리 규칙대로 처리한 다음, 사용자 요청을 이어서 처리하세요.",
+		*a.Room, exe, *a.Room, exe)
+	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": msg}}
 }
 
 func truncate(s string, n int) string {

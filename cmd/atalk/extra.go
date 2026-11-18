@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -74,7 +73,7 @@ func runDaemon(c *client.Client, a args) {
 // listen 은 나에게 온 메시지, 초대, 참여 신청, 방 변화를 한 줄씩 출력하며 계속 실행된다.
 // Claude Code 의 Monitor 도구가 줄마다 세션을 깨우도록 만든 명령이다. 메시지를 읽음 처리하지는 않는다.
 func listen(c *client.Client, id string) error {
-	release, err := daemon.TryLock(filepath.Join(os.TempDir(), "atalk-listen-"+id+".lock"))
+	release, err := daemon.TryLock(daemon.ListenLockFile(id))
 	if err != nil {
 		fmt.Println("[ATalk] 이 세션의 listen 이 이미 실행 중입니다. 기존 알림을 계속 쓰면 됩니다.")
 		return nil

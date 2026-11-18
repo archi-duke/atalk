@@ -125,11 +125,16 @@ func Skill(p Paths) (string, error) {
 	return p.skillFile(), writeFile(p.skillFile(), render(skillTmpl, "atalk"))
 }
 
-var hookEvents = []struct{ event, arg string }{
-	{"SessionStart", "session-start"},
-	{"Stop", "stop"},
-	{"SessionEnd", "session-end"},
-	{"UserPromptSubmit", "prompt"},
+// hookEvents 는 Claude Code settings.json 에 넣는 훅. async 는 백그라운드 + asyncRewake (끝날 때 종료 코드 2 면 쉬는 Claude 를 깨움).
+var hookEvents = []struct {
+	event, arg string
+	async      bool
+}{
+	{"SessionStart", "session-start", false},
+	{"SessionStart", "wait", true}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
+	{"Stop", "stop", false},
+	{"SessionEnd", "session-end", false},
+	{"UserPromptSubmit", "prompt", false},
 }
 
 // isOurs 는 settings.json 의 훅 명령이 atalk 가 넣은 것인지 본다.
@@ -162,12 +167,16 @@ func Claude(p Paths) ([]string, error) {
 		if hooks == nil {
 			hooks = map[string]any{}
 		}
-		for _, h := range hookEvents {
-			list := removeOurs(hooks[h.event])
-			list = append(list, map[string]any{"hooks": []any{map[string]any{
-				"type": "command", "command": fmt.Sprintf(`"%s" hook claude-code %s`, Exe(), h.arg),
-			}}})
-			hooks[h.event] = list
+		for _, h := range hookEvents { // 먼저 이벤트마다 예전 atalk 훅을 빼고
+			hooks[h.event] = removeOurs(hooks[h.event])
+		}
+		for _, h := range hookEvents { // 새로 넣는다
+			entry := map[string]any{"type": "command", "command": fmt.Sprintf(`"%s" hook claude-code %s`, Exe(), h.arg)}
+			if h.async {
+				entry["async"], entry["asyncRewake"] = true, true
+			}
+			list, _ := hooks[h.event].([]any)
+			hooks[h.event] = append(list, map[string]any{"hooks": []any{entry}})
 		}
 		s["hooks"] = hooks
 		perms, _ := s["permissions"].(map[string]any)
@@ -192,7 +201,7 @@ func Claude(p Paths) ([]string, error) {
 	if err != nil {
 		return done, err
 	}
-	done = append(done, "훅(SessionStart/Stop/SessionEnd/UserPromptSubmit) + 허용 규칙: "+p.settingsFile())
+	done = append(done, "훅(SessionStart/Stop/SessionEnd/UserPromptSubmit + 깨우기 대기) + 허용 규칙: "+p.settingsFile())
 	return done, nil
 }
 
