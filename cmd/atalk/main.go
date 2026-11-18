@@ -266,6 +266,9 @@ func main() {
 		check(mcpserver.Run(ctx))
 
 	case "hook":
+		if at.arg(1, "EVENT") == "wait" { // asyncRewake: 깨울 일이 생기면 종료 코드 2
+			os.Exit(hook.Wait(at.arg(0, "KIND"), os.Stdin, os.Stderr, 12*time.Hour))
+		}
 		hook.Run(at.arg(0, "KIND"), at.arg(1, "EVENT"), os.Stdin, os.Stdout)
 
 	case "bridge":

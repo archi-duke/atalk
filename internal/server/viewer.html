@@ -825,7 +825,7 @@ async function loadInteg() {
   $("#sInteg").innerHTML =
     row(st.in_path, false, "PATH 에 atalk 등록", esc(st.path_dir), "path") +
     row(st.claude_skill && st.claude_hooks, !st.claude_skill_current, "Claude Code 스킬 + 훅",
-      (st.claude_skill ? (st.claude_skill_current ? "스킬 최신" : "스킬이 예전 버전") : "스킬 없음") + " · " + (st.claude_hooks ? "훅 4개 등록" : "훅 없음/일부") + "<br>" + esc(st.settings_file), "claude") +
+      (st.claude_skill ? (st.claude_skill_current ? "스킬 최신" : "스킬이 예전 버전") : "스킬 없음") + " · " + (st.claude_hooks ? "훅 등록됨 (깨우기 포함)" : "훅 없음/일부 → 다시 설치") + "<br>" + esc(st.settings_file), "claude") +
     row(st.opencode_plugin, !st.opencode_plugin_current, "opencode 플러그인",
       (st.opencode_plugin ? (st.opencode_plugin_current ? "최신" : "예전 버전") : "없음") + "<br>" + esc(st.plugin_file), "opencode") +
     '<div class="note">atalk 실행 파일: ' + esc(st.exe) + "</div>";
