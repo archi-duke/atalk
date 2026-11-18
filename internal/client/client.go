@@ -347,6 +347,12 @@ func (c *Client) MyRoom(id string) (string, error) {
 // Names 는 agent id → 이름 표 (실패하면 빈 표).
 func (c *Client) Names() map[string]string {
 	out := map[string]string{}
+	var res struct {
+		Names map[string]string `json:"names"`
+	}
+	if err := c.call("GET", "/names", nil, &res, 0); err == nil && res.Names != nil {
+		return res.Names // 지운 카드의 이름까지
+	}
 	if agents, err := c.Agents("", ""); err == nil {
 		for _, a := range agents {
 			out[a.ID] = a.Name

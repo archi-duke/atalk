@@ -503,3 +503,48 @@ func TestRoomRenameDelete(t *testing.T) {
 		t.Fatalf("재생성/재시작: %+v", r)
 	}
 }
+
+func TestOfflinePrune(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "p", "", 0))
+	ok(c.Post(a, "p", PostInput{Body: "기록"}))
+	check(t, c.Leave(a, ""))
+	delete(e.alive, 100) // a: 방 없음 + 프로세스 종료 → offline
+	delete(e.alive, 200) // b: 방 없음 + 종료
+
+	check(t, c.Sweep())
+	if v := ok(c.GetAgent(a)); v.Status != "offline" || v.OfflineSince == nil {
+		t.Fatalf("offline_since 없음: %+v", v)
+	}
+	// b 가 다시 살아나면 offline_since 해제
+	e.alive[200] = true
+	check(t, c.Sweep())
+	if ok(c.GetAgent(b)).OfflineSince != nil {
+		t.Fatal("살아났는데 offline_since 남음")
+	}
+	// 23시간: 유지 / 25시간: 삭제 (기본 24시간)
+	e.clock = e.clock.Add(23 * time.Hour)
+	check(t, c.Sweep())
+	ok(c.GetAgent(a))
+	e.clock = e.clock.Add(2 * time.Hour)
+	check(t, c.Sweep())
+	_, err := c.GetAgent(a)
+	nok(t, err, a)
+	// 지운 카드의 이름은 남는다 (지난 대화 표시)
+	if names := ok(c.Names()); names[a] != "A" {
+		t.Fatalf("이름 기록 없음: %v", names)
+	}
+	// 재시작 후에도
+	if names := ok(e.core().Names()); names[a] != "A" {
+		t.Fatal("재시작 후 이름 기록 없음")
+	}
+	// 0 = 지우지 않음
+	ok(c.SetConfig(Config{OfflineTTLHours: i(0)}))
+	delete(e.alive, 200)
+	check(t, c.Sweep())
+	e.clock = e.clock.Add(1000 * time.Hour)
+	check(t, c.Sweep())
+	ok(c.GetAgent(b))
+}

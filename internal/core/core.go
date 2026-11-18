@@ -55,6 +55,7 @@ type Atalk struct {
 	rooms       map[string]*Room
 	lastSeq     map[string]int
 	cursors     map[string]map[string]int
+	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해, <root>/names.json)
 
 	subMu sync.Mutex
 	subs  map[chan Event]struct{}
@@ -138,6 +139,7 @@ func (c *Atalk) membershipsFile() string   { return filepath.Join(c.Root, "membe
 func (c *Atalk) membershipLog() string     { return filepath.Join(c.Root, "memberships.log.jsonl") }
 func (c *Atalk) cardFile(id string) string { return filepath.Join(c.agentsDir(), id+".json") }
 func (c *Atalk) configFile() string        { return filepath.Join(c.Root, "config.json") }
+func (c *Atalk) namesFile() string         { return filepath.Join(c.Root, "names.json") }
 func (c *Atalk) roomDir(r string) string   { return filepath.Join(c.roomsDir(), r) }
 func (c *Atalk) roomFile(r string) string  { return filepath.Join(c.roomDir(r), "room.json") }
 func (c *Atalk) messagesFile(r string) string {
@@ -166,6 +168,8 @@ func newID() string {
 func (c *Atalk) load() {
 	must(ensureDir(c.agentsDir()))
 	must(ensureDir(c.roomsDir()))
+	c.pastNames = map[string]string{}
+	_, _ = readJSON(c.namesFile(), &c.pastNames)
 
 	entries, err := os.ReadDir(c.agentsDir())
 	must(err)
@@ -344,7 +348,39 @@ func (c *Atalk) nameOf(id string) string {
 	if a, ok := c.agents[id]; ok {
 		return a.Name
 	}
+	if n, ok := c.pastNames[id]; ok {
+		return n
+	}
 	return id
+}
+
+// Names 는 지금 있는 카드와 지운 카드의 id → 이름 (지난 대화 표시용).
+func (c *Atalk) Names() (out map[string]string, err error) {
+	err = c.guard(func() error {
+		out = make(map[string]string, len(c.pastNames)+len(c.agents))
+		for id, n := range c.pastNames {
+			out[id] = n
+		}
+		for id, a := range c.agents {
+			out[id] = a.Name
+		}
+		return nil
+	})
+	return
+}
+
+// removeCard 는 카드를 지우고 이름은 names.json 에 남긴다.
+func (c *Atalk) removeCard(id, reason string) {
+	card, ok := c.agents[id]
+	if !ok {
+		return
+	}
+	c.pastNames[id] = card.Name
+	must(writeJSONAtomic(c.namesFile(), c.pastNames))
+	delete(c.agents, id)
+	_ = os.Remove(c.cardFile(id))
+	c.logMembership(MembershipEvent{TS: c.ts(), Agent: id, Room: "-", Event: "unregister", Detail: reason})
+	c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "unregister"}})
 }
 
 func (c *Atalk) statusOf(id string) string {
@@ -399,6 +435,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 			card = *existing
 			card.UpdatedAt = now
 			card.RetiredBy = nil
+			card.OfflineSince = nil
 			if in.Name != nil {
 				card.Name = *in.Name
 			}
@@ -509,9 +546,7 @@ func (c *Atalk) Unregister(id string) error {
 		if _, ok := c.memberships[id]; ok {
 			c.leaveInternal(id, "leave", "등록 해제")
 		}
-		delete(c.agents, id)
-		_ = os.Remove(c.cardFile(id))
-		c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "unregister"}})
+		c.removeCard(id, "등록 해제")
 		return nil
 	})
 }
@@ -1206,6 +1241,7 @@ func (c *Atalk) Sweep() error {
 				}
 			}
 		}
+		c.sweepOffline(now)
 		return nil
 	})
 }
@@ -1353,6 +1389,39 @@ func (c *Atalk) humanOf(agent string) string {
 	return "사용자"
 }
 
+// sweepOffline 은 offline 이 된 시각을 카드에 적고, offline 이 오래된(기본 24시간) 카드는 지운다.
+// 방에 있는(in_room/away) 카드는 지우지 않는다. pid 를 모르는 카드(CLI 로 등록한 사람 등)는 offline 이 되지 않으므로 지워지지 않는다.
+func (c *Atalk) sweepOffline(now time.Time) {
+	ttl := 24 * time.Hour
+	if cfg := c.readConfig(); cfg.OfflineTTLHours != nil {
+		ttl = time.Duration(*cfg.OfflineTTLHours) * time.Hour
+	}
+	ids := make([]string, 0, len(c.agents))
+	for id := range c.agents {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		card := c.agents[id]
+		if _, inRoom := c.memberships[id]; inRoom {
+			continue
+		}
+		off := c.statusOf(id) == "offline"
+		switch {
+		case off && card.OfflineSince == nil:
+			card.OfflineSince = ptr(c.ts())
+			c.saveCard(card)
+		case !off && card.OfflineSince != nil:
+			card.OfflineSince = nil
+			c.saveCard(card)
+		case off && ttl > 0:
+			if t, err := time.Parse(time.RFC3339Nano, *card.OfflineSince); err == nil && now.Sub(t) > ttl {
+				c.removeCard(id, "offline 이 오래되어 자동 삭제")
+			}
+		}
+	}
+}
+
 // awayGrace 는 자리 비움 후 자동 퇴장까지의 시간. config.json 의 away_grace_min 이 데몬 옵션보다 우선. 0 이면 자동 퇴장 안 함.
 func (c *Atalk) awayGrace() time.Duration {
 	if cfg := c.readConfig(); cfg.AwayGraceMin != nil {
@@ -1391,6 +1460,9 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		}
 		if in.AwayGraceMin != nil && (*in.AwayGraceMin < 0 || *in.AwayGraceMin > 60*24*365) {
 			return bad("invalid_grace", "away_grace_min 은 0(자동 퇴장 안 함) ~ 525600 분")
+		}
+		if in.OfflineTTLHours != nil && (*in.OfflineTTLHours < 0 || *in.OfflineTTLHours > 24*3650) {
+			return bad("invalid_ttl", "offline_ttl_hours 는 0(지우지 않음) ~ 87600 시간")
 		}
 		cfg = in
 		must(writeJSONAtomic(c.configFile(), cfg))

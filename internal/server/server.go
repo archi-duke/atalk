@@ -115,8 +115,12 @@ func (s *Server) ExportHTML(roomID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	names, err := c.Names()
+	if err != nil {
+		return nil, err
+	}
 	data, err := json.Marshal(map[string]any{ // json.Marshal 은 < > & 를 \u003c 등으로 바꾸므로 <script> 안에 안전
-		"room": room, "messages": msgs, "logs": logs, "agents": agents,
+		"room": room, "messages": msgs, "logs": logs, "agents": agents, "names": names,
 		"exported_at": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 	})
 	if err != nil {
@@ -172,6 +176,10 @@ func (s *Server) routes() http.Handler {
 	h("POST /agents/{id}/resume", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		rec, from, err := c.ResumePrevious(r.PathValue("id"))
 		return map[string]any{"recovery": rec, "from": from}, err
+	})
+	h("GET /names", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		names, err := c.Names()
+		return map[string]any{"names": names}, err
 	})
 	h("GET /config", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		cfg, err := c.GetConfig()

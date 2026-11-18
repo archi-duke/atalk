@@ -46,7 +46,9 @@ const help = `atalk — 에이전트 대화방
   atalk agents [--status waiting|in_room|away|offline] [--kind KIND]
   atalk whoami
   atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭]   내 네임카드 수정 (--human: 이 에이전트를 쓰는 사람 별칭)
-  atalk config [user 별칭 | grace 분|off|default]       설정 보기/바꾸기 (사용자 별칭, 자리 비움 후 자동 퇴장 시간. off=퇴장 안 함)
+  atalk config [user 별칭 | grace 분|off|default | offline 시간|off|default]
+                                                      설정: 사용자 별칭 / 자리 비움 후 자동 퇴장(분) / 오프라인 카드 자동 삭제(시간, 기본 24)
+  atalk prune --yes                                   오프라인 네임카드 지금 모두 삭제
   atalk unregister
 
 대화방
@@ -385,6 +387,19 @@ func main() {
 			switch rest[0] {
 			case "user":
 				cfg.User = strings.Join(rest[1:], " ")
+			case "offline":
+				switch v := at.arg(1, "시간 | off | default"); v {
+				case "off", "never", "0":
+					cfg.OfflineTTLHours = new(int)
+				case "default":
+					cfg.OfflineTTLHours = nil
+				default:
+					n, err := strconv.Atoi(v)
+					if err != nil || n < 0 {
+						fail("bad_arg", "offline 은 시간(숫자), off(지우지 않음), default(24시간)")
+					}
+					cfg.OfflineTTLHours = &n
+				}
 			case "grace":
 				switch v := at.arg(1, "분 | off | default"); v {
 				case "off", "never", "0":
@@ -399,7 +414,7 @@ func main() {
 					cfg.AwayGraceMin = &n
 				}
 			default:
-				fail("bad_arg", "atalk config [user 별칭 | grace 분|off|default]")
+				fail("bad_arg", "atalk config [user 별칭 | grace 분|off|default | offline 시간|off|default]")
 			}
 			cfg, err = c.SetConfig(cfg)
 			check(err)
@@ -408,7 +423,11 @@ func main() {
 		if g := cfg.AwayGraceMin; g != nil {
 			grace = map[bool]string{true: "자동 퇴장 안 함", false: strconv.Itoa(*g) + "분"}[*g == 0]
 		}
-		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace)
+		ttl := "24시간 (기본)"
+		if h := cfg.OfflineTTLHours; h != nil {
+			ttl = map[bool]string{true: "지우지 않음", false: strconv.Itoa(*h) + "시간"}[*h == 0]
+		}
+		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace+"\n오프라인 네임카드 자동 삭제: "+ttl)
 
 	case "export":
 		room := at.arg(0, "ROOM")
@@ -426,6 +445,17 @@ func main() {
 		m, err := c.SendHuman(me(), strings.Join(rest, " "))
 		check(err)
 		out(m, fmt.Sprintf("#%d 전송 (%s, %s 로)", m.Seq, m.Room, m.Human))
+
+	case "prune":
+		offline, err := c.Agents("offline", "")
+		check(err)
+		if !a.has("yes") {
+			fail("confirm", fmt.Sprintf("오프라인 네임카드 %d개를 지웁니다 (지난 대화의 이름은 유지). 진행하려면 --yes", len(offline)))
+		}
+		for _, x := range offline {
+			check(c.Unregister(x.ID))
+		}
+		out(map[string]int{"deleted": len(offline)}, fmt.Sprintf("오프라인 네임카드 %d개 삭제", len(offline)))
 
 	case "unregister":
 		check(c.Unregister(me()))

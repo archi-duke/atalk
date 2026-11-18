@@ -48,6 +48,11 @@
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .st-in_room { background:#2fb36b; } .st-away { background:#e0a526; } .st-waiting { background:#7aa2ff; } .st-offline { background:#9aa0a8; }
   .empty { color:var(--muted); padding:24px 16px; text-align:center; }
+  .row.offline { opacity:.6; }
+  .row.offline:hover { opacity:1; }
+  .row .del { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; flex:none; }
+  .prune { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 16px 8px; font-size:11.5px; color:var(--muted); }
+  .prune button { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; }
 
   /* 새 대화방 */
   .side-head .new { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:3px 10px; font-size:12px; cursor:pointer; flex:none; }
@@ -216,7 +221,8 @@ let viewer = localGet("atalk.viewer") || "human";
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
-const nameOf = (id) => agents[id]?.name || id;
+let pastNames = {}; // 지운 네임카드의 이름 (지난 대화 표시용)
+const nameOf = (id) => agents[id]?.name || pastNames[id] || id;
 function hhmm(ts) { const d = new Date(ts); return d.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }); }
 function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); }
 function dayLabel(ts) { return new Date(ts).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" }); }
@@ -244,7 +250,8 @@ const isMine = (m) => (viewer === "human" ? !!m.human : m.from === viewer);
 // ───────── 왼쪽 목록 ─────────
 async function loadSide() {
   if (DATA) return;
-  const [h, a, r] = await Promise.all([j("/health"), j("/agents"), j("/rooms?include_closed=1")]);
+  const [h, a, r, nm] = await Promise.all([j("/health"), j("/agents"), j("/rooms?include_closed=1"), j("/names")]);
+  pastNames = nm.names || {};
   $("#root").textContent = h.root || "";
   agents = Object.fromEntries((a.agents || []).map((x) => [x.id, x]));
   rooms = r.rooms || [];
@@ -261,11 +268,25 @@ async function loadSide() {
 function renderSide() {
   if (tab === "agents") {
     const list = Object.values(agents).sort((p, q) => (p.status === "offline") - (q.status === "offline"));
-    $("#list").innerHTML = list.map((x) =>
-      '<div class="row"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-      '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + x.status + "</span></div>" +
-      '<div class="prev">' + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + "</div></div></div>"
-    ).join("") || '<div class="empty">등록된 에이전트 없음</div>';
+    const offline = list.filter((x) => x.status === "offline");
+    const STATUS_KO = { in_room: "방에 있음", away: "자리 비움", waiting: "대기", offline: "오프라인" };
+    $("#list").innerHTML = (offline.length
+      ? '<div class="prune">오프라인 ' + offline.length + '개 · 하루 지나면 자동 삭제<button id="pruneAll">모두 삭제</button></div>' : "") +
+      (list.map((x) =>
+      '<div class="row' + (x.status === "offline" ? " offline" : "") + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
+      '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + (STATUS_KO[x.status] || x.status) + "</span></div>" +
+      '<div class="prev">' + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + "</div></div>" +
+      (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>"
+    ).join("") || '<div class="empty">등록된 에이전트 없음</div>');
+    const del = async (ids) => {
+      for (const id of ids) await fetch("/agents/" + encodeURIComponent(id), { method: "DELETE" });
+      loadSide();
+    };
+    $("#list").querySelectorAll(".del").forEach((b) => (b.onclick = () => {
+      if (confirm("'" + nameOf(b.dataset.id) + "' 네임카드를 삭제할까요? (지난 대화의 이름은 그대로 보입니다)")) del([b.dataset.id]);
+    }));
+    const all = $("#pruneAll");
+    if (all) all.onclick = () => { if (confirm("오프라인 네임카드 " + offline.length + "개를 모두 삭제할까요?")) del(offline.map((x) => x.id)); };
     return;
   }
   const sorted = [...rooms].sort((p, q) => (previews[q.room_id]?.ts || "").localeCompare(previews[p.room_id]?.ts || ""));
@@ -282,8 +303,8 @@ function renderSide() {
 function cardPresence(room) {
   if (room.closed_at || !room.members.length) return "";
   return '<div class="pres">' + presenceRows(room, roomLogs[room.room_id] || []).map((r) =>
-    '<span class="' + (r.cls === "off" ? "off-t" : r.cls === "busy" ? "busy-t" : "") + '" title="' + esc(r.m.name + ": " + r.title) + '"><span class="pd ' + r.cls + '"></span>' +
-    esc(r.m.name) + (r.cls === "idle" ? "" : " " + esc(r.text)) + "</span>").join("") + "</div>";
+    '<span class="' + (r.cls === "off" ? "off-t" : "") + '" title="' + esc(r.m.name + ": " + r.text + " — " + r.title) + '"><span class="pd ' + r.cls + '"></span>' +
+    esc(r.m.name) + "</span>").join("") + "</div>";
 }
 document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
   tab = b.dataset.tab;
@@ -304,7 +325,7 @@ $("#back").onclick = () => { $("#app").classList.remove("chatting"); };
 $("#title").onclick = () => $("#members").classList.toggle("open");
 
 async function loadChat(scroll) {
-  if (DATA) { chat = DATA; agents = Object.fromEntries((DATA.agents || []).map((x) => [x.id, x])); }
+  if (DATA) { chat = DATA; pastNames = DATA.names || {}; agents = Object.fromEntries((DATA.agents || []).map((x) => [x.id, x])); }
   else {
     if (!selected) return;
     const r = encodeURIComponent(selected);
@@ -483,7 +504,7 @@ function renderPresence(room, logs) {
   const owner = (m) => (m.role === "owner" ? " (방장)" : "");
   // 좁은 화면: 대화창 아래 한 줄
   $("#presence").innerHTML = DATA ? "" : rows.map((r) =>
-    '<span class="p' + (r.cls === "off" ? " off-txt" : "") + '" title="' + esc(r.title) + '"><span class="pd ' + r.cls + '"></span><b>' + esc(r.m.name) + "</b>" + owner(r.m) + " " + esc(r.text) + "</span>").join("");
+    '<span class="p' + (r.cls === "off" ? " off-txt" : "") + '" title="' + esc(r.text + " — " + r.title) + '"><span class="pd ' + r.cls + '"></span><b>' + esc(r.m.name) + "</b>" + owner(r.m) + "</span>").join("");
 }
 
 // ───────── 입력 (사람 메시지) ─────────
