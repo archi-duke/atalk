@@ -53,9 +53,16 @@ func (s *Server) adminRoutes(h func(string, handler)) {
 		name := "atalk-backup-" + time.Now().Format("20060102-1504") + ".zip"
 		w.Header().Set("content-type", "application/zip")
 		w.Header().Set("content-disposition", `attachment; filename="`+name+`"`)
-		// 복사하는 동안 파일이 바뀌지 않게 잠근다
-		err := s.Core.Exclusive(func() error { return zipTree(s.Core.Root, w) })
+		tmp, err := os.MkdirTemp("", "atalk-backup-")
 		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(tmp)
+		dbCopy := filepath.Join(tmp, "atalk.db")
+		if err := s.Core.BackupDB(dbCopy); err != nil {
+			return nil, &core.Error{Status: 500, Code: "backup_failed", Message: err.Error()}
+		}
+		if err := zipTree(s.Core.Root, dbCopy, w); err != nil {
 			log.Printf("backup: %v", err)
 		}
 		return skip{}, nil
@@ -175,8 +182,11 @@ func dirSize(root string) (size int64, files int) {
 	return
 }
 
-// hasAtalkData 는 폴더에 ATalk 데이터(agents/ 또는 rooms/)가 있는지 본다.
+// hasAtalkData 는 폴더에 ATalk 데이터(atalk.db, 또는 예전 형식의 agents/ rooms/)가 있는지 본다.
 func hasAtalkData(dir string) bool {
+	if _, err := os.Stat(filepath.Join(dir, "atalk.db")); err == nil {
+		return true
+	}
 	for _, sub := range []string{"agents", "rooms"} {
 		if fi, err := os.Stat(filepath.Join(dir, sub)); err == nil && fi.IsDir() {
 			return true
@@ -259,8 +269,11 @@ func (s *Server) moveRoot(target, mode string) (string, error) {
 			}
 			return "", bad("not_empty", "옮길 폴더가 비어 있지 않음. 빈 폴더나 새 폴더 이름을 고르세요")
 		}
-		// 복사하는 동안 다른 요청이 파일을 쓰지 못하게 잠근다
-		err := s.Core.Exclusive(func() error { return copyTree(cur, target) })
+		// DB 는 일관된 복사본으로, 나머지 파일(legacy 백업 등)은 그대로 복사
+		err := copyTree(cur, target)
+		if err == nil {
+			err = s.Core.BackupDB(filepath.Join(target, "atalk.db"))
+		}
 		if err != nil {
 			_ = os.RemoveAll(target)
 			return "", bad("copy_failed", "복사 실패 (원래 데이터는 그대로): %v", err)
@@ -277,17 +290,19 @@ func (s *Server) moveRoot(target, mode string) (string, error) {
 	return target, nil
 }
 
-// zipTree 는 데이터 폴더를 zip 으로 쓴다 (daemon.lock, daemon.log 제외).
-func zipTree(root string, w io.Writer) error {
+// skipCopy 는 복사·백업에서 뺄 파일 (DB 는 따로 일관된 복사본을 만든다).
+func skipCopy(rel string) bool {
+	switch rel {
+	case "daemon.lock", "daemon.log", "atalk.db", "atalk.db-wal", "atalk.db-shm":
+		return true
+	}
+	return false
+}
+
+// zipTree 는 데이터 폴더를 zip 으로 쓴다. DB 는 dbCopy(일관된 복사본)를 atalk.db 로 넣는다.
+func zipTree(root, dbCopy string, w io.Writer) error {
 	zw := zip.NewWriter(w)
-	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, _ := filepath.Rel(root, p)
-		if rel == "daemon.lock" || rel == "daemon.log" {
-			return nil
-		}
+	add := func(p, name string) error {
 		in, err := os.Open(p)
 		if err != nil {
 			return err
@@ -295,13 +310,26 @@ func zipTree(root string, w io.Writer) error {
 		defer in.Close()
 		fi, _ := in.Stat()
 		hdr, _ := zip.FileInfoHeader(fi)
-		hdr.Name, hdr.Method = filepath.ToSlash(rel), zip.Deflate
+		hdr.Name, hdr.Method = name, zip.Deflate
 		out, err := zw.CreateHeader(hdr)
 		if err != nil {
 			return err
 		}
 		_, err = io.Copy(out, in)
 		return err
+	}
+	if err := add(dbCopy, "atalk.db"); err != nil {
+		return err
+	}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if skipCopy(filepath.ToSlash(rel)) {
+			return nil
+		}
+		return add(p, filepath.ToSlash(rel))
 	})
 	if err != nil {
 		return err
@@ -309,7 +337,7 @@ func zipTree(root string, w io.Writer) error {
 	return zw.Close()
 }
 
-// copyTree 는 src 의 파일을 dst 로 복사한다 (daemon.lock 제외).
+// copyTree 는 src 의 파일을 dst 로 복사한다 (DB·잠금·로그 제외, DB 는 BackupDB 로).
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -320,7 +348,7 @@ func copyTree(src, dst string) error {
 		if d.IsDir() {
 			return os.MkdirAll(out, 0o755)
 		}
-		if rel == "daemon.lock" {
+		if skipCopy(filepath.ToSlash(rel)) {
 			return nil
 		}
 		in, err := os.Open(p)

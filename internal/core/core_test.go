@@ -26,6 +26,7 @@ func (e *env) core() *Atalk {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	e.t.Cleanup(func() { _ = c.Close() })
 	return c
 }
 
@@ -77,8 +78,11 @@ func TestRegisterCardFile(t *testing.T) {
 	if a != "claude-code_aaa" {
 		t.Fatal(a)
 	}
-	if _, err := os.Stat(filepath.Join(e.root, "agents", "claude-code_aaa.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.root, "atalk.db")); err != nil {
 		t.Fatal(err)
+	}
+	if v := ok(e.core().GetAgent(a)); v.Name != "A" { // 다시 열어도 그대로
+		t.Fatalf("재시작 후 카드: %+v", v)
 	}
 	if ok(c.GetAgent(a)).Status != "waiting" {
 		t.Fatal("not waiting")
@@ -271,9 +275,6 @@ func TestRestartRecovery(t *testing.T) {
 	ok(c.Invite(a, "p", b))
 	ok(c.RespondInvite(b, "p", true))
 	m1 := ok(c.Post(a, "p", PostInput{Body: "hello"}))
-	f, _ := os.OpenFile(filepath.Join(e.root, "rooms", "p", "messages.jsonl"), os.O_APPEND|os.O_WRONLY, 0)
-	_, _ = f.WriteString(`{"seq":99,"bro`)
-	f.Close()
 
 	c = e.core()
 	if *ok(c.GetRoom("p")).Owner != a || *ok(c.GetAgent(b)).Room != "p" {
@@ -296,7 +297,8 @@ func TestRestartReconcile(t *testing.T) {
 	ok(c.CreateRoom(a, "q", "", 0))
 	ok(c.Invite(a, "q", b))
 	ok(c.RespondInvite(b, "q", true))
-	check(t, os.Remove(filepath.Join(e.root, "agents", a+".json")))
+	// 카드가 사라진 상황 (예전엔 파일 삭제, 지금은 DB 행 삭제)
+	check(t, c.guard(func() error { c.st.exec("DELETE FROM agents WHERE id = ?", a); return nil }))
 	c = e.core()
 	if *ok(c.GetRoom("q")).Owner != b || !slices.Equal(members(t, c, "q"), []string{b}) {
 		t.Fatal("reconcile failed")
@@ -328,10 +330,39 @@ func TestReadsTSFormat(t *testing.T) {
 	must2("rooms/r/messages.jsonl", `{"seq":1,"id":"m","ts":"2026-11-17T00:00:00.000Z","room":"r","from":"system","type":"system","to":[],"reply_to":null,"body":"X 입장 (방장)"}`+"\n")
 	must2("rooms/r/cursors.json", `{"codex_x1":0}`)
 	must2("memberships.json", `{"codex_x1":{"room":"r","role":"owner","state":"in_room","joined_at":"2026-11-17T00:00:00.000Z","last_seen":"2026-11-17T00:00:00.000Z","away_since":null,"away_reason":null}}`)
+	must2("rooms/r/logs/codex_x1.jsonl", `{"ts":"2026-11-17T00:00:00.000Z","agent":"codex_x1","seq":1,"state":"received","note":""}`+"\n")
+	must2("trash/old-20261101-000000/room.json", `{"room_id":"old","title":"지운 방","owner":null,"created_at":"2026-11-01T00:00:00.000Z","closed_at":null,"invites":[],"requests":[],"policy":{"max_messages":1000}}`)
+	must2("trash/old-20261101-000000/messages.jsonl", `{"seq":1,"id":"o","ts":"2026-11-01T00:00:00.000Z","room":"old","from":"system","type":"system","to":[],"reply_to":null,"body":"옛 메시지"}`+"\n")
+	must2("config.json", `{"user":"대장"}`)
+	must2("names.json", `{"gone_1":"사라진 에이전트"}`)
 	c := e.core()
 	m := ok(c.Post("codex_x1", "r", PostInput{Body: "go 에서 이어 씀"}))
 	if m.Seq != 2 || *ok(c.GetAgent("codex_x1")).Room != "r" {
 		t.Fatal("format compat failed")
+	}
+	if l := ok(c.ReadLogs("r", "")); len(l) != 1 || l[0].State != "received" {
+		t.Fatalf("처리 기록: %+v", l)
+	}
+	if n, _ := c.TrashInfo(); n != 1 {
+		t.Fatalf("휴지통: %d", n)
+	}
+	if cfg := ok(c.GetConfig()); cfg.User != "대장" {
+		t.Fatal("설정")
+	}
+	if names := ok(c.Names()); names["gone_1"] != "사라진 에이전트" {
+		t.Fatal("이름")
+	}
+	// 원래 파일은 legacy-<시각>/ 으로 옮겨지고, 다시 열어도 두 번 가져오지 않는다
+	if _, err := os.Stat(filepath.Join(e.root, "agents")); !os.IsNotExist(err) {
+		t.Fatal("예전 파일이 그대로 있음")
+	}
+	legacy, _ := filepath.Glob(filepath.Join(e.root, "legacy-*", "rooms", "r", "messages.jsonl"))
+	if len(legacy) != 1 {
+		t.Fatal("legacy 폴더 없음")
+	}
+	c2 := e.core()
+	if msgs := ok(c2.ReadMessages("r", 0, 100)); len(msgs) != 2 {
+		t.Fatalf("다시 열었을 때 메시지 %d개", len(msgs))
 	}
 }
 
@@ -484,12 +515,9 @@ func TestRoomRenameDelete(t *testing.T) {
 	_, err := c.RenameRoom("x", "a\nb", "")
 	nok(t, err, "제목")
 
-	trash := ok(c.DeleteRoom("x"))
-	if _, err := os.Stat(filepath.Join(trash, "messages.jsonl")); err != nil {
-		t.Fatalf("trash 에 기록 없음: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(e.root, "rooms", "x")); !os.IsNotExist(err) {
-		t.Fatal("방 폴더가 남아 있음")
+	ok(c.DeleteRoom("x"))
+	if n, size := c.TrashInfo(); n != 1 || size == 0 {
+		t.Fatalf("휴지통: %d %d", n, size)
 	}
 	if ok(c.GetAgent(a)).Status != "waiting" || ok(c.GetAgent(b)).Room != nil {
 		t.Fatal("멤버가 방에서 나오지 않음")

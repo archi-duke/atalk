@@ -3,7 +3,6 @@ package core
 import (
 	"crypto/rand"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -43,7 +42,8 @@ type Options struct {
 	Now       func() time.Time
 }
 
-// Atalk 은 데몬 안에서 단독으로 파일을 쓴다. 모든 공개 메서드는 mu 로 직렬화된다.
+// Atalk 은 데몬 안에서 단독으로 상태를 바꾼다. 상태는 메모리에 있고 바뀐 것은 Store(SQLite)에 저장한다.
+// 모든 공개 메서드는 mu 로 직렬화되고, 메서드 하나가 트랜잭션 하나다.
 type Atalk struct {
 	Root      string
 	AwayGrace time.Duration
@@ -56,8 +56,13 @@ type Atalk struct {
 	rooms       map[string]*Room
 	lastSeq     map[string]int
 	cursors     map[string]map[string]int
-	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해, <root>/names.json)
+	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해)
 	trashSwept  time.Time         // 휴지통을 마지막으로 정리한 시각 (한 시간에 한 번)
+	cfg         Config            // 설정 (DB meta.config 의 사본)
+
+	st      *sqliteStore // 저장 계층 (<root>/atalk.db)
+	inGuard bool
+	pending []Event // 트랜잭션이 확정된 뒤에 내보낼 이벤트
 
 	subMu sync.Mutex
 	subs  map[chan Event]struct{}
@@ -82,31 +87,107 @@ func New(opts Options) (*Atalk, error) {
 	if c.now == nil {
 		c.now = time.Now
 	}
-	err = c.guard(func() error { c.load(); return nil })
-	return c, err
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return nil, err
+	}
+	st, err := openSQLite(filepath.Join(root, "atalk.db"))
+	if err != nil {
+		return nil, err
+	}
+	c.st = st
+	// 예전 파일 형식 데이터가 있으면 한 번 가져온다
+	if hasLegacyFiles(root) {
+		err = c.guard(func() error {
+			snap, err := c.st.Load()
+			if err != nil || snap.imported {
+				return err
+			}
+			importLegacy(root, c.st, c.ts())
+			return nil
+		})
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("예전 파일 데이터를 가져오지 못함: %w", err)
+		}
+		moveLegacy(root, c.now())
+	}
+	if err = c.guard(func() error { c.load(); return nil }); err != nil {
+		st.Close()
+		return nil, err
+	}
+	return c, nil
 }
 
-// guard 는 잠금을 잡고 fn 을 실행하며, 파일 쓰기 실패 panic 을 오류로 바꾼다.
+// Close 는 DB 를 닫는다.
+func (c *Atalk) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.st.Close()
+}
+
+// guard 는 잠금을 잡고 fn 을 트랜잭션 하나로 실행한다.
+// 성공하면 확정하고 이벤트를 내보낸다. 오류나 저장 실패(panic)면 되돌리고, 메모리 상태도 DB 에서 다시 읽는다.
 func (c *Atalk) guard(fn func() error) (err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.inGuard, c.pending = true, nil
 	defer func() {
-		if r := recover(); r != nil {
-			if f, ok := r.(ioFailure); ok {
-				err = &Error{500, "io_error", f.err.Error()}
-				return
+		c.inGuard = false
+		r := recover()
+		if r != nil {
+			f, ok := r.(ioFailure)
+			if !ok {
+				c.st.Rollback()
+				panic(r)
 			}
-			panic(r)
+			err = &Error{500, "io_error", f.err.Error()}
+		}
+		if err == nil {
+			if cerr := c.st.Commit(); cerr != nil {
+				err = &Error{500, "io_error", cerr.Error()}
+			}
+		}
+		if err != nil {
+			c.st.Rollback()
+			c.pending = nil
+			if r != nil || isIOError(err) { // 메모리만 바뀌고 저장은 안 됐을 수 있으므로 DB 기준으로 되돌린다
+				c.reload()
+			}
+			return
+		}
+		evs := c.pending
+		c.pending = nil
+		for _, e := range evs {
+			c.send(e)
 		}
 	}()
 	return fn()
 }
 
+func isIOError(err error) bool {
+	e, ok := err.(*Error)
+	return ok && e.Code == "io_error"
+}
+
+// reload 는 메모리 상태를 DB 에서 다시 읽는다 (트랜잭션 실패 후).
+func (c *Atalk) reload() {
+	defer func() { _ = recover(); c.st.Rollback() }()
+	c.agents, c.memberships, c.rooms = map[string]*AgentCard{}, map[string]*Membership{}, map[string]*Room{}
+	c.lastSeq, c.cursors = map[string]int{}, map[string]map[string]int{}
+	c.load()
+	_ = c.st.Commit()
+}
+
 // ───────────────────────── 이벤트 구독 ─────────────────────────
 
 // Subscribe 는 모든 이벤트를 받는 채널을 돌려준다. 다 쓰면 Unsubscribe 해야 한다.
-// Exclusive 는 다른 요청이 파일을 쓰지 못하게 잠근 채로 fn 을 실행한다 (데이터 폴더 복사 등).
+// Exclusive 는 다른 요청이 상태를 바꾸지 못하게 잠근 채로 fn 을 실행한다 (데이터 폴더 복사 등).
 func (c *Atalk) Exclusive(fn func() error) error { return c.guard(fn) }
+
+// BackupDB 는 DB 의 일관된 복사본을 path 에 만든다 (데이터 폴더 이동, 백업).
+func (c *Atalk) BackupDB(path string) error {
+	return c.guard(func() error { return c.st.BackupTo(path) })
+}
 
 func (c *Atalk) Subscribe() chan Event {
 	ch := make(chan Event, 256)
@@ -122,10 +203,19 @@ func (c *Atalk) Unsubscribe(ch chan Event) {
 	c.subMu.Unlock()
 }
 
+// emit 은 이벤트를 모아 두었다가 트랜잭션이 확정되면 내보낸다.
 func (c *Atalk) emit(e Event) {
 	if e.To == nil {
 		e.To = []string{}
 	}
+	if c.inGuard {
+		c.pending = append(c.pending, e)
+		return
+	}
+	c.send(e)
+}
+
+func (c *Atalk) send(e Event) {
 	c.subMu.Lock()
 	defer c.subMu.Unlock()
 	for ch := range c.subs {
@@ -137,23 +227,6 @@ func (c *Atalk) emit(e Event) {
 }
 
 // ───────────────────────── 경로 / 시간 ─────────────────────────
-
-func (c *Atalk) agentsDir() string         { return filepath.Join(c.Root, "agents") }
-func (c *Atalk) roomsDir() string          { return filepath.Join(c.Root, "rooms") }
-func (c *Atalk) membershipsFile() string   { return filepath.Join(c.Root, "memberships.json") }
-func (c *Atalk) membershipLog() string     { return filepath.Join(c.Root, "memberships.log.jsonl") }
-func (c *Atalk) cardFile(id string) string { return filepath.Join(c.agentsDir(), id+".json") }
-func (c *Atalk) configFile() string        { return filepath.Join(c.Root, "config.json") }
-func (c *Atalk) namesFile() string         { return filepath.Join(c.Root, "names.json") }
-func (c *Atalk) roomDir(r string) string   { return filepath.Join(c.roomsDir(), r) }
-func (c *Atalk) roomFile(r string) string  { return filepath.Join(c.roomDir(r), "room.json") }
-func (c *Atalk) messagesFile(r string) string {
-	return filepath.Join(c.roomDir(r), "messages.jsonl")
-}
-func (c *Atalk) cursorsFile(r string) string { return filepath.Join(c.roomDir(r), "cursors.json") }
-func (c *Atalk) logFile(r, agent string) string {
-	return filepath.Join(c.roomDir(r), "logs", agent+".jsonl")
-}
 
 // ts 는 JavaScript toISOString() 과 같은 형식 (UTC, 밀리초).
 func (c *Atalk) ts() string { return c.now().UTC().Format("2006-01-02T15:04:05.000Z") }
@@ -171,56 +244,23 @@ func newID() string {
 // ───────────────────────── 로드 / 복구 ─────────────────────────
 
 func (c *Atalk) load() {
-	must(ensureDir(c.agentsDir()))
-	must(ensureDir(c.roomsDir()))
-	c.pastNames = map[string]string{}
-	_, _ = readJSON(c.namesFile(), &c.pastNames)
-
-	entries, err := os.ReadDir(c.agentsDir())
+	snap, err := c.st.Load()
 	must(err)
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		var card AgentCard
-		if ok, err := readJSON(filepath.Join(c.agentsDir(), e.Name()), &card); ok && err == nil && card.ID != "" {
-			if card.Capabilities == nil {
-				card.Capabilities = []string{}
-			}
-			c.agents[card.ID] = &card
-		}
+	c.pastNames = snap.names
+	c.cfg = snap.config
+	for _, a := range snap.agents {
+		c.agents[a.ID] = a
 	}
-
-	dirs, err := os.ReadDir(c.roomsDir())
-	must(err)
-	for _, d := range dirs {
-		if !d.IsDir() {
-			continue
-		}
-		var room Room
-		if ok, err := readJSON(c.roomFile(d.Name()), &room); !ok || err != nil {
-			continue
-		}
-		normalizeRoom(&room)
-		c.rooms[room.RoomID] = &room
-		repairJSONLTail(c.messagesFile(room.RoomID))
-		msgs, err := readJSONL[Message](c.messagesFile(room.RoomID))
-		must(err)
-		last := 0
-		for _, m := range msgs {
-			last = max(last, m.Seq)
-		}
-		c.lastSeq[room.RoomID] = last
-		cur := map[string]int{}
-		if _, err := readJSON(c.cursorsFile(room.RoomID), &cur); err != nil || cur == nil {
+	for _, r := range snap.rooms {
+		c.rooms[r.RoomID] = r
+		c.lastSeq[r.RoomID] = snap.lastSeq[r.RoomID]
+		cur := snap.cursors[r.RoomID]
+		if cur == nil {
 			cur = map[string]int{}
 		}
-		c.cursors[room.RoomID] = cur
+		c.cursors[r.RoomID] = cur
 	}
-
-	if _, err := readJSON(c.membershipsFile(), &c.memberships); err != nil || c.memberships == nil {
-		c.memberships = map[string]*Membership{}
-	}
+	c.memberships = snap.memberships
 	c.reconcile()
 }
 
@@ -266,11 +306,11 @@ func (c *Atalk) reconcile() {
 
 // ───────────────────────── 저장 ─────────────────────────
 
-func (c *Atalk) saveCard(card *AgentCard)        { must(writeJSONAtomic(c.cardFile(card.ID), card)) }
-func (c *Atalk) saveMemberships()                { must(writeJSONAtomic(c.membershipsFile(), c.memberships)) }
-func (c *Atalk) saveRoom(room *Room)             { must(writeJSONAtomic(c.roomFile(room.RoomID), room)) }
-func (c *Atalk) saveCursors(r string)            { must(writeJSONAtomic(c.cursorsFile(r), c.cursors[r])) }
-func (c *Atalk) logMembership(e MembershipEvent) { must(appendJSONL(c.membershipLog(), e)) }
+func (c *Atalk) saveCard(card *AgentCard)        { c.st.PutAgent(card) }
+func (c *Atalk) saveMemberships()                { c.st.PutMemberships(c.memberships) }
+func (c *Atalk) saveRoom(room *Room)             { c.st.PutRoom(room) }
+func (c *Atalk) saveCursors(r string)            { c.st.PutCursors(r, c.cursors[r]) }
+func (c *Atalk) logMembership(e MembershipEvent) { c.st.AppendMembershipEvent(e) }
 
 // ───────────────────────── 조회 헬퍼 ─────────────────────────
 
@@ -381,9 +421,9 @@ func (c *Atalk) removeCard(id, reason string) {
 		return
 	}
 	c.pastNames[id] = card.Name
-	must(writeJSONAtomic(c.namesFile(), c.pastNames))
+	c.st.PutName(id, card.Name)
 	delete(c.agents, id)
-	_ = os.Remove(c.cardFile(id))
+	c.st.DeleteAgent(id)
 	c.logMembership(MembershipEvent{TS: c.ts(), Agent: id, Room: "-", Event: "unregister", Detail: reason})
 	c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "unregister"}})
 }
@@ -601,9 +641,6 @@ func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v Room
 		if _, ok := c.rooms[roomID]; ok {
 			return conflict("room_exists", "이미 있는 방: %s", roomID)
 		}
-		if _, err := os.Stat(c.roomDir(roomID)); err == nil {
-			return conflict("room_exists", "이미 있는 방: %s", roomID)
-		}
 		if title == "" {
 			title = roomID
 		}
@@ -617,13 +654,11 @@ func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v Room
 			RoomID: roomID, Title: title, Owner: ptr(agent), CreatedAt: c.ts(),
 			Invites: []Invite{}, Requests: []JoinRequest{}, Policy: Policy{MaxMessages: maxMessages},
 		}
-		must(ensureDir(filepath.Join(c.roomDir(roomID), "logs")))
 		c.rooms[roomID] = room
 		c.lastSeq[roomID] = 0
 		c.cursors[roomID] = map[string]int{}
 		c.saveRoom(room)
 		c.saveCursors(roomID)
-		must(os.WriteFile(c.messagesFile(roomID), nil, 0o644))
 		c.joinInternal(agent, roomID, RoleOwner)
 		c.emit(Event{Type: "room", Data: map[string]any{"room": roomID, "action": "create"}})
 		v = c.roomView(room)
@@ -683,62 +718,25 @@ func (c *Atalk) SetRoomLimit(r string, n int) (v RoomView, err error) {
 
 // TrashInfo 는 휴지통(삭제한 방)의 개수와 크기.
 func (c *Atalk) TrashInfo() (count int, size int64) {
-	dir := filepath.Join(c.Root, "trash")
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		count++
-		_ = filepath.WalkDir(filepath.Join(dir, e.Name()), func(_ string, d fs.DirEntry, err error) error {
-			if err == nil && !d.IsDir() {
-				if fi, err := d.Info(); err == nil {
-					size += fi.Size()
-				}
-			}
-			return nil
-		})
-	}
+	_ = c.guard(func() error { count, size = c.st.TrashInfo(); return nil })
 	return
 }
 
 // EmptyTrash 는 휴지통을 비운다. olderThan > 0 이면 그보다 오래된 것만.
 func (c *Atalk) EmptyTrash(olderThan time.Duration) (removed int, err error) {
 	err = c.guard(func() error {
-		dir := filepath.Join(c.Root, "trash")
-		entries, _ := os.ReadDir(dir)
-		now := c.now()
-		for _, e := range entries {
-			if !e.IsDir() {
-				continue
-			}
-			if olderThan > 0 && now.Sub(trashTime(dir, e.Name())) <= olderThan {
-				continue
-			}
-			if os.RemoveAll(filepath.Join(dir, e.Name())) == nil {
-				removed++
-			}
+		before := ""
+		if olderThan > 0 {
+			before = c.now().Add(-olderThan).UTC().Format("2006-01-02T15:04:05.000Z")
 		}
+		removed = c.st.EmptyTrash(before)
 		return nil
 	})
 	return
 }
 
-// trashTime 은 trash/<방>-YYYYMMDD-HHMMSS 의 시각 (이름에서, 안 되면 폴더 수정 시각).
-func trashTime(dir, name string) time.Time {
-	if len(name) > 16 {
-		if t, err := time.Parse("20060102-150405", name[len(name)-15:]); err == nil {
-			return t
-		}
-	}
-	if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
-		return fi.ModTime()
-	}
-	return time.Now()
-}
-
-// DeleteRoom 은 방을 지운다. 멤버는 모두 방에서 나오고(대기 상태), 방 폴더는 <root>/trash/<방>-<시각> 으로 옮겨진다.
-// 대화 기록은 trash 에서 되살릴 수 있다 (폴더를 rooms/ 로 다시 옮기고 데몬 재시작).
+// DeleteRoom 은 방을 지운다. 멤버는 모두 방에서 나오고(대기 상태), 대화 기록은 휴지통으로 간다.
+// 휴지통은 설정의 보관 기간(기본 30일)이 지나면 비워진다.
 func (c *Atalk) DeleteRoom(r string) (trash string, err error) {
 	err = c.guard(func() error {
 		room, err := c.requireRoom(r, false)
@@ -753,18 +751,8 @@ func (c *Atalk) DeleteRoom(r string) (trash string, err error) {
 			c.logMembership(MembershipEvent{TS: now, Agent: e.agent, Room: r, Event: "room_deleted", Detail: "방 삭제"})
 		}
 		c.saveMemberships()
-		must(ensureDir(filepath.Join(c.Root, "trash")))
-		trash = filepath.Join(c.Root, "trash", r+"-"+c.now().UTC().Format("20060102-150405"))
-		var mv error
-		for i := 0; i < 20; i++ { // Windows 에서 다른 프로세스가 잠깐 파일을 열고 있으면 실패할 수 있어 다시 시도
-			if mv = os.Rename(c.roomDir(room.RoomID), trash); mv == nil {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if mv != nil {
-			must(mv)
-		}
+		id := c.st.TrashRoom(room, now)
+		trash = fmt.Sprintf("휴지통 #%d", id)
 		delete(c.rooms, r)
 		delete(c.lastSeq, r)
 		delete(c.cursors, r)
@@ -1119,8 +1107,7 @@ func (c *Atalk) buildRecovery(agent string, recentCount int) *Recovery {
 		return nil
 	}
 	rec := &Recovery{Room: m.Room, Role: m.Role, Unread: c.unreadLocked(agent, false).Messages, Unfinished: []Unfinished{}}
-	logs, err := readJSONL[LogEntry](c.logFile(m.Room, agent))
-	must(err)
+	logs := c.st.Logs(m.Room, agent)
 	last := map[int]string{}
 	var order []int
 	for _, e := range logs {
@@ -1136,12 +1123,7 @@ func (c *Atalk) buildRecovery(agent string, recentCount int) *Recovery {
 		}
 	}
 	if len(unfinished) > 0 || recentCount > 0 {
-		all, err := readJSONL[Message](c.messagesFile(m.Room))
-		must(err)
-		bySeq := map[int]Message{}
-		for _, x := range all {
-			bySeq[x.Seq] = x
-		}
+		bySeq := c.st.MessagesBySeq(m.Room, unfinished)
 		for _, seq := range unfinished {
 			u := Unfinished{Seq: seq, State: last[seq]}
 			if msg, ok := bySeq[seq]; ok {
@@ -1150,7 +1132,7 @@ func (c *Atalk) buildRecovery(agent string, recentCount int) *Recovery {
 			rec.Unfinished = append(rec.Unfinished, u)
 		}
 		if recentCount > 0 {
-			rec.Recent = all[max(0, len(all)-recentCount):]
+			rec.Recent = c.st.Messages(m.Room, max(0, c.lastSeq[m.Room]-recentCount), 0)
 		}
 	}
 	return rec
@@ -1265,12 +1247,7 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 			c.saveRoom(room)
 		}
 		// 이전 세션의 처리 기록을 이어받아야 미완료 작업이 보인다
-		oldLogs, err := readJSONL[LogEntry](c.logFile(m.Room, oldID))
-		must(err)
-		for _, e := range oldLogs {
-			e.Agent = newID
-			must(appendJSONL(c.logFile(m.Room, newID), e))
-		}
+		c.st.CopyLogs(m.Room, oldID, newID)
 		// 사람이 정해 둔 이름/설명/능력/별칭은 새 세션이 이어받는다 (새 세션이 기본값일 때만)
 		if old.Name != defaultName(old) && (nu.Name == defaultName(nu) || nu.Name == "") {
 			nu.Name = old.Name
@@ -1338,13 +1315,7 @@ func (c *Atalk) Sweep() error {
 				days = *cfg.TrashRetentionDays
 			}
 			if days > 0 {
-				dir := filepath.Join(c.Root, "trash")
-				entries, _ := os.ReadDir(dir)
-				for _, e := range entries {
-					if e.IsDir() && now.Sub(trashTime(dir, e.Name())) > time.Duration(days)*24*time.Hour {
-						_ = os.RemoveAll(filepath.Join(dir, e.Name()))
-					}
-				}
+				c.st.EmptyTrash(now.Add(-time.Duration(days) * 24 * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z"))
 			}
 		}
 		return nil
@@ -1359,7 +1330,7 @@ func (c *Atalk) appendMessage(r string, msg Message) Message {
 	if msg.To == nil {
 		msg.To = []string{}
 	}
-	must(appendJSONL(c.messagesFile(r), msg))
+	c.st.AppendMessage(msg)
 	c.lastSeq[r] = msg.Seq
 	to := c.memberIDs(r, msg.From)
 	if msg.Human != "" && slices.Contains(msg.To, msg.From) {
@@ -1535,11 +1506,7 @@ func (c *Atalk) awayGrace() time.Duration {
 	return c.AwayGrace
 }
 
-func (c *Atalk) readConfig() Config {
-	var cfg Config
-	_, _ = readJSON(c.configFile(), &cfg)
-	return cfg
-}
+func (c *Atalk) readConfig() Config { return c.cfg }
 
 // checkAlias: 표시에 "@" 를 구분자로 쓰므로 별칭에는 @ 와 줄바꿈을 허용하지 않는다.
 func checkAlias(s string) error {
@@ -1576,7 +1543,8 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 			return bad("invalid_trash", "trash_retention_days 는 0(비우지 않음) ~ 3650 일")
 		}
 		cfg = in
-		must(writeJSONAtomic(c.configFile(), cfg))
+		c.st.PutConfig(cfg)
+		c.cfg = cfg
 		c.emit(Event{Type: "config", Data: cfg})
 		return nil
 	})
@@ -1588,15 +1556,7 @@ func (c *Atalk) ReadMessages(r string, after, limit int) (out []Message, err err
 		if _, err := c.requireRoom(r, false); err != nil {
 			return err
 		}
-		all, err := readJSONL[Message](c.messagesFile(r))
-		must(err)
-		limit = max(1, min(limit, 1000))
-		out = []Message{}
-		for _, m := range all {
-			if m.Seq > after && len(out) < limit {
-				out = append(out, m)
-			}
-		}
+		out = c.st.Messages(r, after, max(1, min(limit, 1000)))
 		return nil
 	})
 	return
@@ -1621,10 +1581,8 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 	}
 	cur := c.cursors[m.Room]
 	cursor := cur[agent]
-	all, err := readJSONL[Message](c.messagesFile(m.Room))
-	must(err)
 	msgs := []InboxMessage{}
-	for _, x := range all {
+	for _, x := range c.st.Messages(m.Room, cursor, 0) {
 		// 보통 내가 보낸 메시지는 받지 않지만, 내 사람이 나를 지정해 쓴 말(대장@나 → 나)은 받는다
 		toSelf := x.From == agent && x.Human != "" && slices.Contains(x.To, agent)
 		if x.Seq > cursor && (x.From != agent || toSelf) {
@@ -1685,7 +1643,7 @@ func (c *Atalk) Log(agent, r string, seq int, state, note string) (e LogEntry, e
 			return bad("invalid_state", "state 는 %s 중 하나", strings.Join(LogStates, "|"))
 		}
 		e = LogEntry{TS: c.ts(), Agent: agent, Seq: seq, State: state, Note: note}
-		must(appendJSONL(c.logFile(r, agent), e))
+		c.st.AppendLog(r, e)
 		c.emit(Event{Type: "log", Data: map[string]any{"room": r, "ts": e.TS, "agent": agent, "seq": seq, "state": state, "note": note}})
 		return nil
 	})
@@ -1702,21 +1660,10 @@ func (c *Atalk) ReadLogs(r, agent string) (out []LogEntry, err error) {
 			if !IsValidAgentID(agent) {
 				return bad("invalid_agent", "잘못된 agent id")
 			}
-			l, err := readJSONL[LogEntry](c.logFile(r, agent))
-			must(err)
-			out = append(out, l...)
+			out = c.st.Logs(r, agent)
 			return nil
 		}
-		dir := filepath.Join(c.roomDir(r), "logs")
-		entries, _ := os.ReadDir(dir)
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".jsonl") {
-				l, err := readJSONL[LogEntry](filepath.Join(dir, e.Name()))
-				must(err)
-				out = append(out, l...)
-			}
-		}
-		sort.SliceStable(out, func(i, j int) bool { return out[i].TS < out[j].TS })
+		out = c.st.Logs(r, "")
 		return nil
 	})
 	return

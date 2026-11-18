@@ -140,7 +140,10 @@ func (s *Server) Close() error {
 	defer cancel()
 	err := s.http.Shutdown(ctx)
 	if errors.Is(err, context.DeadlineExceeded) {
-		return s.http.Close()
+		err = s.http.Close()
+	}
+	if cerr := s.Core.Close(); err == nil {
+		err = cerr
 	}
 	return err
 }
