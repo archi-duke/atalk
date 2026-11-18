@@ -31,6 +31,7 @@ type Input struct {
 	Source         string `json:"source"` // SessionStart: startup | resume | clear | compact | fork
 	StopHookActive bool   `json:"stop_hook_active"`
 	Reason         string `json:"reason"` // SessionEnd
+	Prompt         string `json:"prompt"` // UserPromptSubmit
 }
 
 // Run 은 stdin 에서 훅 입력을 읽고 stdout 에 훅 출력을 쓴다.
@@ -45,7 +46,7 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		return
 	}
 	c := client.New("")
-	if event == "session-start" {
+	if event == "session-start" || (event == "prompt" && strings.HasPrefix(strings.TrimSpace(in.Prompt), client.HumanPrefix)) {
 		_ = daemon.Ensure(c) // 데몬이 없으면 백그라운드로 띄운다
 	}
 	if c.Health() != nil {
@@ -57,6 +58,8 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		out = sessionStart(c, kind, in)
 	case "stop":
 		out = stop(c, kind, in)
+	case "prompt":
+		out = prompt(c, kind, in)
 	case "session-end":
 		_ = c.Away(core.MakeAgentID(kind, in.SessionID), "session_end:"+orDefault(in.Reason, "exit"))
 	}
@@ -203,8 +206,42 @@ func stop(c *client.Client, kind string, in Input) any {
 		}
 		parts = append(parts, strings.Join(texts, "\n"))
 	}
+	parts = append(parts, client.HumanRule)
 	parts = append(parts, "처리 순서는 atalk 스킬의 \"알림을 받았을 때\" 를 따르세요: log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done. result/status 에는 답장하지 마세요. 답할 필요가 없으면 log SEQ skipped.")
 	return map[string]any{"decision": "block", "reason": strings.Join(parts, "\n\n")}
+}
+
+// prompt 는 UserPromptSubmit 훅. 입력이 ">>" 로 시작하면 사람이 대화방에 직접 하는 말이므로
+// 모델을 거치지 않고 원문 그대로 방에 올리고, 모델로는 보내지 않는다(block).
+func prompt(c *client.Client, kind string, in Input) any {
+	text := strings.TrimSpace(in.Prompt)
+	if !strings.HasPrefix(text, client.HumanPrefix) {
+		return nil
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(text, client.HumanPrefix))
+	block := func(reason string) any { return map[string]any{"decision": "block", "reason": reason} }
+	if text == "" {
+		return block("[ATalk] 사용법: >> 보낼 말   (특정 멤버에게: >> @이름 보낼 말)")
+	}
+	id := core.MakeAgentID(kind, in.SessionID)
+	m, err := c.SendHuman(id, text)
+	if err != nil {
+		return block("[ATalk] 보내지 못함: " + err.Error())
+	}
+	me := id
+	if a, err := c.Agent(id); err == nil {
+		me = a.Name
+	}
+	to := "방 전체"
+	if len(m.To) > 0 {
+		names := c.Names()
+		ns := make([]string, len(m.To))
+		for i, t := range m.To {
+			ns[i] = orDefault(names[t], t)
+		}
+		to = strings.Join(ns, ", ")
+	}
+	return block(fmt.Sprintf("[ATalk] %s #%d → %s\n%s@%s: %s", m.Room, m.Seq, to, m.Human, me, m.Body))
 }
 
 func truncate(s string, n int) string {

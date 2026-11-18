@@ -280,7 +280,7 @@ func (b *Bridge) buildPrompt(room string, msgs []core.InboxMessage, wantReply bo
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "[ATalk] %s 방에서 새 메시지가 왔습니다. 나(%s)에게 온 메시지를 처리하세요.\n\n", room, b.id)
 	sb.WriteString(client.FormatMessages(msgs, b.c.Names()))
-	sb.WriteString("\n\n")
+	sb.WriteString("\n\n" + client.HumanRule + "\n\n")
 	if wantReply {
 		sb.WriteString("답변 본문만 출력하세요. 출력은 자동으로 대화방에 result 로 게시됩니다. 답할 필요가 없으면 " + skipMark + " 만 출력하세요.")
 	} else {

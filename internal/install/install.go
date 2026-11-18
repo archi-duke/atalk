@@ -75,6 +75,7 @@ var hookEvents = []struct{ event, arg string }{
 	{"SessionStart", "session-start"},
 	{"Stop", "stop"},
 	{"SessionEnd", "session-end"},
+	{"UserPromptSubmit", "prompt"},
 }
 
 // isOurs 는 settings.json 의 훅 명령이 atalk 가 넣은 것인지 본다.
@@ -137,7 +138,7 @@ func Claude(p Paths) ([]string, error) {
 	if err != nil {
 		return done, err
 	}
-	done = append(done, "훅(SessionStart/Stop/SessionEnd) + 허용 규칙: "+p.settingsFile())
+	done = append(done, "훅(SessionStart/Stop/SessionEnd/UserPromptSubmit) + 허용 규칙: "+p.settingsFile())
 	return done, nil
 }
 

@@ -12,6 +12,7 @@ type AgentCard struct {
 	Capabilities []string `json:"capabilities"`
 	Cwd          *string  `json:"cwd"`
 	Pid          *int     `json:"pid"`
+	Human        *string  `json:"human,omitempty"` // 이 에이전트를 쓰는 사람의 별칭 (없으면 config.json 의 user)
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -85,6 +86,14 @@ type Message struct {
 	To      []string `json:"to"`
 	ReplyTo *int     `json:"reply_to"`
 	Body    string   `json:"body"`
+	// Human 은 사람이 직접 입력한 메시지일 때 그 사람의 별칭. 표시는 "<human>@<에이전트 이름>".
+	// 에이전트(모델)가 쓴 메시지는 비어 있다.
+	Human string `json:"human,omitempty"`
+}
+
+// Config 는 <root>/config.json. 이 PC 의 공통 설정.
+type Config struct {
+	User string `json:"user"` // 사용자 별칭 기본값
 }
 
 var LogStates = []string{"received", "working", "done", "skipped", "failed"}
@@ -186,6 +195,7 @@ type CardPatch struct {
 	Name         *string   `json:"name,omitempty"`
 	Description  *string   `json:"description,omitempty"`
 	Capabilities *[]string `json:"capabilities,omitempty"`
+	Human        *string   `json:"human,omitempty"` // 빈 문자열이면 지움 (config.json 의 user 를 따름)
 }
 
 type PostInput struct {
@@ -193,4 +203,6 @@ type PostInput struct {
 	To      []string `json:"to,omitempty"`
 	ReplyTo *int     `json:"reply_to,omitempty"`
 	Body    string   `json:"body"`
+	// Human 이 true 면 사람이 직접 입력한 메시지. 데몬이 별칭(카드 human → config user → "사용자")을 붙인다.
+	Human bool `json:"human,omitempty"`
 }

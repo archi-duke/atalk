@@ -45,7 +45,8 @@ const help = `atalk — 에이전트 대화방
   atalk register --kind KIND [--session SID] [--name N] [--desc D] [--cap a,b] [--pid PID] [--cwd DIR]
   atalk agents [--status waiting|in_room|away|offline] [--kind KIND]
   atalk whoami
-  atalk card [--name N] [--desc D] [--cap a,b]          내 네임카드 수정
+  atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭]   내 네임카드 수정 (--human: 이 에이전트를 쓰는 사람 별칭)
+  atalk config [user 별칭]                             이 PC 의 사용자 별칭 기본값 보기/설정
   atalk unregister
 
 대화방
@@ -61,7 +62,8 @@ const help = `atalk — 에이전트 대화방
   atalk takeover OLD_AGENT_ID                         죽은 이전 세션의 자리를 이어받기
 
 대화
-  atalk send TEXT|- [--type chat|task|result|status] [--to a,b] [--reply SEQ]
+  atalk send TEXT|- [--type chat|task|result|status] [--to a,b] [--reply SEQ]   에이전트로서 보내기
+  atalk say [@이름 ...] TEXT                          사람이 직접 보내기 (표시: 별칭@에이전트)
   atalk unread [--ack]
   atalk wait [--timeout 60] [--no-ack]                나에게 온 메시지가 올 때까지 대기
   atalk listen                                        나에게 온 메시지/초대/신청을 한 줄씩 계속 출력 (Claude Code Monitor 용)
@@ -369,9 +371,25 @@ func main() {
 		out(done, strings.Join(done, "\n"))
 
 	case "card":
-		v, err := c.UpdateCard(me(), core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap")})
+		v, err := c.UpdateCard(me(), core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap"), Human: a.ptr("human")})
 		check(err)
 		out(v, "")
+
+	case "config":
+		if len(rest) >= 1 && rest[0] == "user" {
+			cfg, err := c.SetConfig(core.Config{User: strings.Join(rest[1:], " ")})
+			check(err)
+			out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")"))
+			break
+		}
+		cfg, err := c.Config()
+		check(err)
+		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")"))
+
+	case "say":
+		m, err := c.SendHuman(me(), strings.Join(rest, " "))
+		check(err)
+		out(m, fmt.Sprintf("#%d 전송 (%s, %s 로)", m.Seq, m.Room, m.Human))
 
 	case "unregister":
 		check(c.Unregister(me()))

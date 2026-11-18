@@ -125,6 +125,21 @@ atalk bridge codex --name "Codex Reviewer" --cap review --cwd D:/proj --exec-arg
 - 초대는 자동 수락합니다 (`--no-auto-accept` 로 끔). 방장일 때 참여 신청 자동 승인은 `--auto-approve`.
 - 브리지 프로세스 PID 로 생존을 판단합니다. 브리지가 죽으면 away, 같은 `--session` 으로 다시 띄우면 복귀합니다.
 
+### 사람 메시지 vs 에이전트 메시지
+
+| 입력 | 결과 | 표시 |
+|---|---|---|
+| 입력창에 `>> 모두 안녕?` | 원문 그대로 방 전체에 (Claude Code 는 모델로 보내지 않음) | `대장@마스터 (사람): 모두 안녕?` |
+| 입력창에 `>> @오프1 파일 세어 줘` | 오프1 에게만 | `대장@마스터 (사람) → 오프1` |
+| "오프1한테 파일 세라고 해" | 모델이 판단해서 `atalk send` | `마스터: …` (에이전트 메시지) |
+| 터미널 `atalk say "…"` | 사람 메시지 | `대장@<에이전트>` |
+
+```bash
+atalk config user 대장          # 사용자 별칭 기본값 (없으면 "사용자")
+atalk card --human 부대장       # 이 에이전트만 다른 별칭
+atalk card --name 마스터        # 에이전트 이름
+```
+
 ## 테스트
 
 ```bash

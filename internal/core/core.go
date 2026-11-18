@@ -137,6 +137,7 @@ func (c *Atalk) roomsDir() string          { return filepath.Join(c.Root, "rooms
 func (c *Atalk) membershipsFile() string   { return filepath.Join(c.Root, "memberships.json") }
 func (c *Atalk) membershipLog() string     { return filepath.Join(c.Root, "memberships.log.jsonl") }
 func (c *Atalk) cardFile(id string) string { return filepath.Join(c.agentsDir(), id+".json") }
+func (c *Atalk) configFile() string        { return filepath.Join(c.Root, "config.json") }
 func (c *Atalk) roomDir(r string) string   { return filepath.Join(c.roomsDir(), r) }
 func (c *Atalk) roomFile(r string) string  { return filepath.Join(c.roomDir(r), "room.json") }
 func (c *Atalk) messagesFile(r string) string {
@@ -474,6 +475,15 @@ func (c *Atalk) UpdateCard(id string, p CardPatch) (v AgentView, err error) {
 		}
 		if p.Capabilities != nil {
 			card.Capabilities = slices.Clone(*p.Capabilities)
+		}
+		if p.Human != nil {
+			if h := strings.TrimSpace(*p.Human); h == "" {
+				card.Human = nil
+			} else if err := checkAlias(h); err != nil {
+				return err
+			} else {
+				card.Human = &h
+			}
 		}
 		card.UpdatedAt = c.ts()
 		c.saveCard(card)
@@ -1115,7 +1125,59 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 		} else {
 			c.saveMemberships()
 		}
-		msg = c.appendMessage(r, Message{From: agent, Type: typ, To: slices.Clone(in.To), ReplyTo: in.ReplyTo, Body: in.Body})
+		out := Message{From: agent, Type: typ, To: slices.Clone(in.To), ReplyTo: in.ReplyTo, Body: in.Body}
+		if in.Human {
+			out.Human = c.humanOf(agent)
+		}
+		msg = c.appendMessage(r, out)
+		return nil
+	})
+	return
+}
+
+// humanOf 는 에이전트를 쓰는 사람의 별칭: 카드 human → config.json user → "사용자".
+func (c *Atalk) humanOf(agent string) string {
+	if card, ok := c.agents[agent]; ok && card.Human != nil && *card.Human != "" {
+		return *card.Human
+	}
+	if cfg := c.readConfig(); cfg.User != "" {
+		return cfg.User
+	}
+	return "사용자"
+}
+
+func (c *Atalk) readConfig() Config {
+	var cfg Config
+	_, _ = readJSON(c.configFile(), &cfg)
+	return cfg
+}
+
+// checkAlias: 표시에 "@" 를 구분자로 쓰므로 별칭에는 @ 와 줄바꿈을 허용하지 않는다.
+func checkAlias(s string) error {
+	if s == "" || len([]rune(s)) > 32 || strings.ContainsAny(s, "@\r\n") {
+		return bad("invalid_alias", "별칭은 1~32자, @ 와 줄바꿈 불가")
+	}
+	return nil
+}
+
+func (c *Atalk) GetConfig() (cfg Config, err error) {
+	err = c.guard(func() error { cfg = c.readConfig(); return nil })
+	return
+}
+
+// SetConfig 는 사용자 별칭 기본값을 바꾼다.
+func (c *Atalk) SetConfig(user string) (cfg Config, err error) {
+	err = c.guard(func() error {
+		user = strings.TrimSpace(user)
+		if user != "" {
+			if err := checkAlias(user); err != nil {
+				return err
+			}
+		}
+		cfg = c.readConfig()
+		cfg.User = user
+		must(writeJSONAtomic(c.configFile(), cfg))
+		c.emit(Event{Type: "config", Data: cfg})
 		return nil
 	})
 	return

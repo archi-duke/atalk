@@ -128,6 +128,18 @@ func (s *Server) routes() http.Handler {
 		a, err := c.ListAgents(r.URL.Query().Get("status"), r.URL.Query().Get("kind"))
 		return map[string]any{"agents": a}, err
 	})
+	h("GET /config", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		cfg, err := c.GetConfig()
+		return map[string]any{"config": cfg}, err
+	})
+	h("PUT /config", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b core.Config
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			return nil, &core.Error{Status: 400, Code: "bad_json", Message: "JSON 본문이 필요함"}
+		}
+		cfg, err := c.SetConfig(b.User)
+		return map[string]any{"config": cfg}, err
+	})
 	h("POST /agents", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var in core.RegisterInput
 		if err := readBody(r, &in); err != nil {

@@ -334,3 +334,38 @@ func TestReadsTSFormat(t *testing.T) {
 		t.Fatal("format compat failed")
 	}
 }
+
+func TestHumanMessage(t *testing.T) {
+	c := newEnv(t).core()
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m"}))
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o"}))
+	ok(c.CreateRoom("claude-code_m", "r", "", 0))
+	ok(c.Invite("claude-code_m", "r", "opencode_o"))
+	ok(c.RespondInvite("opencode_o", "r", true))
+
+	// 별칭이 없으면 "사용자"
+	m := ok(c.Post("claude-code_m", "r", PostInput{Body: "안녕?", Human: true}))
+	if m.Human != "사용자" {
+		t.Fatalf("기본 별칭: %q", m.Human)
+	}
+	// config 기본값 → 카드 덮어쓰기
+	ok(c.SetConfig("대장"))
+	if m = ok(c.Post("claude-code_m", "r", PostInput{Body: "x", Human: true})); m.Human != "대장" {
+		t.Fatalf("config 별칭: %q", m.Human)
+	}
+	ok(c.UpdateCard("opencode_o", CardPatch{Human: ptr("부대장")}))
+	if m = ok(c.Post("opencode_o", "r", PostInput{Body: "y", Human: true})); m.Human != "부대장" {
+		t.Fatalf("카드 별칭: %q", m.Human)
+	}
+	// 에이전트 메시지에는 human 이 없다
+	if m = ok(c.Post("claude-code_m", "r", PostInput{Body: "z"})); m.Human != "" {
+		t.Fatalf("에이전트 메시지에 human: %q", m.Human)
+	}
+	_, err := c.SetConfig("대@장")
+	nok(t, err, "별칭은")
+	// 사람 메시지도 받는 쪽 for_me
+	u := ok(c.Unread("opencode_o", false))
+	if len(u.Messages) < 2 || u.Messages[1].Human != "사용자" || !u.Messages[1].ForMe {
+		t.Fatalf("unread: %+v", u.Messages)
+	}
+}

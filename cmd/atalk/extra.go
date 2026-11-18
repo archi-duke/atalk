@@ -151,6 +151,9 @@ func listen(c *client.Client, id string) error {
 			if n, ok := names[m.From]; ok {
 				from = n + " (" + m.From + ")"
 			}
+			if m.Human != "" {
+				from = m.Human + "@" + from + " [사람]"
+			}
 			fmt.Printf("[ATalk] %s #%d [%s] %s: %s  → atalk unread --ack 로 읽고 처리\n", room, m.Seq, m.Type, from, oneLine(m.Body, 160))
 		}
 		if p, err := c.Pending(id); err == nil {
