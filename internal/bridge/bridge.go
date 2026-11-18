@@ -278,7 +278,11 @@ func (b *Bridge) step(ctx context.Context) error {
 
 func (b *Bridge) buildPrompt(room string, msgs []core.InboxMessage, wantReply bool) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "[ATalk] %s 방에서 새 메시지가 왔습니다. 나(%s)에게 온 메시지를 처리하세요.\n\n", room, b.id)
+	fmt.Fprintf(&sb, "[ATalk] %s 방에서 새 메시지가 왔습니다. 나(%s)에게 온 메시지를 처리하세요.\n", room, b.id)
+	if p := b.c.Purpose(room); p != "" {
+		sb.WriteString(p + "\n")
+	}
+	sb.WriteString("\n")
 	sb.WriteString(client.FormatMessages(msgs, b.c.Names()))
 	sb.WriteString("\n\n" + client.HumanRule + "\n\n")
 	if wantReply {

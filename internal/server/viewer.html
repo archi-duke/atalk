@@ -113,6 +113,7 @@
   .side-head .new { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:3px 10px; font-size:12px; cursor:pointer; flex:none; }
   .newroom { margin:0 12px 10px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); display:flex; flex-direction:column; gap:6px; font-size:12px; }
   .newroom label { display:flex; flex-direction:column; gap:2px; color:var(--muted); }
+  .newroom textarea { font:inherit; font-size:13px; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 7px; resize:vertical; }
   .newroom input, .newroom select { font:inherit; font-size:13px; color:var(--fg); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 7px; }
   .newroom .hint { color:var(--muted); font-size:11px; }
   .newroom .acts { display:flex; gap:6px; justify-content:flex-end; }
@@ -136,6 +137,7 @@
   .chat-head h2 { margin:0; font-size:16px; }
   .chat-head .sub { color:var(--muted); font-size:12px; }
   .chat-head .grow { flex:1; min-width:0; }
+  .chat-head .purpose { font-size:12px; color:var(--fg); opacity:.8; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:default; }
   .chat-head h2, .chat-head .sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chat-head select { max-width:40%; }
   .chat-head select, .chat-head .btn { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:4px 8px; font-size:12px; cursor:pointer; text-decoration:none; color:var(--fg); }
@@ -202,6 +204,7 @@
   .compose { display:flex; align-items:flex-end; gap:8px; padding:8px 12px; background:var(--panel); border-top:1px solid var(--line); }
   .targets { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:6px 12px 0; background:var(--panel); border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
   .targets button { border:1px solid var(--line); background:var(--bg); border-radius:12px; padding:1px 9px; font-size:12px; cursor:pointer; color:var(--fg); }
+  .targets a { color:var(--accent); font-weight:600; }
   .targets button.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .compose { border-top:0; }
   .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; max-height:160px; outline:none; }
@@ -229,6 +232,7 @@
     <form class="newroom" id="newRoom" hidden>
       <label>제목<input id="nrTitle" maxlength="100" placeholder="예: API 리팩터링" required></label>
       <label>방 ID<input id="nrId" maxlength="64" placeholder="자동 (문자·숫자·-·_)"></label>
+      <label>목적 (에이전트들에게 전해짐)<textarea id="nrDesc" maxlength="1000" rows="2" placeholder="예: 결제 API 를 v2 로 옮기고 테스트까지 끝내기"></textarea></label>
       <label>방장 에이전트<select id="nrOwner"></select></label>
       <div class="hint" id="nrHint"></div>
       <div class="err" id="nrErr"></div>
@@ -241,11 +245,13 @@
   <section>
     <div class="chat-head" id="head" hidden>
       <button class="back" id="back" aria-label="뒤로">‹</button>
-      <div class="grow"><h2 id="title"></h2><div class="sub" id="sub"></div></div>
+      <div class="grow"><h2 id="title"></h2><div class="sub" id="sub"></div><div class="purpose" id="purpose" hidden></div></div>
       <select id="view" title="누구의 시점으로 볼지 (오른쪽 말풍선)"></select>
       <div class="menu-wrap" id="menuWrap"><button class="btn" id="menuBtn" title="방 메뉴" aria-haspopup="true">⋯</button>
         <div class="menu" id="menu" hidden>
           <button id="mRename">제목 변경</button>
+          <button id="mDesc">목적(설명) 변경…</button>
+          <button id="mInvite">에이전트 초대·신청…</button>
           <button id="mLimit">메시지 한도…</button>
           <a id="export">내보내기 (HTML 파일)</a>
           <button id="mDelete" class="danger">방 삭제…</button>
@@ -263,6 +269,18 @@
     <div class="send-err" id="sendErr"></div>
   </section>
 </div>
+<dialog class="settings" id="inviteDlg" aria-labelledby="invTitle">
+  <form method="dialog">
+    <header><h2 id="invTitle">에이전트 초대·신청</h2><button class="x" aria-label="닫기">×</button></header>
+    <div class="body">
+      <section><h3>초대할 수 있는 에이전트</h3><div id="invList" class="integ"></div>
+        <p class="note">사람(웹)이 보내는 초대입니다. opencode 는 방에 없으면 자동 수락하고, Claude 는 "사람이 보낸 초대" 로 보고 바로 수락합니다. 다른 방에 있는 에이전트는 수락하면 그 방에서 나옵니다.</p></section>
+      <section><h3>보낸 초대 (대기 중)</h3><div id="invPending" class="note"></div></section>
+      <section><h3>참여 신청</h3><div id="reqList" class="integ"></div></section>
+    </div>
+    <footer><span class="msg" id="invMsg"></span><button class="btn2">닫기</button></footer>
+  </form>
+</dialog>
 <dialog class="settings" id="settings" aria-labelledby="setTitle">
   <form id="setForm">
     <header><h2 id="setTitle">설정</h2><button type="button" class="x" id="setClose" aria-label="닫기">×</button></header>
@@ -503,7 +521,10 @@ function renderChat(scroll) {
   const room = chat.room, msgs = chat.messages || [];
   $("#head").hidden = false;
   $("#title").textContent = room.title || room.room_id;
-  $("#sub").textContent = "멤버 " + room.members.length + (room.closed_at ? " · 닫힌 방" : "") + (DATA ? " · " + new Date(DATA.exported_at).toLocaleString("ko-KR") + " 내보냄" : "");
+  $("#purpose").hidden = !room.description;
+  $("#purpose").textContent = room.description ? "목적: " + room.description : "";
+  $("#purpose").title = room.description || "";
+  $("#sub").textContent = (room.owner ? "" : "방장 없음 · ") + "멤버 " + room.members.length + (room.closed_at ? " · 닫힌 방" : "") + (DATA ? " · " + new Date(DATA.exported_at).toLocaleString("ko-KR") + " 내보냄" : "");
   $("#members").innerHTML = room.members.map((m) => '<span><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
   renderCompose(room);
   renderPresence(room, chat.logs || []);
@@ -566,18 +587,21 @@ let idEdited = false;
 function ownerOptions() {
   // 방에 없는(대기) 에이전트를 먼저: 이미 방에 있는 에이전트를 고르면 그 방에서 나오게 되므로
   const live = Object.values(agents).filter((a) => a.status === "waiting" || a.status === "in_room").sort((p, q) => !!p.room - !!q.room);
-  $("#nrOwner").innerHTML = live.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + (a.room ? " (지금 " + esc(a.room) + " 방)" : "") + "</option>").join("") ||
-    '<option value="">켜져 있는 에이전트 없음</option>';
+  const none = '<option value="">방장 없이 — 처음 들어오는 에이전트가 방장</option>';
+  const opts = live.map((a) => '<option value="' + esc(a.id) + '">' + esc(a.name) + (a.room ? " (지금 " + esc(a.room) + " 방)" : "") + "</option>").join("");
+  // 방에 없는 에이전트가 있으면 그 에이전트가 기본, 없으면 "방장 없이" 가 기본
+  $("#nrOwner").innerHTML = live.length && !live[0].room ? opts + none : none + opts;
   ownerHint();
 }
 function ownerHint() {
+  if (!$("#nrOwner").value) { $("#nrHint").textContent = "방을 만든 뒤 ⋯ › 에이전트 초대 로 들일 수 있습니다. 비어 있어도 방이 닫히지 않습니다."; return; }
   const a = agents[$("#nrOwner").value];
   $("#nrHint").textContent = a?.room ? a.name + " 은(는) " + a.room + " 방에서 나와 새 방의 방장이 됩니다 (세션 하나 = 방 하나)." : "";
 }
 $("#newBtn").onclick = () => {
   const f = $("#newRoom");
   f.hidden = !f.hidden;
-  if (!f.hidden) { idEdited = false; $("#nrTitle").value = ""; $("#nrId").value = ""; $("#nrErr").textContent = ""; ownerOptions(); $("#nrTitle").focus(); }
+  if (!f.hidden) { idEdited = false; $("#nrTitle").value = ""; $("#nrId").value = ""; $("#nrDesc").value = ""; $("#nrErr").textContent = ""; ownerOptions(); $("#nrTitle").focus(); }
 };
 $("#nrCancel").onclick = () => { $("#newRoom").hidden = true; };
 $("#nrTitle").oninput = () => { if (!idEdited) $("#nrId").value = slug($("#nrTitle").value); };
@@ -593,8 +617,7 @@ $("#newRoom").onsubmit = async (e) => {
   const title = $("#nrTitle").value.trim(), id = $("#nrId").value.trim() || slug(title), agent = $("#nrOwner").value;
   $("#nrErr").textContent = "";
   try {
-    if (!agent) throw new Error("방장이 될 에이전트가 없습니다. 에이전트를 먼저 실행하세요.");
-    await send("POST", "/rooms", { agent, room_id: id, title });
+    await send("POST", "/rooms", { agent, room_id: id, title, description: $("#nrDesc").value.trim() });
     $("#newRoom").hidden = true;
     await loadSide();
     openRoom(id);
@@ -621,6 +644,44 @@ $("#mRename").onclick = () => {
   };
   inp.onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) finish(true); if (e.key === "Escape") finish(false); };
   inp.onblur = () => finish(true);
+};
+$("#mDesc").onclick = async () => {
+  $("#menu").hidden = true;
+  const r = chat.room;
+  const v = prompt("'" + (r.title || r.room_id) + "' 방의 목적 (에이전트들에게 전해집니다, 비우면 지움)", r.description || "");
+  if (v === null) return;
+  try { await send("PATCH", "/rooms/" + encodeURIComponent(r.room_id), { description: v }); loadChat(false); loadSide(); }
+  catch (err) { alert("바꾸지 못함: " + (err.message || err)); }
+};
+async function renderInvite() {
+  const r = (await j("/rooms/" + encodeURIComponent(chat.room.room_id))).room;
+  const members = new Set(r.members.map((m) => m.agent));
+  const pendingInv = (r.invites || []).filter((i) => i.status === "pending");
+  const invited = new Set(pendingInv.map((i) => i.agent));
+  const cands = Object.values(agents).filter((a) => a.status !== "offline" && !members.has(a.id));
+  const ST = { in_room: "다른 방에 있음", away: "자리 비움", waiting: "대기" };
+  $("#invList").innerHTML = cands.map((a) =>
+    '<div class="irow"><span class="ist ' + (a.status === "waiting" ? "ok" : "warn") + '">' + esc([...a.name][0] || "?") + "</span><div><b>" + esc(a.name) + "</b>" +
+    '<div class="note">' + esc(a.kind) + " · " + (ST[a.status] || a.status) + (a.room ? " (" + esc(a.room) + ")" : "") + "</div></div>" +
+    (invited.has(a.id) ? '<span class="note">초대함</span>' : '<button type="button" class="btn2" data-inv="' + esc(a.id) + '">초대</button>') + "</div>").join("") ||
+    '<div class="note">초대할 수 있는 켜진 에이전트가 없습니다. 에이전트를 먼저 실행하세요.</div>';
+  $("#invPending").textContent = pendingInv.length ? pendingInv.map((i) => nameOf(i.agent) + " (보낸 이 " + (agents[i.by]?.name || i.by) + ")").join(", ") : "없음";
+  const reqs = (r.requests || []).filter((q) => q.status === "pending");
+  $("#reqList").innerHTML = reqs.map((q) =>
+    '<div class="irow"><span class="ist warn">?</span><div><b>' + esc(nameOf(q.agent)) + '</b><div class="note">' + esc(q.note || "") + "</div></div>" +
+    '<button type="button" class="btn2 primary" data-ok="' + esc(q.agent) + '">승인</button><button type="button" class="btn2" data-no="' + esc(q.agent) + '">거절</button></div>').join("") ||
+    '<div class="note">없음</div>';
+  const room = encodeURIComponent(r.room_id);
+  const act = (fn) => async (e) => { e.target.disabled = true; try { await fn(e.target); $("#invMsg").textContent = ""; } catch (err) { $("#invMsg").textContent = err.message; } renderInvite(); loadChat(false); };
+  $("#invList").querySelectorAll("[data-inv]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/invites", { target: t.dataset.inv }))));
+  $("#reqList").querySelectorAll("[data-ok]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/requests/respond", { target: t.dataset.ok, approve: true }))));
+  $("#reqList").querySelectorAll("[data-no]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/requests/respond", { target: t.dataset.no, approve: false }))));
+}
+$("#mInvite").onclick = async () => {
+  $("#menu").hidden = true;
+  $("#invTitle").textContent = "에이전트 초대·신청 — " + (chat.room.title || chat.room.room_id);
+  await renderInvite();
+  $("#inviteDlg").showModal();
 };
 $("#mLimit").onclick = async () => {
   $("#menu").hidden = true;
@@ -674,6 +735,12 @@ function renderCompose(room) {
   const form = $("#compose"), bar = $("#targets");
   const live = room.members.filter((m) => m.state === "in_room");
   form.hidden = bar.hidden = !!DATA || !!room.closed_at || !live.length;
+  if (!DATA && !room.closed_at && !live.length) { // 아직 들어온(켜진) 에이전트가 없음
+    bar.hidden = false;
+    bar.innerHTML = '<span>아직 방에 들어온 에이전트가 없습니다 — <a href="#" id="hintInvite">⋯ › 에이전트 초대</a></span>';
+    $("#hintInvite").onclick = (e) => { e.preventDefault(); $("#mInvite").click(); };
+    return;
+  }
   if (form.hidden) return;
   const owner = live.find((m) => m.role === "owner");
   ownerId = owner ? owner.agent : null;

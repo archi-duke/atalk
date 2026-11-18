@@ -630,10 +630,61 @@ func (c *Atalk) ListAgents(status, kind string) (out []AgentView, err error) {
 
 // ───────────────────────── 대화방 ─────────────────────────
 
-func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v RoomView, err error) {
+// CreateRoom 은 설명 없이 방을 만든다 (CreateRoomWith 참고).
+func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (RoomView, error) {
+	return c.CreateRoomWith(agent, roomID, title, "", maxMessages)
+}
+
+func checkDescription(d string) (string, error) {
+	d = strings.TrimSpace(d)
+	if len([]rune(d)) > 1000 {
+		return "", bad("invalid_description", "방 설명은 1000자까지")
+	}
+	return d, nil
+}
+
+// SetRoomDescription 은 방 설명(목적)을 바꾼다. by 는 바꾼 에이전트, 사람이면 "".
+func (c *Atalk) SetRoomDescription(r, desc, by string) (v RoomView, err error) {
 	err = c.guard(func() error {
-		if _, err := c.requireAgent(agent); err != nil {
+		room, err := c.requireRoom(r, false)
+		if err != nil {
 			return err
+		}
+		if desc, err = checkDescription(desc); err != nil {
+			return err
+		}
+		if room.Description != desc {
+			room.Description = desc
+			c.saveRoom(room)
+			who := c.humanOf("") + "(사람)"
+			if by != "" {
+				who = c.nameOf(by)
+			}
+			body := "방 설명 지움 (" + who + ")"
+			if desc != "" {
+				body = "방 설명 변경 (" + who + "): " + desc
+			}
+			c.systemMessage(r, body, false)
+			c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "description"}})
+		}
+		v = c.roomView(room)
+		return nil
+	})
+	return
+}
+
+// CreateRoomWith 는 방을 만든다. agent 가 방장이 되어 바로 들어간다.
+// agent 가 "" 이면 사람이 (화면·터미널에서) 방장 없이 만든 방: 비어 있어도 닫히지 않고, 처음 들어오는 에이전트가 방장이 된다.
+func (c *Atalk) CreateRoomWith(agent, roomID, title, description string, maxMessages int) (v RoomView, err error) {
+	err = c.guard(func() error {
+		description, err := checkDescription(description)
+		if err != nil {
+			return err
+		}
+		if agent != "" {
+			if _, err := c.requireAgent(agent); err != nil {
+				return err
+			}
 		}
 		if !IsValidRoomID(roomID) {
 			return bad("invalid_room_id", "방 ID 는 문자/숫자/-/_ 로 된 1~64자여야 함")
@@ -651,15 +702,24 @@ func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v Room
 			}
 		}
 		room := &Room{
-			RoomID: roomID, Title: title, Owner: ptr(agent), CreatedAt: c.ts(),
+			RoomID: roomID, Title: title, Description: description, CreatedAt: c.ts(),
 			Invites: []Invite{}, Requests: []JoinRequest{}, Policy: Policy{MaxMessages: maxMessages},
+		}
+		if agent != "" {
+			room.Owner = ptr(agent)
+		} else {
+			room.Persistent = true
 		}
 		c.rooms[roomID] = room
 		c.lastSeq[roomID] = 0
 		c.cursors[roomID] = map[string]int{}
 		c.saveRoom(room)
 		c.saveCursors(roomID)
-		c.joinInternal(agent, roomID, RoleOwner)
+		if agent != "" {
+			c.joinInternal(agent, roomID, RoleOwner)
+		} else {
+			c.systemMessage(roomID, c.humanOf("")+"(사람) 이 방을 만듦 — 처음 들어오는 에이전트가 방장이 됩니다", false)
+		}
 		c.emit(Event{Type: "room", Data: map[string]any{"room": roomID, "action": "create"}})
 		v = c.roomView(room)
 		return nil
@@ -797,7 +857,10 @@ func (c *Atalk) Invite(owner, r, target string) (v RoomView, err error) {
 		if err != nil {
 			return err
 		}
-		if err := c.requireOwner(owner, room); err != nil {
+		by := owner
+		if owner == "" { // 사람이 화면·터미널에서 초대 (방장이 없거나 있어도)
+			by = c.humanOf("") + " (사람)"
+		} else if err := c.requireOwner(owner, room); err != nil {
 			return err
 		}
 		if _, err := c.requireAgent(target); err != nil {
@@ -811,9 +874,9 @@ func (c *Atalk) Invite(owner, r, target string) (v RoomView, err error) {
 				return conflict("already_invited", "%s 는 이미 초대됨", target)
 			}
 		}
-		room.Invites = append(room.Invites, Invite{Agent: target, By: owner, At: c.ts(), Status: "pending"})
+		room.Invites = append(room.Invites, Invite{Agent: target, By: by, At: c.ts(), Status: "pending"})
 		c.saveRoom(room)
-		c.emit(Event{Type: "invite", To: []string{target}, Data: map[string]any{"room": r, "title": room.Title, "by": owner}})
+		c.emit(Event{Type: "invite", To: []string{target}, Data: map[string]any{"room": r, "title": room.Title, "by": by}})
 		v = c.roomView(room)
 		return nil
 	})
@@ -881,8 +944,10 @@ func (c *Atalk) RespondRequest(owner, r, target string, approve bool) (v RoomVie
 		if err != nil {
 			return err
 		}
-		if err := c.requireOwner(owner, room); err != nil {
-			return err
+		if owner != "" { // "" 이면 사람(관리자)
+			if err := c.requireOwner(owner, room); err != nil {
+				return err
+			}
 		}
 		idx := slices.IndexFunc(room.Requests, func(q JoinRequest) bool { return q.Agent == target && q.Status == "pending" })
 		if idx < 0 {
@@ -968,13 +1033,18 @@ func (c *Atalk) joinInternal(agent, r, role string) {
 		c.leaveInternal(agent, "move", r+" 방으로 이동")
 	}
 	now := c.ts()
+	room := c.rooms[r]
+	if room.Owner == nil { // 방장 없는 방에 처음 들어온 에이전트가 방장
+		role = RoleOwner
+		room.Owner = ptr(agent)
+		c.saveRoom(room)
+	}
 	c.memberships[agent] = &Membership{Room: r, Role: role, State: StateInRoom, JoinedAt: now, LastSeen: now}
 	c.saveMemberships()
 
 	c.cursors[r][agent] = c.lastSeq[r] // 입장 이후 메시지부터 읽음
 	c.saveCursors(r)
 
-	room := c.rooms[r]
 	touched := false
 	for i := range room.Invites {
 		if room.Invites[i].Agent == agent && room.Invites[i].Status == "pending" {
@@ -1044,6 +1114,14 @@ func (c *Atalk) fixOwner(room *Room, why string) {
 		c.logMembership(MembershipEvent{TS: c.ts(), Agent: next.agent, Room: room.RoomID, Event: "owner_transfer", Detail: why})
 		c.systemMessage(room.RoomID, fmt.Sprintf("방장 변경 → %s (%s)", c.nameOf(next.agent), why), false)
 		c.emit(Event{Type: "membership", To: []string{next.agent}, Data: map[string]any{"agent": next.agent, "room": room.RoomID, "action": "owner"}})
+		return
+	}
+	if room.Persistent { // 사람이 만든 방: 닫지 않고 방장 없이 남긴다
+		if room.Owner != nil {
+			room.Owner = nil
+			c.saveRoom(room)
+			c.systemMessage(room.RoomID, "방장 없음 (남은 멤버 없음) — 다음에 들어오는 에이전트가 방장이 됩니다", false)
+		}
 		return
 	}
 	room.Owner = nil

@@ -58,14 +58,25 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 				}
 			}
 			if len(forMe) > 0 && u.Room != nil {
-				lines = append(lines, fmt.Sprintf("[ATalk] %s 방에서 나에게 온 메시지 %d개:", *u.Room, len(forMe)), client.FormatMessages(forMe, c.Names()))
+				lines = append(lines, fmt.Sprintf("[ATalk] %s 방에서 나에게 온 메시지 %d개:", *u.Room, len(forMe)))
+				if p := c.Purpose(*u.Room); p != "" {
+					lines = append(lines, p)
+				}
+				lines = append(lines, client.FormatMessages(forMe, c.Names()))
 			}
 		}
 		if p, err := c.Pending(id); err == nil {
 			for _, i := range p.Invites {
 				if k := "inv:" + i.Room + ":" + i.At; !seen[k] {
 					seen[k] = true
-					lines = append(lines, fmt.Sprintf("[ATalk 초대] %s %q (보낸 이 %s) — 사용자에게 알리고, 사용자가 원하면 `%s accept %s`", i.Room, i.Title, i.By, exe, i.Room))
+					how := "사용자에게 알리고, 사용자가 원하면"
+					if strings.HasSuffix(i.By, "(사람)") {
+						how = "내 사용자가 화면에서 보낸 초대이므로 바로"
+					}
+					lines = append(lines, fmt.Sprintf("[ATalk 초대] %s %q (보낸 이 %s) — %s `%s accept %s`", i.Room, i.Title, i.By, how, exe, i.Room))
+					if p := c.Purpose(i.Room); p != "" {
+						lines = append(lines, p)
+					}
 				}
 			}
 			for _, q := range p.Requests {

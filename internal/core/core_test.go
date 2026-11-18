@@ -635,3 +635,64 @@ func TestSayAll(t *testing.T) {
 		t.Fatalf("한 명: %v", m.To)
 	}
 }
+
+func TestOwnerlessRoomAndDescription(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	ok(c.SetConfig(Config{User: "대장"}))
+
+	// 사람이 방장 없이, 목적과 함께 만든다
+	r := ok(c.CreateRoomWith("", "h", "사람 방", "결제 API 를 v2 로", 0))
+	if r.Owner != nil || !r.Persistent || r.Description != "결제 API 를 v2 로" || len(r.Members) != 0 {
+		t.Fatalf("방장 없는 방: %+v", r)
+	}
+	// 방장이 없어도 닫히지 않고, 사람이 초대할 수 있다
+	ok(c.Invite("", "h", a))
+	if inv := ok(c.Pending(a)).Invites; len(inv) != 1 || inv[0].By != "대장 (사람)" {
+		t.Fatalf("사람 초대: %+v", inv)
+	}
+	_, err := c.Invite(b, "h", a) // 에이전트는 방장이 아니면 초대 못 함
+	nok(t, err, "방장")
+	// 처음 들어온 에이전트가 방장
+	ok(c.RespondInvite(a, "h", true))
+	if r := ok(c.GetRoom("h")); r.Owner == nil || *r.Owner != a {
+		t.Fatalf("첫 입장자 방장: %+v", r.Owner)
+	}
+	// 참여 신청은 사람이 승인할 수 있다
+	ok(c.RequestJoin(b, "h", "도울게요"))
+	ok(c.RespondRequest("", "h", b, true))
+	if !slices.Contains(members(t, c, "h"), b) {
+		t.Fatal("사람 승인")
+	}
+	// 모두 나가도 닫히지 않고 방장 없이 남는다 → 다음 입장자가 방장
+	check(t, c.Leave(a, ""))
+	check(t, c.Leave(b, ""))
+	if r := ok(c.GetRoom("h")); r.ClosedAt != nil || r.Owner != nil {
+		t.Fatalf("빈 방: closed=%v owner=%v", r.ClosedAt, r.Owner)
+	}
+	c2 := e.core() // 다시 열어도 그대로
+	if r := ok(c2.GetRoom("h")); r.ClosedAt != nil || r.Description == "" {
+		t.Fatal("재시작 후 빈 방")
+	}
+	ok(c2.Invite("", "h", b))
+	ok(c2.RespondInvite(b, "h", true))
+	if r := ok(c2.GetRoom("h")); *r.Owner != b {
+		t.Fatal("다음 입장자 방장")
+	}
+	// 설명 변경 / 지우기 / 길이 제한
+	if r := ok(c2.SetRoomDescription("h", "  새 목적 ", "")); r.Description != "새 목적" {
+		t.Fatal(r.Description)
+	}
+	if r := ok(c2.SetRoomDescription("h", "", b)); r.Description != "" {
+		t.Fatal("지우기")
+	}
+	_, err = c2.SetRoomDescription("h", strings.Repeat("가", 1001), "")
+	nok(t, err, "1000")
+	// 에이전트가 만든 방은 예전처럼 마지막 멤버가 나가면 닫힌다
+	ok(c2.CreateRoom(a, "ag", "", 0))
+	check(t, c2.Leave(a, ""))
+	if ok(c2.GetRoom("ag")).ClosedAt == nil {
+		t.Fatal("에이전트 방은 닫혀야 함")
+	}
+}

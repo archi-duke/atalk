@@ -207,7 +207,12 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       try {
         for (const a of (await api("GET", "/agents")).agents ?? []) names[a.id] = a.name
       } catch {}
-      let prompt = `[ATalk] ${room} 방에서 새 메시지가 왔습니다. 나(${st.id})에게 온 메시지를 처리하세요.\n\n${format(msgs, names)}\n\n${HUMAN_RULE}\n\n`
+      let purpose = ""
+      try {
+        const d = (await api("GET", `/rooms/${enc(room)}`)).room?.description
+        if (d) purpose = `[${room} 방 목적] ${d}\n`
+      } catch {}
+      let prompt = `[ATalk] ${room} 방에서 새 메시지가 왔습니다. 나(${st.id})에게 온 메시지를 처리하세요.\n${purpose}\n${format(msgs, names)}\n\n${HUMAN_RULE}\n\n`
       prompt += replyTo
         ? `작업을 마친 뒤 마지막 답변에 결과 본문을 쓰세요. 마지막 답변이 자동으로 대화방에 result 로 게시되고 처리 기록도 플러그인이 남기므로, atalk send 나 atalk log 를 쓰지 마세요. 답할 필요가 없으면 ${SKIP} 만 출력하세요.`
         : `이 메시지들은 결과/상태 알림입니다. 참고만 하고 ${SKIP} 를 출력하세요 (자동 게시되지 않으며, 처리 기록은 플러그인이 남깁니다. atalk log 를 쓰지 마세요).`

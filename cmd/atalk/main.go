@@ -55,13 +55,14 @@ const help = `atalk — 에이전트 대화방
 대화방
   atalk rooms [--all]
   atalk room ROOM
-  atalk create ROOM [--title T]                       방 만들기 (내가 방장, 기존 방에서는 자동 퇴장)
+  atalk create ROOM [--title T] [--desc 목적]          방 만들기 (에이전트면 내가 방장·기존 방에서 자동 퇴장, 터미널이면 방장 없는 방)
+  atalk desc ROOM 설명                                방 설명(목적) 바꾸기
   atalk title ROOM 제목                               방 제목 바꾸기
   atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
-  atalk invite AGENT                                  (방장) 내 방으로 초대
+  atalk invite AGENT [--room ROOM]                    (방장) 내 방으로 초대 / --room 이면 사람으로 그 방에 초대
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
   atalk request ROOM [--note TEXT]                    참여 신청
-  atalk approve AGENT | atalk reject AGENT            (방장) 신청 승인/거절
+  atalk approve AGENT | atalk reject AGENT [--room R] (방장) 신청 승인/거절 / --room 이면 사람으로
   atalk pending                                       나에게 온 초대 / 내 방에 온 신청
   atalk leave
   atalk takeover OLD_AGENT_ID                         죽은 이전 세션의 자리를 이어받기
@@ -488,18 +489,43 @@ func main() {
 				owner = *r.Owner
 			}
 			lines = append(lines, fmt.Sprintf("%s%s  %q  방장 %s  멤버 %d  메시지 %d", r.RoomID, closed, r.Title, owner, len(r.Members), r.LastSeq))
+			if r.Description != "" {
+				lines = append(lines, "    목적: "+r.Description)
+			}
 		}
 		out(rooms, orText(strings.Join(lines, "\n"), "(대화방 없음)"))
 
 	case "room":
 		r, err := c.Room(at.arg(0, "ROOM"))
 		check(err)
-		out(r, "")
+		owner := "없음"
+		if r.Owner != nil {
+			owner = *r.Owner
+		}
+		var ms []string
+		for _, m := range r.Members {
+			ms = append(ms, fmt.Sprintf("%s(%s, %s)", m.Name, m.Role, m.State))
+		}
+		out(r, fmt.Sprintf("%s  %q\n목적: %s\n방장: %s\n멤버: %s\n메시지: %d / 한도 %d",
+			r.RoomID, r.Title, orText(r.Description, "(없음)"), owner, orText(strings.Join(ms, ", "), "(없음)"), r.LastSeq, r.Policy.MaxMessages))
 
 	case "create":
-		r, err := c.CreateRoom(me(), at.arg(0, "ROOM"), a.str("title"))
+		// 에이전트 안에서 실행하면 그 에이전트가 방장, 터미널(사람)이면 방장 없는 방
+		by, _ := identity(a)
+		r, err := c.CreateRoomWith(by, at.arg(0, "ROOM"), a.str("title"), a.str("desc"))
 		check(err)
-		out(r, fmt.Sprintf("방 생성: %s (방장 %s)", r.RoomID, me()))
+		owner := "없음 (처음 들어오는 에이전트가 방장)"
+		if r.Owner != nil {
+			owner = *r.Owner
+		}
+		out(r, fmt.Sprintf("방 생성: %s (방장 %s)", r.RoomID, owner))
+
+	case "desc":
+		room := at.arg(0, "ROOM")
+		by, _ := identity(a)
+		v, err := c.SetRoomDescription(by, room, strings.Join(rest[1:], " "))
+		check(err)
+		out(v, fmt.Sprintf("%s 방 설명: %s", room, orText(v.Description, "(없음)")))
 
 	case "title":
 		room := at.arg(0, "ROOM")
@@ -519,8 +545,12 @@ func main() {
 		out(map[string]string{"trash": trash}, fmt.Sprintf("%s 방 삭제. 대화 기록: %s", room, trash))
 
 	case "invite":
-		room := myRoom()
-		check(c.Invite(me(), room, at.arg(0, "AGENT")))
+		// --room 을 주면 사람(관리자)으로, 아니면 내 방의 방장으로 초대
+		by, room := "", a.str("room")
+		if room == "" {
+			by, room = me(), myRoom()
+		}
+		check(c.Invite(by, room, at.arg(0, "AGENT")))
 		out(map[string]bool{"ok": true}, fmt.Sprintf("%s 를 %s 방에 초대함", rest[0], room))
 
 	case "accept", "decline":
@@ -532,8 +562,11 @@ func main() {
 		out(map[string]bool{"ok": true}, rest[0]+" 방에 참여 신청함")
 
 	case "approve", "reject":
-		room := myRoom()
-		check(c.RespondRequest(me(), room, at.arg(0, "AGENT"), cmd == "approve"))
+		by, room := "", a.str("room")
+		if room == "" {
+			by, room = me(), myRoom()
+		}
+		check(c.RespondRequest(by, room, at.arg(0, "AGENT"), cmd == "approve"))
 		out(map[string]bool{"ok": true}, fmt.Sprintf("%s 신청 %s", rest[0], map[bool]string{true: "승인", false: "거절"}[cmd == "approve"]))
 
 	case "pending":
