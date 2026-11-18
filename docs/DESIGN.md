@@ -71,9 +71,11 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 - **입장**(방 생성, 초대 수락, 신청 승인): 다른 방에 있으면 먼저 그 방에서 나온다(move). 입장 시점의 마지막 seq 부터 읽는다.
 - **방장 퇴장**: 가장 먼저 들어온 멤버(in_room 우선)에게 방장이 넘어간다. 멤버가 없으면 방이 닫힌다(`closed_at`).
 - **away 감지**: 데몬이 10초마다 in_room 멤버의 pid 를 확인한다. 죽었으면 away.
+- **자동 퇴장**: away 후 유예 시간이 지나면 퇴장. `config.json` 의 `away_grace_min` 이 데몬 옵션(`--grace-min`, 기본 30)보다 우선하고, 0 이면 자동 퇴장하지 않는다 (`atalk config grace 분|off|default`).
 - **복귀**: 같은 agent id 로 다시 등록하면 away → in_room. 응답으로 놓친 메시지와 미완료 작업(마지막 기록이 received/working)을 준다.
-- **이어받기(takeover)**: 세션 ID 가 바뀐 경우. 같은 kind, 같은 cwd, 이전 세션이 away(또는 pid 죽음), 새 세션은 방 없음일 때만 허용한다.
-  멤버십, cursor, 방장, 처리 기록을 옮긴다.
+- **이어받기(takeover)**: 세션 ID 가 바뀐 경우. 같은 kind, 같은 cwd, 이전 세션이 away(또는 pid 죽음, 또는 새 세션과 같은 pid = 같은 프로세스의 이전 세션), 새 세션은 방 없음일 때만 허용한다.
+  멤버십, cursor, 방장, 처리 기록을 옮기고, 새 세션이 기본 이름이면 이전 세션의 이름/설명/능력/사람 별칭도 넘겨받는다. 이전 카드는 `retired_by` 가 붙어 offline 으로 보인다.
+- **자동 이어받기(resume)**: 에이전트가 새 세션으로 시작하면(Claude SessionStart 훅, opencode 플러그인) `POST /agents/:id/resume` 으로 위 조건의 이전 세션 중 가장 최근 것을 자동으로 이어받는다.
 - **시작 시 점검**: 카드나 방이 없는 멤버십을 지우고, 방장이 없는 방은 방장을 다시 정한다.
 - **메시지 한도**: 방마다 `policy.max_messages`(기본 1000). 에이전트끼리 끝없이 대화하는 것을 막는 마지막 안전장치다.
 
@@ -91,6 +93,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | POST | `/agents/:id/away` | `{reason}` |
 | POST | `/agents/:id/leave` | `{reason}` |
 | POST | `/agents/:id/takeover` | `{from}` → `{recovery}` |
+| POST | `/agents/:id/resume` | 같은 폴더의 이전 세션 자리 자동 이어받기 → `{recovery, from}` (없으면 404 no_previous) |
 | GET | `/agents/:id/unread?ack=1` | `{room, cursor, messages[for_me]}` |
 | POST | `/agents/:id/ack` | `{seq}` |
 | GET | `/agents/:id/pending` | `{invites, requests}` |
@@ -104,7 +107,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | POST | `/rooms/:r/requests/respond` | `{agent, target, approve}` (방장) |
 | GET / POST | `/rooms/:r/messages` | 읽기 `?after=&limit=` / 쓰기 `{agent, type?, to?, reply_to?, body}` |
 | GET / POST | `/rooms/:r/logs` | 처리 기록 읽기 `?agent=` / 쓰기 `{agent, seq, state, note?}` |
-| GET / PUT | `/config` | 이 PC 설정 `{user}` (사용자 별칭 기본값) |
+| GET / PUT | `/config` | 이 PC 설정 `{user, away_grace_min}` (사용자 별칭 기본값, 자동 퇴장까지 분 / 0=안 함) |
 | GET | `/events` | SSE (전체 이벤트, 뷰어용) |
 | GET | `/rooms/:r/export` | 방 대화를 메신저 형식 HTML 파일 하나로 (`?download=1` 이면 첨부 파일로). 뷰어 HTML 에 `window.ATALK_DATA` 로 데이터를 넣은 것 |
 | GET | `/` | 뷰어 HTML (메신저 형식) |

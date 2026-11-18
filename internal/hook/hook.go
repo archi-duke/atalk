@@ -114,8 +114,15 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	if kind != "claude-code" {
 		lines = append(lines, fmt.Sprintf("- atalk 명령에는 --as %s 를 붙이세요 (MCP 를 쓰면 atalk_attach(agent_id=%q)).", a.ID, a.ID))
 	}
-	if rec := r.Recovery; rec != nil {
-		lines = append(lines, "", fmt.Sprintf("[ATalk 복구] %s 방으로 복귀했습니다 (역할 %s).", rec.Room, rec.Role))
+	// 새 세션이면 같은 폴더의 이전 세션이 있던 방 자리를 자동으로 이어받는다
+	rec, title := r.Recovery, "[ATalk 복구] %s 방으로 복귀했습니다 (역할 %s)."
+	if rec == nil {
+		if rr, from, err := c.ResumePrevious(a.ID); err == nil && rr != nil {
+			rec, title = rr, "[ATalk 이어받기] 이전 세션("+from+")이 있던 %s 방 자리를 이어받았습니다 (역할 %s)."
+		}
+	}
+	if rec != nil {
+		lines = append(lines, "", fmt.Sprintf(title, rec.Room, rec.Role))
 		if kind == "claude-code" {
 			lines = append(lines, fmt.Sprintf("메시지 알림을 받으려면 Monitor 도구로 `%s listen` 을 실행하세요 (atalk 스킬의 \"메시지 받기\" 참고).", exe))
 		}
@@ -131,15 +138,6 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 		}
 		if len(rec.Unread) > 0 {
 			lines = append(lines, "놓친 메시지:", client.FormatMessages(rec.Unread, c.Names()))
-		}
-	} else {
-		// 같은 폴더의 죽은 세션이 방에 남아 있으면 이어받기를 안내
-		if away, err := c.Agents("away", kind); err == nil {
-			for _, x := range away {
-				if x.ID != a.ID && x.Cwd != nil && samePath(*x.Cwd, cwd) && x.Room != nil {
-					lines = append(lines, fmt.Sprintf("- 같은 폴더의 이전 세션 %s 가 %s 방에 자리 비움 상태로 남아 있습니다. 사용자가 원하면 `%s takeover %s` 로 이어받을 수 있습니다.", x.ID, *x.Room, exe, x.ID))
-				}
-			}
 		}
 	}
 	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart", "additionalContext": strings.Join(lines, "\n")}}

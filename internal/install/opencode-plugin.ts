@@ -75,15 +75,24 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       await ensureDaemon()
       const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
-      else {
-        // 처음 등록할 때만 기본 이름 (폴더명-세션ID끝자리). 나중에 atalk card --name 으로 바꾼 이름은 덮어쓰지 않는다.
-        const exists = await api("GET", `/agents/${enc(agentId(sid))}`).then(() => true, () => false)
-        if (!exists) body.name = `${directory.split(/[\\/]/).filter(Boolean).pop() ?? "opencode"}-${sid.slice(-5)}`
-      }
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
-      await api("POST", "/agents", body)
+      const reg = await api("POST", "/agents", body)
       sessions.set(sid, { id: agentId(sid), busy: false, working: false, seen: new Set() })
+      // 새 세션이면 같은 폴더의 이전 세션(이 opencode 의 이전 세션 포함)이 있던 방 자리를 자동으로 이어받는다
+      let resumed = false
+      if (!reg.recovery) {
+        try {
+          const r = await api("POST", `/agents/${enc(agentId(sid))}/resume`, {})
+          resumed = !!r.recovery?.room
+          if (resumed) await client.tui.showToast({ body: { message: `ATalk: 이전 세션이 있던 ${r.recovery.room} 방을 이어서 씁니다`, variant: "info" } }).catch(() => {})
+        } catch {}
+      }
+      // 처음 등록했고 이어받은 세션도 없으면 기본 이름 (폴더명-세션ID끝자리). 나중에 바꾼 이름은 덮어쓰지 않는다.
+      if (reg.created && !resumed && !process.env.ATALK_NAME) {
+        const name = `${directory.split(/[\\/]/).filter(Boolean).pop() ?? "opencode"}-${sid.slice(-5)}`
+        await api("PATCH", `/agents/${enc(agentId(sid))}`, { name }).catch(() => {})
+      }
     } catch {
       // 데몬이 없으면 다음 이벤트 때 다시 시도
     } finally {

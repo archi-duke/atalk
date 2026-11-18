@@ -46,7 +46,7 @@ const help = `atalk — 에이전트 대화방
   atalk agents [--status waiting|in_room|away|offline] [--kind KIND]
   atalk whoami
   atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭]   내 네임카드 수정 (--human: 이 에이전트를 쓰는 사람 별칭)
-  atalk config [user 별칭]                             이 PC 의 사용자 별칭 기본값 보기/설정
+  atalk config [user 별칭 | grace 분|off|default]       설정 보기/바꾸기 (사용자 별칭, 자리 비움 후 자동 퇴장 시간. off=퇴장 안 함)
   atalk unregister
 
 대화방
@@ -377,15 +377,36 @@ func main() {
 		out(v, "")
 
 	case "config":
-		if len(rest) >= 1 && rest[0] == "user" {
-			cfg, err := c.SetConfig(core.Config{User: strings.Join(rest[1:], " ")})
-			check(err)
-			out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")"))
-			break
-		}
 		cfg, err := c.Config()
 		check(err)
-		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")"))
+		if len(rest) >= 1 {
+			switch rest[0] {
+			case "user":
+				cfg.User = strings.Join(rest[1:], " ")
+			case "grace":
+				switch v := at.arg(1, "분 | off | default"); v {
+				case "off", "never", "0":
+					cfg.AwayGraceMin = new(int)
+				case "default":
+					cfg.AwayGraceMin = nil
+				default:
+					n, err := strconv.Atoi(v)
+					if err != nil || n < 0 {
+						fail("bad_arg", "grace 는 분(숫자), off(자동 퇴장 안 함), default(데몬 기본값)")
+					}
+					cfg.AwayGraceMin = &n
+				}
+			default:
+				fail("bad_arg", "atalk config [user 별칭 | grace 분|off|default]")
+			}
+			cfg, err = c.SetConfig(cfg)
+			check(err)
+		}
+		grace := "데몬 기본값 (atalk server --grace-min, 기본 30분)"
+		if g := cfg.AwayGraceMin; g != nil {
+			grace = map[bool]string{true: "자동 퇴장 안 함", false: strconv.Itoa(*g) + "분"}[*g == 0]
+		}
+		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace)
 
 	case "export":
 		room := at.arg(0, "ROOM")

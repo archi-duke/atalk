@@ -349,7 +349,7 @@ func TestHumanMessage(t *testing.T) {
 		t.Fatalf("기본 별칭: %q", m.Human)
 	}
 	// config 기본값 → 카드 덮어쓰기
-	ok(c.SetConfig("대장"))
+	ok(c.SetConfig(Config{User: "대장"}))
 	if m = ok(c.Post("claude-code_m", "r", PostInput{Body: "x", Human: true})); m.Human != "대장" {
 		t.Fatalf("config 별칭: %q", m.Human)
 	}
@@ -361,11 +361,84 @@ func TestHumanMessage(t *testing.T) {
 	if m = ok(c.Post("claude-code_m", "r", PostInput{Body: "z"})); m.Human != "" {
 		t.Fatalf("에이전트 메시지에 human: %q", m.Human)
 	}
-	_, err := c.SetConfig("대@장")
+	_, err := c.SetConfig(Config{User: "대@장"})
 	nok(t, err, "별칭은")
 	// 사람 메시지도 받는 쪽 for_me
 	u := ok(c.Unread("opencode_o", false))
 	if len(u.Messages) < 2 || u.Messages[1].Human != "사용자" || !u.Messages[1].ForMe {
 		t.Fatalf("unread: %+v", u.Messages)
 	}
+}
+
+func TestResumePrevious(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "aaa", Cwd: s("D:/proj")}))
+	ok(c.CreateRoom(a, "t", "", 0))
+	ok(c.Invite(a, "t", b))
+	ok(c.RespondInvite(b, "t", true))
+
+	// 이전 세션이 살아 있고 다른 프로세스면 이어받지 않는다
+	e.alive[101] = true
+	a2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "aaa2", Cwd: s("D:/proj"), Pid: i(101)})).Agent.ID
+	_, _, err := c.ResumePrevious(a2)
+	nok(t, err, "이어받을 이전 세션 없음")
+
+	// 다른 폴더 세션은 후보가 아님
+	delete(e.alive, 100)
+	other := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "zzz", Cwd: s("D:/other")})).Agent.ID
+	_, _, err = c.ResumePrevious(other)
+	nok(t, err, "이어받을 이전 세션 없음")
+
+	// 이전 세션 프로세스가 죽으면 자동 이어받기 → 방장 유지, 이전 카드는 offline(retired)
+	rec, from := func() (*Recovery, string) { r, f, err := c.ResumePrevious(a2); check(t, err); return r, f }()
+	if from != a || rec.Room != "t" || *ok(c.GetRoom("t")).Owner != a2 {
+		t.Fatalf("resume wrong: from=%s rec=%+v", from, rec)
+	}
+	if v := ok(c.GetAgent(a)); v.Status != "offline" || v.RetiredBy == nil || *v.RetiredBy != a2 {
+		t.Fatalf("old card: %+v", v)
+	}
+	if v := ok(c.GetAgent(a2)); v.Name != "A" {
+		t.Fatalf("이름을 이어받지 않음: %q", v.Name)
+	}
+
+	// 같은 프로세스의 새 세션(Claude /clear, opencode 새 세션)은 살아 있는 이전 세션 자리도 이어받는다
+	a3 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "aaa3", Cwd: s("D:/proj"), Pid: i(101)})).Agent.ID
+	if _, f, err := c.ResumePrevious(a3); err != nil || f != a2 {
+		t.Fatalf("same pid resume: %v %s", err, f)
+	}
+	// 이미 방에 있으면 안 함
+	_, _, err = c.ResumePrevious(a3)
+	nok(t, err, "이미 방에 있음")
+	// 이어받긴 세션이 같은 id 로 다시 등록되면 retired 해제 (방은 없음)
+	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "aaa2"})).Agent; v.RetiredBy != nil || v.Room != nil {
+		t.Fatalf("re-register: %+v", v)
+	}
+}
+
+func TestGraceConfig(t *testing.T) {
+	e := newEnv(t)
+	c := e.core() // 데몬 기본 1분
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "g", "", 0))
+	ok(c.Invite(a, "g", b))
+	ok(c.RespondInvite(b, "g", true))
+	check(t, c.MarkAway(b, "test"))
+
+	// 0 = 자동 퇴장 안 함
+	ok(c.SetConfig(Config{AwayGraceMin: i(0)}))
+	e.clock = e.clock.Add(10 * time.Hour)
+	check(t, c.Sweep())
+	if !slices.Contains(members(t, c, "g"), b) {
+		t.Fatal("grace 0 인데 퇴장됨")
+	}
+	// 120분: 아직 안 지났으면 유지, 지나면 퇴장
+	ok(c.SetConfig(Config{AwayGraceMin: i(120)}))
+	check(t, c.Sweep())
+	if slices.Contains(members(t, c, "g"), b) {
+		t.Fatal("10시간 > 120분 인데 남아 있음")
+	}
+	_, err := c.SetConfig(Config{AwayGraceMin: i(-1)})
+	nok(t, err, "away_grace_min")
 }

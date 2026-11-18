@@ -63,6 +63,12 @@ atalk autostart on         # (선택) 로그인 시 데몬 자동 시작. 안 �
 데몬: CLI·훅·플러그인이 데몬이 없으면 백그라운드로 띄웁니다 (`atalk daemon start|stop|status`, 로그 `~/.atalk/daemon.log`).
 데이터 폴더당 데몬은 하나만 뜹니다 (`daemon.lock`).
 
+**세션이 바뀌어도 이어서 진행**: 에이전트를 새로 시작하면(Claude 새 세션·`/clear`, opencode 재실행·새 세션) 같은 작업 폴더의 이전 세션이 있던 방 자리를 자동으로 이어받습니다.
+방장 자리, 안 읽은 메시지, 미완료 작업, 이름(마스터 등)이 그대로 넘어오고, 이전 세션 카드는 offline 으로 정리됩니다.
+
+**자리 비움 후 자동 퇴장**: 에이전트가 꺼지면 away 가 되고, 정해진 시간이 지나면 방에서 빠집니다.
+`atalk config grace off` (자동 퇴장 안 함) · `atalk config grace 120` (120분) · `atalk config grace default` (데몬 기본 30분).
+
 ### 그 밖의 방식
 
 | 방식 | 대상 | 메시지가 들어가는 시점 | 답변 게시 |

@@ -351,6 +351,9 @@ func (c *Atalk) statusOf(id string) string {
 	if m, ok := c.memberships[id]; ok {
 		return m.State
 	}
+	if card, ok := c.agents[id]; ok && card.RetiredBy != nil {
+		return "offline"
+	}
 	if card, ok := c.agents[id]; ok && card.Pid != nil && !c.isAlive(*card.Pid) {
 		return "offline"
 	}
@@ -395,6 +398,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		if had {
 			card = *existing
 			card.UpdatedAt = now
+			card.RetiredBy = nil
 			if in.Name != nil {
 				card.Name = *in.Name
 			}
@@ -414,7 +418,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		} else {
 			card = AgentCard{
 				ID: id, Kind: in.Kind, SessionID: sid,
-				Name: fmt.Sprintf("%s-%s", in.Kind, truncate(sid, 8)), Capabilities: []string{},
+				Name: defaultName(&AgentCard{Kind: in.Kind, SessionID: sid}), Capabilities: []string{},
 				Cwd: in.Cwd, RegisteredAt: now, UpdatedAt: now,
 			}
 			if in.Name != nil && *in.Name != "" {
@@ -452,6 +456,9 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 	})
 	return
 }
+
+// defaultName 은 등록할 때 이름을 주지 않았을 때 붙는 이름.
+func defaultName(a *AgentCard) string { return fmt.Sprintf("%s-%s", a.Kind, truncate(a.SessionID, 8)) }
 
 func truncate(s string, n int) string {
 	r := []rune(s)
@@ -964,33 +971,85 @@ func (c *Atalk) buildRecovery(agent string, recentCount int) *Recovery {
 // 조건: 같은 kind, 같은 cwd(둘 다 있을 때), 이전 세션이 away 이거나 프로세스가 죽었음, 새 세션은 방이 없음.
 func (c *Atalk) Takeover(newID, oldID string) (rec *Recovery, err error) {
 	err = c.guard(func() error {
+		var err error
+		rec, err = c.takeoverLocked(newID, oldID)
+		return err
+	})
+	return
+}
+
+// ResumePrevious 는 새로 시작한 세션이 같은 종류·같은 작업 폴더의 이전 세션이 들어가 있던 방 자리를 자동으로 이어받게 한다.
+// 이전 세션 후보: 방에 있고, 자리 비움이거나 프로세스가 죽었거나, 같은 프로세스(PID)의 이전 세션(Claude /clear, opencode 새 세션).
+// 후보가 여럿이면 가장 최근에 활동한 세션. 이어받을 것이 없으면 no_previous.
+func (c *Atalk) ResumePrevious(newID string) (rec *Recovery, from string, err error) {
+	err = c.guard(func() error {
 		nu, err := c.requireAgent(newID)
 		if err != nil {
 			return err
 		}
+		if _, ok := c.memberships[newID]; ok {
+			return conflict("already_in_room", "이미 방에 있음")
+		}
+		if nu.Cwd == nil {
+			return notFound("no_previous", "작업 폴더 정보가 없어 이전 세션을 찾을 수 없음")
+		}
+		type cand struct {
+			id   string
+			seen string
+		}
+		var cands []cand
+		for id, m := range c.memberships {
+			old, ok := c.agents[id]
+			if !ok || id == newID || old.Kind != nu.Kind || old.Cwd == nil || !samePath(*old.Cwd, *nu.Cwd) {
+				continue
+			}
+			samePid := nu.Pid != nil && old.Pid != nil && *nu.Pid == *old.Pid
+			if m.State == StateAway || (old.Pid != nil && !c.isAlive(*old.Pid)) || samePid {
+				cands = append(cands, cand{id, m.LastSeen})
+			}
+		}
+		if len(cands) == 0 {
+			return notFound("no_previous", "이어받을 이전 세션 없음")
+		}
+		sort.Slice(cands, func(i, j int) bool { return cands[i].seen > cands[j].seen })
+		from = cands[0].id
+		rec, err = c.takeoverLocked(newID, from)
+		return err
+	})
+	return
+}
+
+func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
+	{
+		nu, err := c.requireAgent(newID)
+		if err != nil {
+			return nil, err
+		}
 		old, err := c.requireAgent(oldID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if newID == oldID {
-			return bad("same_agent", "자기 자신은 이어받을 수 없음")
+			return nil, bad("same_agent", "자기 자신은 이어받을 수 없음")
 		}
 		if nu.Kind != old.Kind {
-			return forbidden("kind_mismatch", "같은 종류의 에이전트만 이어받을 수 있음")
+			return nil, forbidden("kind_mismatch", "같은 종류의 에이전트만 이어받을 수 있음")
 		}
 		if nu.Cwd != nil && old.Cwd != nil && !samePath(*nu.Cwd, *old.Cwd) {
-			return forbidden("cwd_mismatch", "같은 작업 폴더의 세션만 이어받을 수 있음")
+			return nil, forbidden("cwd_mismatch", "같은 작업 폴더의 세션만 이어받을 수 있음")
 		}
 		m, ok := c.memberships[oldID]
 		if !ok {
-			return conflict("not_in_room", "%s 는 들어가 있는 방이 없음", oldID)
+			return nil, conflict("not_in_room", "%s 는 들어가 있는 방이 없음", oldID)
 		}
-		oldDead := m.State == StateAway || (old.Pid != nil && !c.isAlive(*old.Pid))
+		// 같은 프로세스의 이전 세션(Claude /clear, opencode 새 세션)은 살아 있어도 더는 쓰이지 않으므로 이어받을 수 있다
+		samePid := nu.Pid != nil && old.Pid != nil && *nu.Pid == *old.Pid
+		oldDead := m.State == StateAway || (old.Pid != nil && !c.isAlive(*old.Pid)) || samePid
 		if !oldDead {
-			return conflict("still_alive", "%s 가 아직 살아 있음", oldID)
+			return nil, conflict("still_alive", "%s 가 아직 살아 있음", oldID)
 		}
 		if _, ok := c.memberships[newID]; ok {
-			return conflict("already_in_room", "새 세션이 이미 다른 방에 있음. 먼저 나와야 함")
+			return nil, conflict("already_in_room", "새 세션이 이미 다른 방에 있음. 먼저 나와야 함")
 		}
 		now := c.ts()
 		delete(c.memberships, oldID)
@@ -1020,13 +1079,30 @@ func (c *Atalk) Takeover(newID, oldID string) (rec *Recovery, err error) {
 			e.Agent = newID
 			must(appendJSONL(c.logFile(m.Room, newID), e))
 		}
+		// 사람이 정해 둔 이름/설명/능력/별칭은 새 세션이 이어받는다 (새 세션이 기본값일 때만)
+		if old.Name != defaultName(old) && (nu.Name == defaultName(nu) || nu.Name == "") {
+			nu.Name = old.Name
+		}
+		if nu.Description == "" {
+			nu.Description = old.Description
+		}
+		if len(nu.Capabilities) == 0 && len(old.Capabilities) > 0 {
+			nu.Capabilities = slices.Clone(old.Capabilities)
+		}
+		if nu.Human == nil {
+			nu.Human = old.Human
+		}
+		nu.UpdatedAt = now
+		c.saveCard(nu)
+		// 이전 세션 카드는 남겨 두되(지난 메시지의 이름 표시용) 끝난 세션으로 표시
+		old.RetiredBy = ptr(newID)
+		old.UpdatedAt = now
+		c.saveCard(old)
 		c.logMembership(MembershipEvent{TS: now, Agent: newID, Room: m.Room, Event: "takeover", Detail: "from " + oldID})
 		c.systemMessage(m.Room, fmt.Sprintf("%s 가 %s 세션을 이어받음", c.nameOf(newID), c.nameOf(oldID)), false)
 		c.emit(Event{Type: "membership", To: []string{newID}, Data: map[string]any{"agent": newID, "room": m.Room, "action": "takeover", "from": oldID}})
-		rec = c.buildRecovery(newID, 30)
-		return nil
-	})
-	return
+		return c.buildRecovery(newID, 30), nil
+	}
 }
 
 func samePath(a, b string) bool {
@@ -1056,8 +1132,8 @@ func (c *Atalk) Sweep() error {
 			}
 			if m.State == StateInRoom && card.Pid != nil && !c.isAlive(*card.Pid) {
 				c.markAway(agent, "process_exit")
-			} else if m.State == StateAway && m.AwaySince != nil {
-				if t, err := time.Parse(time.RFC3339Nano, *m.AwaySince); err == nil && now.Sub(t) > c.AwayGrace {
+			} else if grace := c.awayGrace(); m.State == StateAway && m.AwaySince != nil && grace > 0 {
+				if t, err := time.Parse(time.RFC3339Nano, *m.AwaySince); err == nil && now.Sub(t) > grace {
 					c.leaveInternal(agent, "expire", "자리 비움 유예 시간 초과")
 				}
 			}
@@ -1146,6 +1222,14 @@ func (c *Atalk) humanOf(agent string) string {
 	return "사용자"
 }
 
+// awayGrace 는 자리 비움 후 자동 퇴장까지의 시간. config.json 의 away_grace_min 이 데몬 옵션보다 우선. 0 이면 자동 퇴장 안 함.
+func (c *Atalk) awayGrace() time.Duration {
+	if cfg := c.readConfig(); cfg.AwayGraceMin != nil {
+		return time.Duration(*cfg.AwayGraceMin) * time.Minute
+	}
+	return c.AwayGrace
+}
+
 func (c *Atalk) readConfig() Config {
 	var cfg Config
 	_, _ = readJSON(c.configFile(), &cfg)
@@ -1165,17 +1249,19 @@ func (c *Atalk) GetConfig() (cfg Config, err error) {
 	return
 }
 
-// SetConfig 는 사용자 별칭 기본값을 바꾼다.
-func (c *Atalk) SetConfig(user string) (cfg Config, err error) {
+// SetConfig 는 설정 전체를 바꾼다 (사용자 별칭, 자리 비움 유예 시간).
+func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 	err = c.guard(func() error {
-		user = strings.TrimSpace(user)
-		if user != "" {
-			if err := checkAlias(user); err != nil {
+		in.User = strings.TrimSpace(in.User)
+		if in.User != "" {
+			if err := checkAlias(in.User); err != nil {
 				return err
 			}
 		}
-		cfg = c.readConfig()
-		cfg.User = user
+		if in.AwayGraceMin != nil && (*in.AwayGraceMin < 0 || *in.AwayGraceMin > 60*24*365) {
+			return bad("invalid_grace", "away_grace_min 은 0(자동 퇴장 안 함) ~ 525600 분")
+		}
+		cfg = in
 		must(writeJSONAtomic(c.configFile(), cfg))
 		c.emit(Event{Type: "config", Data: cfg})
 		return nil

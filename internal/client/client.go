@@ -132,6 +132,16 @@ func (c *Client) Export(room string) ([]byte, error) {
 	return b, nil
 }
 
+// ResumePrevious 는 같은 폴더의 이전 세션이 있던 방 자리를 이어받는다. 없으면 code no_previous 오류.
+func (c *Client) ResumePrevious(id string) (*core.Recovery, string, error) {
+	var out struct {
+		Recovery *core.Recovery `json:"recovery"`
+		From     string         `json:"from"`
+	}
+	err := c.call("POST", "/agents/"+esc(id)+"/resume", map[string]any{}, &out, 0)
+	return out.Recovery, out.From, err
+}
+
 func (c *Client) Config() (cfg core.Config, err error) {
 	var out struct {
 		Config core.Config `json:"config"`

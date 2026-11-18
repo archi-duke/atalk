@@ -12,7 +12,8 @@ type AgentCard struct {
 	Capabilities []string `json:"capabilities"`
 	Cwd          *string  `json:"cwd"`
 	Pid          *int     `json:"pid"`
-	Human        *string  `json:"human,omitempty"` // 이 에이전트를 쓰는 사람의 별칭 (없으면 config.json 의 user)
+	Human        *string  `json:"human,omitempty"`      // 이 에이전트를 쓰는 사람의 별칭 (없으면 config.json 의 user)
+	RetiredBy    *string  `json:"retired_by,omitempty"` // 다른 세션이 이 세션의 자리를 이어받았으면 그 세션 id (상태는 offline)
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -94,6 +95,8 @@ type Message struct {
 // Config 는 <root>/config.json. 이 PC 의 공통 설정.
 type Config struct {
 	User string `json:"user"` // 사용자 별칭 기본값
+	// AwayGraceMin 은 자리 비움(away) 후 자동 퇴장까지의 분. 0 이면 자동 퇴장하지 않음. 없으면 데몬 옵션(기본 30분).
+	AwayGraceMin *int `json:"away_grace_min,omitempty"`
 }
 
 var LogStates = []string{"received", "working", "done", "skipped", "failed"}
