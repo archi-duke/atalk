@@ -123,6 +123,9 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	}
 	if rec != nil {
 		lines = append(lines, "", fmt.Sprintf(title, rec.Room, rec.Role))
+		if p := c.Purpose(rec.Room); p != "" {
+			lines = append(lines, p)
+		}
 		if kind == "claude-code" {
 			lines = append(lines, fmt.Sprintf("메시지 알림을 받으려면 Monitor 도구로 `%s listen` 을 실행하세요 (atalk 스킬의 \"메시지 받기\" 참고).", exe))
 		}
@@ -194,6 +197,9 @@ func stop(c *client.Client, kind string, in Input) any {
 		room = *u.Room
 	}
 	parts := []string{fmt.Sprintf("[ATalk] %s 방에서 새 메시지가 왔습니다. 처리하세요.", room)}
+	if p := c.Purpose(room); p != "" {
+		parts = append(parts, p)
+	}
 	if len(u.Messages) > 0 {
 		parts = append(parts, client.FormatMessages(u.Messages, c.Names()))
 	}

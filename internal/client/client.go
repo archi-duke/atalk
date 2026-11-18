@@ -259,6 +259,24 @@ func (c *Client) Room(room string) (core.RoomView, error) {
 	return r.Room, err
 }
 
+// CreateRoomWith 는 설명(목적)과 함께 방을 만든다. agent 가 "" 이면 사람이 방장 없이 만든 방.
+func (c *Client) CreateRoomWith(agent, roomID, title, description string) (core.RoomView, error) {
+	var out struct {
+		Room core.RoomView `json:"room"`
+	}
+	err := c.call("POST", "/rooms", map[string]string{"agent": agent, "room_id": roomID, "title": title, "description": description}, &out, 0)
+	return out.Room, err
+}
+
+// SetRoomDescription 은 방 설명을 바꾼다.
+func (c *Client) SetRoomDescription(agent, room, desc string) (core.RoomView, error) {
+	var out struct {
+		Room core.RoomView `json:"room"`
+	}
+	err := c.call("PATCH", "/rooms/"+esc(room), map[string]any{"agent": agent, "description": desc}, &out, 0)
+	return out.Room, err
+}
+
 func (c *Client) CreateRoom(agent, roomID, title string) (core.RoomView, error) {
 	var r struct{ Room core.RoomView }
 	err := c.call("POST", "/rooms", map[string]string{"agent": agent, "room_id": roomID, "title": title}, &r, 0)
@@ -442,6 +460,17 @@ func AsInbox(msgs []core.Message) []core.InboxMessage {
 		out[i] = core.InboxMessage{Message: m, ForMe: true}
 	}
 	return out
+}
+
+// Purpose 는 방 목적 한 줄 ("[방 목적] …"). 설명이 없거나 못 읽으면 "".
+func (c *Client) Purpose(room string) string {
+	if room == "" {
+		return ""
+	}
+	if r, err := c.Room(room); err == nil && r.Description != "" {
+		return "[" + room + " 방 목적] " + r.Description
+	}
+	return ""
 }
 
 // HumanPrefix 는 에이전트 입력창에서 "사람이 대화방에 직접 보내는 말" 을 표시하는 접두어.

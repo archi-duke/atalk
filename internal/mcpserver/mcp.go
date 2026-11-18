@@ -199,14 +199,15 @@ func register(srv *mcp.Server, st *state) {
 
 	tool(srv, "atalk_create_room", "대화방을 만들고 방장이 된다. 다른 방에 있었다면 자동으로 나온다.",
 		func(in struct {
-			RoomID string `json:"room_id" jsonschema:"문자/숫자/-/_ 1~64자"`
-			Title  string `json:"title,omitempty"`
+			RoomID      string `json:"room_id" jsonschema:"문자/숫자/-/_ 1~64자"`
+			Title       string `json:"title,omitempty"`
+			Description string `json:"description,omitempty" jsonschema:"방의 목적 (에이전트들에게 전해짐)"`
 		}) (*mcp.CallToolResult, error) {
 			me, err := st.me()
 			if err != nil {
 				return nil, err
 			}
-			r, err := c.CreateRoom(me, in.RoomID, in.Title)
+			r, err := c.CreateRoomWith(me, in.RoomID, in.Title, in.Description)
 			if err != nil {
 				return nil, err
 			}

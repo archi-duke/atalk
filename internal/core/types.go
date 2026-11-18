@@ -65,14 +65,18 @@ type Policy struct {
 
 // Room 은 rooms/<room>/room.json. 멤버 목록은 없다 (memberships.json 이 원본).
 type Room struct {
-	RoomID    string        `json:"room_id"`
-	Title     string        `json:"title"`
-	Owner     *string       `json:"owner"`
-	CreatedAt string        `json:"created_at"`
-	ClosedAt  *string       `json:"closed_at"`
-	Invites   []Invite      `json:"invites"`
-	Requests  []JoinRequest `json:"requests"`
-	Policy    Policy        `json:"policy"`
+	RoomID string `json:"room_id"`
+	Title  string `json:"title"`
+	// Description 은 방의 목적·설명. 에이전트에게 초대·메시지와 함께 전해진다.
+	Description string        `json:"description,omitempty"`
+	Owner       *string       `json:"owner"`
+	CreatedAt   string        `json:"created_at"`
+	ClosedAt    *string       `json:"closed_at"`
+	Invites     []Invite      `json:"invites"`
+	Requests    []JoinRequest `json:"requests"`
+	Policy      Policy        `json:"policy"`
+	// Persistent 인 방(사람이 화면에서 방장 없이 만든 방)은 멤버가 모두 나가도 닫히지 않고 방장 없이 남는다.
+	Persistent bool `json:"persistent,omitempty"`
 }
 
 var AgentMessageTypes = []string{"chat", "task", "result", "status"}

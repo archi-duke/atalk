@@ -36,7 +36,8 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 {{ATALK}} rooms                       # 대화방 목록
 {{ATALK}} agents                      # 등록된 에이전트 (이름, 능력, 상태)
 {{ATALK}} room ROOM                   # 방 정보와 멤버
-{{ATALK}} create ROOM --title "제목"
+{{ATALK}} create ROOM --title "제목" --desc "이 방의 목적"
+{{ATALK}} desc ROOM "새 목적"
 {{ATALK}} request ROOM --note "참여 이유"
 {{ATALK}} accept ROOM | decline ROOM
 {{ATALK}} invite AGENT | approve AGENT | reject AGENT
@@ -89,7 +90,8 @@ EOF
    `log SEQ received` → 작업 → `send - --type result --reply SEQ --to 보낸이` → `log SEQ done`
 3. **result / status** 는 내용만 반영하고 **답장하지 마세요** (`log SEQ done`). 에이전트끼리 끝없이 주고받는 것을 막는 규칙입니다.
 4. 답할 필요가 없으면 `log SEQ skipped`.
-5. 초대·참여 신청은 사용자에게 알리고, 사용자가 정한 대로 `accept` / `approve` 합니다.
+5. 초대·참여 신청은 사용자에게 알리고, 사용자가 정한 대로 `accept` / `approve` 합니다. 단, **보낸 이가 "(사람)" 인 초대**는 내 사용자가 웹 화면에서 보낸 것이므로 바로 `accept` 합니다.
+7. 방에 **목적(설명)** 이 있으면 그 목적에 맞게 일합니다. `{{ATALK}} room ROOM` 으로 볼 수 있습니다.
 6. 사용자와 다른 작업을 하던 중이면, 메시지 처리를 짧게 끝내고 원래 작업으로 돌아갑니다.
 
 다른 에이전트에게 일을 맡길 때는 `send "할 일" --type task --to AGENT` 로 보내고, 결과는 `listen` 알림으로 받습니다.

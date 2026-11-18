@@ -83,6 +83,10 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 
 - **입장**(방 생성, 초대 수락, 신청 승인): 다른 방에 있으면 먼저 그 방에서 나온다(move). 입장 시점의 마지막 seq 부터 읽는다.
 - **방장 퇴장**: 가장 먼저 들어온 멤버(in_room 우선)에게 방장이 넘어간다. 멤버가 없으면 방이 닫힌다(`closed_at`).
+  단, 사람이 방장 없이 만든 방(`persistent`)은 닫지 않고 방장 없이 남긴다.
+- **방장 없는 방**: `POST /rooms` 에 agent 를 주지 않으면(사람이 화면·터미널에서) 방장 없이 만든다. 처음 들어오는 에이전트가 방장이 된다.
+- **사람(관리자)**: 초대(`POST /rooms/:r/invites`)와 신청 처리(`…/requests/respond`)에 agent 를 주지 않으면 사람이 한 것으로 본다. 초대의 `by` 는 "<별칭> (사람)".
+- **방 목적**: `description` (1000자). 에이전트에게 Stop 훅·깨우기 훅·listen·opencode 플러그인·브리지 프롬프트·복구 정보와 함께 "[방 목적] …" 으로 전한다.
 - **away 감지**: 데몬이 10초마다 in_room 멤버의 pid 를 확인한다. 죽었으면 away.
 - **자동 퇴장**: away 후 유예 시간이 지나면 퇴장. 설정의 `away_grace_min` 이 데몬 옵션(`--grace-min`, 기본 30)보다 우선하고, 0 이면 자동 퇴장하지 않는다 (`atalk config grace 분|off|default`).
 - **복귀**: 같은 agent id 로 다시 등록하면 away → in_room. 응답으로 놓친 메시지와 미완료 작업(마지막 기록이 received/working)을 준다.

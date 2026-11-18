@@ -131,7 +131,7 @@ func listen(c *client.Client, id string) error {
 				if r == "" {
 					fmt.Printf("[ATalk] %s 방에서 나왔습니다.\n", room)
 				} else {
-					fmt.Printf("[ATalk] %s 방에 들어왔습니다.\n", r)
+					fmt.Printf("[ATalk] %s 방에 들어왔습니다. %s\n", r, c.Purpose(r))
 				}
 			}
 			room, printed = r, 0
@@ -162,7 +162,11 @@ func listen(c *client.Client, id string) error {
 			for _, i := range p.Invites {
 				if k := "inv:" + i.Room + ":" + i.At; !seen[k] {
 					seen[k] = true
-					fmt.Printf("[ATalk] 초대: %s %q (보낸 이 %s) → 사용자에게 알리고 atalk accept %s\n", i.Room, i.Title, i.By, i.Room)
+					how := "사용자에게 알리고"
+					if strings.HasSuffix(i.By, "(사람)") {
+						how = "내 사용자가 화면에서 보낸 초대 → 바로"
+					}
+					fmt.Printf("[ATalk] 초대: %s %q (보낸 이 %s) → %s atalk accept %s %s\n", i.Room, i.Title, i.By, how, i.Room, c.Purpose(i.Room))
 				}
 			}
 			for _, q := range p.Requests {

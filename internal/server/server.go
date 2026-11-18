@@ -295,12 +295,13 @@ func (s *Server) routes() http.Handler {
 			Agent       string `json:"agent"`
 			RoomID      string `json:"room_id"`
 			Title       string `json:"title"`
+			Description string `json:"description"`
 			MaxMessages int    `json:"max_messages"`
 		}
-		if err := readActor(r, &b, &b.Agent); err != nil {
+		if err := readBody(r, &b); err != nil { // agent 가 없으면 사람이 방장 없이 만든 방
 			return nil, err
 		}
-		room, err := c.CreateRoom(b.Agent, b.RoomID, b.Title, b.MaxMessages)
+		room, err := c.CreateRoomWith(b.Agent, b.RoomID, b.Title, b.Description, b.MaxMessages)
 		return map[string]any{"room": room}, err
 	})
 	h("GET /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
@@ -309,15 +310,21 @@ func (s *Server) routes() http.Handler {
 	})
 	h("PATCH /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
-			Agent       string `json:"agent"` // 바꾼 에이전트 (사람이 화면에서 바꾸면 비움)
-			Title       string `json:"title"`
-			MaxMessages int    `json:"max_messages"`
+			Agent       string  `json:"agent"` // 바꾼 에이전트 (사람이 화면에서 바꾸면 비움)
+			Title       string  `json:"title"`
+			Description *string `json:"description"`
+			MaxMessages int     `json:"max_messages"`
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
 		var room core.RoomView
 		var err error
+		if b.Description != nil {
+			if room, err = c.SetRoomDescription(r.PathValue("r"), *b.Description, b.Agent); err != nil || (b.Title == "" && b.MaxMessages == 0) {
+				return map[string]any{"room": room}, err
+			}
+		}
 		if b.MaxMessages > 0 {
 			if room, err = c.SetRoomLimit(r.PathValue("r"), b.MaxMessages); err != nil || b.Title == "" {
 				return map[string]any{"room": room}, err
@@ -332,7 +339,7 @@ func (s *Server) routes() http.Handler {
 	})
 	h("POST /rooms/{r}/invites", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct{ Agent, Target string }
-		if err := readActor(r, &b, &b.Agent); err != nil {
+		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
 		room, err := c.Invite(b.Agent, r.PathValue("r"), b.Target)
@@ -363,7 +370,7 @@ func (s *Server) routes() http.Handler {
 			Target  string `json:"target"`
 			Approve *bool  `json:"approve"`
 		}
-		if err := readActor(r, &b, &b.Agent); err != nil {
+		if err := readBody(r, &b); err != nil { // agent 가 없으면 사람(관리자)
 			return nil, err
 		}
 		room, err := c.RespondRequest(b.Agent, r.PathValue("r"), b.Target, b.Approve == nil || *b.Approve)
