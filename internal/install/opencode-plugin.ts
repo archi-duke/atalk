@@ -96,9 +96,28 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
   async function notifyPending(st: State) {
     const p = await api("GET", `/agents/${enc(st.id)}/pending`)
     const lines: string[] = []
+    // 방에 없을 때 받은 초대는 자동 수락 (ATALK_AUTO_ACCEPT=0 이면 끔).
+    // 이미 방에 있으면 수락하는 순간 그 방에서 나가게 되므로 알림만 한다.
+    const auto = process.env.ATALK_AUTO_ACCEPT !== "0"
+    let inRoom = false
+    if (auto && (p.invites ?? []).length) {
+      try {
+        inRoom = !!(await api("GET", `/agents/${enc(st.id)}`)).agent?.room
+      } catch {}
+    }
     for (const i of p.invites ?? []) {
       const k = `inv:${i.room}:${i.at}`
-      if (!st.seen.has(k)) st.seen.add(k), lines.push(`ATalk 초대: ${i.room} — "/atalk accept ${i.room}" 으로 수락`)
+      if (st.seen.has(k)) continue
+      st.seen.add(k)
+      if (auto && !inRoom) {
+        try {
+          await api("POST", `/rooms/${enc(i.room)}/invites/respond`, { agent: st.id, accept: true })
+          inRoom = true
+          lines.push(`ATalk: ${i.room} 방 초대를 자동 수락했습니다`)
+          continue
+        } catch {}
+      }
+      lines.push(`ATalk 초대: ${i.room} — "/atalk accept ${i.room}" 으로 수락 (수락하면 지금 방에서 나옵니다)`)
     }
     for (const q of p.requests ?? []) {
       const k = `req:${q.room}:${q.agent}:${q.at}`

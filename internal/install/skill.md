@@ -22,7 +22,7 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | `create ROOM [제목]` | `create ROOM --title "제목"` → **메시지 받기 시작** |
 | `join ROOM` | `request ROOM` (방장 승인 필요) → **메시지 받기 시작** (승인되면 알림이 옴) |
 | `accept ROOM` | 받은 초대 수락 `accept ROOM` → **메시지 받기 시작** |
-| `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id |
+| `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id. opencode 는 방에 없으면 자동 수락함 |
 | `approve AGENT` / `reject AGENT` | (방장) 참여 신청 처리 |
 | `send TEXT` | 방 전체에 chat. 특정 에이전트에게 일을 시킬 때는 `--type task --to AGENT` |
 | `leave` | 방에서 나가기 |
