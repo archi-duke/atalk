@@ -100,7 +100,12 @@
   .flash { animation:flash 1.2s; }
   @keyframes flash { 0%,40% { box-shadow:0 0 0 3px var(--accent); } 100% { box-shadow:none; } }
 
-  /* 참여 에이전트 상태 (대화창 아래) */
+  /* 참여 에이전트 상태: 대화방 카드 안 (좁은 화면에서 대화를 볼 때는 대화창 아래에도) */
+  .row .pres { display:flex; flex-wrap:wrap; gap:2px 10px; margin-top:3px; font-size:11px; color:var(--muted); }
+  .row .pres span { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; }
+  .row .pres .busy-t { color:var(--task); font-weight:600; }
+  .row .pres .off-t { opacity:.65; }
+  @media (min-width: 761px) { .presence { display:none !important; } }
   .presence { display:flex; flex-wrap:wrap; gap:4px 12px; padding:5px 14px; font-size:11.5px; color:var(--muted); background:var(--chat); border-top:1px solid var(--line); }
   .presence:empty { display:none; }
   .presence .p { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
@@ -170,7 +175,7 @@ const KIND_COLOR = { "claude-code": "#d0704a", opencode: "#3b6fd8", codex: "#139
 const STATE_KO = { received: "받음", working: "처리 중", done: "완료", skipped: "건너뜀", failed: "실패" };
 const TYPE_KO = { task: "작업 요청", result: "결과", status: "상태" };
 
-let tab = "rooms", selected = null, agents = {}, rooms = [], previews = {};
+let tab = "rooms", selected = null, agents = {}, rooms = [], previews = {}, roomLogs = {};
 let viewer = localGet("atalk.viewer") || "human";
 
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
@@ -213,6 +218,9 @@ async function loadSide() {
     const m = await j("/rooms/" + encodeURIComponent(x.room_id) + "/messages?after=" + (x.last_seq - 1) + "&limit=1");
     previews[x.room_id] = (m.messages || [])[0];
   }));
+  await Promise.all(rooms.filter((x) => !x.closed_at && x.members.length).map(async (x) => {
+    roomLogs[x.room_id] = (await j("/rooms/" + encodeURIComponent(x.room_id) + "/logs")).logs || [];
+  }));
   renderSide();
 }
 function renderSide() {
@@ -231,9 +239,16 @@ function renderSide() {
     const prev = p ? (p.type === "system" ? clean(p.body) : (p.human ? p.human + "@" : "") + nameOf(p.from) + ": " + clean(p.body)) : "메시지 없음";
     return '<div class="row' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><div class="room-ico">' + esc([...(x.title || x.room_id)][0]) + "</div>" +
       '<div class="txt"><div class="top"><span class="title">' + esc(x.title || x.room_id) + ' <span class="when">' + x.members.length + "</span>" + (x.closed_at ? ' <span class="when">닫힘</span>' : "") +
-      '</span><span class="when">' + shortWhen(p?.ts) + '</span></div><div class="prev">' + esc(prev.split("\n")[0]) + "</div></div></div>";
+      '</span><span class="when">' + shortWhen(p?.ts) + '</span></div><div class="prev">' + esc(prev.split("\n")[0]) + "</div>" + cardPresence(x) + "</div></div>";
   }).join("") || '<div class="empty">대화방 없음</div>';
   document.querySelectorAll(".row[data-r]").forEach((el) => (el.onclick = () => openRoom(el.dataset.r)));
+}
+// 대화방 카드 안의 참여 에이전트 상태: "● 마스터  ● 오1 작업중 #5  ○ 오2"
+function cardPresence(room) {
+  if (room.closed_at || !room.members.length) return "";
+  return '<div class="pres">' + presenceRows(room, roomLogs[room.room_id] || []).map((r) =>
+    '<span class="' + (r.cls === "off" ? "off-t" : r.cls === "busy" ? "busy-t" : "") + '" title="' + esc(r.m.name + ": " + r.title) + '"><span class="pd ' + r.cls + '"></span>' +
+    esc(r.m.name) + (r.cls === "idle" ? "" : " " + esc(r.text)) + "</span>").join("") + "</div>";
 }
 document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
   tab = b.dataset.tab;
@@ -336,19 +351,22 @@ function renderChat(scroll) {
 // ───────── 참여 에이전트 상태 ─────────
 // 작업중: 처리 기록상 받았거나(received) 처리 중(working)인데 아직 끝나지 않은 메시지가 있음
 // 대기: 방에 있고 처리 중인 메시지 없음 · 비활성: 자리 비움(에이전트가 꺼짐)
-function renderPresence(room, logs) {
+function presenceRows(room, logs) {
   const last = {}; // agent → seq → 마지막 상태
   for (const e of logs) (last[e.agent] ||= {})[e.seq] = e.state;
-  const items = room.members.map((m) => {
+  return room.members.map((m) => {
     const open = Object.entries(last[m.agent] || {}).filter(([, st]) => st === "received" || st === "working").map(([seq]) => Number(seq));
-    const owner = m.role === "owner" ? " (방장)" : "";
-    if (m.state === "away")
-      return '<span class="p off-txt" title="자리 비움: 에이전트가 꺼져 있음"><span class="pd off"></span><b>' + esc(m.name) + "</b>" + owner + " 비활성</span>";
-    if (open.length)
-      return '<span class="p" title="처리 중인 메시지: #' + open.join(", #") + '"><span class="pd busy"></span><b>' + esc(m.name) + "</b>" + owner + " 작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : "") + "</span>";
-    return '<span class="p"><span class="pd idle"></span><b>' + esc(m.name) + "</b>" + owner + " 대기</span>";
+    if (m.state === "away") return { m, cls: "off", text: "비활성", title: "자리 비움: 에이전트가 꺼져 있음" };
+    if (open.length) return { m, cls: "busy", text: "작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : ""), title: "처리 중인 메시지: #" + open.join(", #") };
+    return { m, cls: "idle", text: "대기", title: "방에 있고 처리 중인 메시지 없음" };
   });
-  $("#presence").innerHTML = DATA ? "" : items.join("");
+}
+function renderPresence(room, logs) {
+  const rows = presenceRows(room, logs);
+  const owner = (m) => (m.role === "owner" ? " (방장)" : "");
+  // 좁은 화면: 대화창 아래 한 줄
+  $("#presence").innerHTML = DATA ? "" : rows.map((r) =>
+    '<span class="p' + (r.cls === "off" ? " off-txt" : "") + '" title="' + esc(r.title) + '"><span class="pd ' + r.cls + '"></span><b>' + esc(r.m.name) + "</b>" + owner(r.m) + " " + esc(r.text) + "</span>").join("");
 }
 
 // ───────── 입력 (사람 메시지) ─────────
