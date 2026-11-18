@@ -68,6 +68,11 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       await ensureDaemon()
       const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
+      else {
+        // 처음 등록할 때만 기본 이름 (폴더명-세션ID끝자리). 나중에 atalk card --name 으로 바꾼 이름은 덮어쓰지 않는다.
+        const exists = await api("GET", `/agents/${enc(agentId(sid))}`).then(() => true, () => false)
+        if (!exists) body.name = `${directory.split(/[\\/]/).filter(Boolean).pop() ?? "opencode"}-${sid.slice(-5)}`
+      }
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
       await api("POST", "/agents", body)
@@ -141,8 +146,8 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       } catch {}
       let prompt = `[ATalk] ${room} 방에서 새 메시지가 왔습니다. 나(${st.id})에게 온 메시지를 처리하세요.\n\n${format(msgs, names)}\n\n`
       prompt += replyTo
-        ? `작업을 마친 뒤 마지막 답변에 결과 본문을 쓰세요. 마지막 답변이 자동으로 대화방에 result 로 게시되므로 atalk send 로 따로 보내지 마세요. 답할 필요가 없으면 ${SKIP} 만 출력하세요.`
-        : `이 메시지들은 결과/상태 알림입니다. 참고만 하고 ${SKIP} 를 출력하세요 (자동 게시되지 않습니다).`
+        ? `작업을 마친 뒤 마지막 답변에 결과 본문을 쓰세요. 마지막 답변이 자동으로 대화방에 result 로 게시되고 처리 기록도 플러그인이 남기므로, atalk send 나 atalk log 를 쓰지 마세요. 답할 필요가 없으면 ${SKIP} 만 출력하세요.`
+        : `이 메시지들은 결과/상태 알림입니다. 참고만 하고 ${SKIP} 를 출력하세요 (자동 게시되지 않으며, 처리 기록은 플러그인이 남깁니다. atalk log 를 쓰지 마세요).`
       for (const m of work) await log(m, "working", "opencode 세션에 전달")
 
       const r: any = await client.session.prompt({ path: { id: sid }, body: { parts: [{ type: "text", text: prompt }] } })
@@ -173,6 +178,29 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     }
   }
 
+  // 일반 TUI 로 실행하면 첫 메시지 전에는 세션이 없어서 ATalk 에 보이지 않는다.
+  // 그래서 시작하자마자 세션을 만들어 등록하고 TUI 를 그 세션으로 옮긴다.
+  // (-c/--session 으로 이어서 열거나 run/serve 등 다른 명령이면 하지 않는다)
+  let foreignActivity = false
+  const argv = process.argv.slice(1).map(String)
+  const skipEager = ["run", "serve", "web", "attach", "acp", "mcp", "export", "import", "-c", "--continue", "-s", "--session", "--prompt"]
+  if (!argv.some((a) => skipEager.includes(a) || a.startsWith("--session=") || a.startsWith("--continue"))) {
+    setTimeout(async () => {
+      try {
+        if (sessions.size || foreignActivity) return
+        const r: any = await client.session.create({ body: { title: process.env.ATALK_NAME ?? "ATalk" } })
+        const sid = r?.data?.id
+        if (!sid) return
+        await track(sid)
+        for (const wait of [0, 2500]) {
+          await new Promise((res) => setTimeout(res, wait))
+          if (foreignActivity) break
+          await client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: sid } } as any }).catch(() => {})
+        }
+      } catch {}
+    }, 2500)
+  }
+
   const timer = setInterval(() => {
     for (const sid of sessions.keys()) void pump(sid)
   }, POLL_MS)
@@ -182,6 +210,8 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       try {
         const e: any = event
         const p = e.properties ?? {}
+        // 사용자가 다른 세션에서 이미 일을 시작했으면 TUI 를 옮기지 않는다
+        if (e.type === "session.status" && p.status?.type === "busy" && !sessions.has(p.sessionID)) foreignActivity = true
         switch (e.type) {
           case "session.created":
           case "session.updated":

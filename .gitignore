@@ -1,7 +1,7 @@
 ts/node_modules/
 node_modules/
 /atalk.exe
-/atalk-dev.exe
+/atalk-*.exe
 /atalk
 .atalk-data/
 *.exe~
