@@ -10,9 +10,12 @@ package server
 //	                                 → 위치 파일 저장 후 데몬이 새 위치로 다시 시작
 
 import (
+	"archive/zip"
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,6 +26,8 @@ import (
 
 	"atalk/internal/core"
 	"atalk/internal/daemon"
+	"atalk/internal/install"
+	"atalk/internal/paths"
 )
 
 func (s *Server) adminRoutes(h func(string, handler)) {
@@ -32,12 +37,87 @@ func (s *Server) adminRoutes(h func(string, handler)) {
 			port = portOf(s.ln.Addr().String())
 		}
 		size, files := dirSize(s.Core.Root)
+		tc, tb := s.Core.TrashInfo()
 		return map[string]any{
 			"root": s.Core.Root, "pid": os.Getpid(), "port": port,
-			"root_pointer": daemon.RootPointerFile(), "env_root": os.Getenv("ATALK_ROOT"),
-			"autostart": daemon.Autostart(), "data_bytes": size, "data_files": files,
-			"os": runtime.GOOS,
+			"root_pointer": daemon.RootPointerFile(), "env_root": os.Getenv("ATALK_ROOT"), "env_port": os.Getenv("ATALK_PORT"),
+			"config_dir": paths.ConfigDir(), "autostart": daemon.Autostart(), "data_bytes": size, "data_files": files,
+			"trash_count": tc, "trash_bytes": tb, "os": runtime.GOOS,
 		}, nil
+	})
+	h("POST /admin/trash/empty", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		n, err := s.Core.EmptyTrash(0)
+		return map[string]any{"removed": n}, err
+	})
+	h("GET /admin/backup", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		name := "atalk-backup-" + time.Now().Format("20060102-1504") + ".zip"
+		w.Header().Set("content-type", "application/zip")
+		w.Header().Set("content-disposition", `attachment; filename="`+name+`"`)
+		// 복사하는 동안 파일이 바뀌지 않게 잠근다
+		err := s.Core.Exclusive(func() error { return zipTree(s.Core.Root, w) })
+		if err != nil {
+			log.Printf("backup: %v", err)
+		}
+		return skip{}, nil
+	})
+	h("PUT /admin/port", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Port int `json:"port"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		if os.Getenv("ATALK_PORT") != "" || os.Getenv("ATALK_URL") != "" {
+			return nil, &core.Error{Status: 400, Code: "env_port", Message: "ATALK_PORT/ATALK_URL 환경 변수가 있어 포트를 바꿀 수 없음"}
+		}
+		if b.Port < 1024 || b.Port > 65535 {
+			return nil, &core.Error{Status: 400, Code: "bad_port", Message: "포트는 1024 ~ 65535"}
+		}
+		if s.ln != nil && portOf(s.ln.Addr().String()) == b.Port {
+			return nil, &core.Error{Status: 400, Code: "same_port", Message: "지금 쓰는 포트와 같음"}
+		}
+		if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", b.Port)); err != nil {
+			return nil, &core.Error{Status: 400, Code: "port_busy", Message: fmt.Sprintf("포트 %d 를 다른 프로그램이 쓰고 있음", b.Port)}
+		} else {
+			ln.Close()
+		}
+		if err := paths.SetPort(b.Port); err != nil {
+			return nil, err
+		}
+		s.RestartPort = b.Port
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			s.Restart <- struct{}{}
+		}()
+		return map[string]any{"port": b.Port, "url": fmt.Sprintf("http://127.0.0.1:%d/", b.Port), "restarting": true}, nil
+	})
+	h("GET /admin/integrations", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]any{"status": install.Check(install.DefaultPaths())}, nil
+	})
+	h("POST /admin/integrations/install", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Target string `json:"target"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		p := install.DefaultPaths()
+		var done []string
+		var err error
+		switch b.Target {
+		case "claude":
+			done, err = install.Claude(p)
+		case "opencode":
+			done, err = install.Opencode(p)
+		case "path":
+			done, err = install.Path()
+		default:
+			return nil, &core.Error{Status: 400, Code: "bad_target", Message: "target 은 claude | opencode | path"}
+		}
+		if err != nil {
+			return nil, &core.Error{Status: 400, Code: "install_failed", Message: err.Error()}
+		}
+		return map[string]any{"done": done, "status": install.Check(p)}, nil
 	})
 	h("PUT /admin/autostart", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
@@ -195,6 +275,38 @@ func (s *Server) moveRoot(target, mode string) (string, error) {
 		return "", bad("pointer", "위치 파일을 저장하지 못함: %v", err)
 	}
 	return target, nil
+}
+
+// zipTree 는 데이터 폴더를 zip 으로 쓴다 (daemon.lock, daemon.log 제외).
+func zipTree(root string, w io.Writer) error {
+	zw := zip.NewWriter(w)
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		if rel == "daemon.lock" || rel == "daemon.log" {
+			return nil
+		}
+		in, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		fi, _ := in.Stat()
+		hdr, _ := zip.FileInfoHeader(fi)
+		hdr.Name, hdr.Method = filepath.ToSlash(rel), zip.Deflate
+		out, err := zw.CreateHeader(hdr)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(out, in)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	return zw.Close()
 }
 
 // copyTree 는 src 의 파일을 dst 로 복사한다 (daemon.lock 제외).

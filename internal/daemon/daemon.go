@@ -11,48 +11,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"atalk/internal/client"
+	"atalk/internal/paths"
 )
 
-// DefaultRoot 는 데이터 폴더: ATALK_ROOT → 설정 화면에서 정한 위치(RootPointerFile) → ~/.atalk.
-func DefaultRoot() string {
-	if r := os.Getenv("ATALK_ROOT"); r != "" {
-		return r
-	}
-	if b, err := os.ReadFile(RootPointerFile()); err == nil {
-		if r := strings.TrimSpace(string(b)); r != "" {
-			return r
-		}
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".atalk")
-}
+// DefaultRoot 는 데이터 폴더 (paths.Root: ATALK_ROOT → 위치 파일 → ~/.atalk).
+func DefaultRoot() string { return paths.Root() }
 
-// RootPointerFile 은 데이터 폴더 위치를 적어 두는 파일. 데이터 폴더 바깥(사용자 설정 폴더)에 있어야
-// 데몬·로그인 자동 시작·CLI·훅이 모두 같은 위치를 찾는다. (Windows: %APPDATA%\atalk\root.txt)
-func RootPointerFile() string {
-	if d := os.Getenv("ATALK_CONFIG_DIR"); d != "" { // 시험·여러 설정을 나눠 쓸 때
-		return filepath.Join(d, "root.txt")
-	}
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		dir = filepath.Join(home, ".config")
-	}
-	return filepath.Join(dir, "atalk", "root.txt")
-}
+// RootPointerFile 은 데이터 폴더 위치를 적어 두는 파일.
+func RootPointerFile() string { return paths.RootFile() }
 
 // SetRootPointer 는 다음부터 쓸 데이터 폴더 위치를 저장한다.
-func SetRootPointer(root string) error {
-	f := RootPointerFile()
-	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(f, []byte(root+"\n"), 0o644)
-}
+func SetRootPointer(root string) error { return paths.SetRoot(root) }
 
 // Lock 은 데이터 폴더의 daemon.lock 을 독점으로 잡는다. 이미 다른 데몬이 잡고 있으면 오류.
 func Lock(root string) (release func(), err error) {

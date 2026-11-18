@@ -548,3 +548,46 @@ func TestOfflinePrune(t *testing.T) {
 	check(t, c.Sweep())
 	ok(c.GetAgent(b))
 }
+
+func TestSettingsConfig(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, _, _ := setup(t, c)
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "aaa", Cwd: s("D:/p")}))
+	ok(c.CreateRoom(a, "r1", "", 0))
+	delete(e.alive, 100)
+	e.alive[150] = true
+	a2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "new", Cwd: s("D:/p"), Pid: i(150)})).Agent.ID
+
+	// 자동 이어받기 끄기
+	f := false
+	ok(c.SetConfig(Config{AutoResume: &f}))
+	_, _, err := c.ResumePrevious(a2)
+	nok(t, err, "꺼져 있음")
+	ok(c.SetConfig(Config{}))
+	if _, from, err := c.ResumePrevious(a2); err != nil || from != a {
+		t.Fatalf("다시 켜면 이어받아야 함: %v", err)
+	}
+	// 새 방 메시지 한도 기본값, 방 한도 변경
+	ok(c.SetConfig(Config{DefaultMaxMessages: i(50)}))
+	b2 := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "z"})).Agent.ID
+	if r := ok(c.CreateRoom(b2, "r2", "", 0)); r.Policy.MaxMessages != 50 {
+		t.Fatalf("기본 한도: %d", r.Policy.MaxMessages)
+	}
+	if r := ok(c.SetRoomLimit("r2", 20)); r.Policy.MaxMessages != 20 {
+		t.Fatal("한도 변경")
+	}
+	_, err = c.SetRoomLimit("r2", 5)
+	nok(t, err, "10")
+	// 휴지통 보관 기간
+	ok(c.DeleteRoom("r2"))
+	if n, _ := c.TrashInfo(); n != 1 {
+		t.Fatalf("휴지통: %d", n)
+	}
+	ok(c.SetConfig(Config{TrashRetentionDays: i(7)}))
+	e.clock = e.clock.Add(8 * 24 * time.Hour)
+	check(t, c.Sweep())
+	if n, _ := c.TrashInfo(); n != 0 {
+		t.Fatalf("7일 지났는데 휴지통에 남음: %d", n)
+	}
+}

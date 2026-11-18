@@ -12,11 +12,16 @@
     --unread:#d9930d; --task:#b45f06; --result:#18794e; --status:#4b5563; --fail:#c0362c; --accent:#2f6fde;
     --quote:rgba(0,0,0,.06);
   }
-  @media (prefers-color-scheme: dark) { :root {
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
     --bg:#121417; --panel:#1a1d21; --fg:#e9eaec; --muted:#9aa0a8; --line:#2b2f35; --hover:#22262b; --sel:#1f2a3d;
     --chat:#171b20; --bubble:#262b31; --mine:#6e5a1c; --mine-fg:#fff6d6; --sys:#a3acb6; --sys-bg:rgba(255,255,255,.07);
     --unread:#f0b43c; --task:#f0a04b; --result:#4cc38a; --status:#a3acb6; --fail:#ff6b5f; --accent:#7aa2ff; --quote:rgba(255,255,255,.07);
   } }
+  :root[data-theme="dark"] {
+    --bg:#121417; --panel:#1a1d21; --fg:#e9eaec; --muted:#9aa0a8; --line:#2b2f35; --hover:#22262b; --sel:#1f2a3d;
+    --chat:#171b20; --bubble:#262b31; --mine:#6e5a1c; --mine-fg:#fff6d6; --sys:#a3acb6; --sys-bg:rgba(255,255,255,.07);
+    --unread:#f0b43c; --task:#f0a04b; --result:#4cc38a; --status:#a3acb6; --fail:#ff6b5f; --accent:#7aa2ff; --quote:rgba(255,255,255,.07);
+  }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   html, body { height:100%; }
@@ -85,6 +90,16 @@
   .settings .btn2:disabled { opacity:.45; cursor:default; }
   .settings footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--line); align-items:center; }
   .settings footer .msg { margin-right:auto; font-size:12px; color:var(--muted); }
+  .stabs { display:flex; gap:2px; padding:0 14px; border-bottom:1px solid var(--line); overflow-x:auto; }
+  .stabs button { border:0; background:none; padding:9px 10px; font-size:13px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; white-space:nowrap; }
+  .stabs button.on { color:var(--fg); border-bottom-color:var(--accent); font-weight:600; }
+  .settings .body { min-height:300px; }
+  .settings code { font:12px ui-monospace,Consolas,monospace; }
+  .settings .seg label { display:inline-flex; align-items:center; gap:4px; margin-right:12px; }
+  .integ .irow { display:flex; align-items:flex-start; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .integ .irow > div { flex:1; min-width:0; word-break:break-all; font-size:13px; }
+  .integ .ist { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:12px; font-weight:700; color:#fff; flex:none; margin-top:1px; }
+  .integ .ist.ok { background:#2fb36b; } .integ .ist.warn { background:#e08a1e; } .integ .ist.no { background:#c0362c; }
   .browser { border:1px solid var(--line); border-radius:8px; margin-top:8px; overflow:hidden; }
   .browser .bar { display:flex; gap:6px; padding:6px; background:var(--bg); border-bottom:1px solid var(--line); }
   .browser .bar input { flex:1; min-width:0; font:12.5px ui-monospace,Consolas,monospace; }
@@ -231,6 +246,7 @@
       <div class="menu-wrap" id="menuWrap"><button class="btn" id="menuBtn" title="방 메뉴" aria-haspopup="true">⋯</button>
         <div class="menu" id="menu" hidden>
           <button id="mRename">제목 변경</button>
+          <button id="mLimit">메시지 한도…</button>
           <a id="export">내보내기 (HTML 파일)</a>
           <button id="mDelete" class="danger">방 삭제…</button>
         </div>
@@ -250,43 +266,92 @@
 <dialog class="settings" id="settings" aria-labelledby="setTitle">
   <form id="setForm">
     <header><h2 id="setTitle">설정</h2><button type="button" class="x" id="setClose" aria-label="닫기">×</button></header>
+    <nav class="stabs" id="stabs">
+      <button type="button" data-p="general" class="on">일반</button><button type="button" data-p="rooms">대화방</button><button type="button" data-p="view">알림·화면</button><button type="button" data-p="data">데이터</button><button type="button" data-p="integ">연동</button><button type="button" data-p="about">정보</button>
+    </nav>
     <div class="body">
-      <section>
-        <h3>사람</h3>
-        <label class="f"><span>사용자 별칭</span><input type="text" id="sUser" maxlength="32" placeholder="사용자"></label>
-        <p class="note">사람이 직접 쓴 메시지에 "별칭@에이전트" 로 표시됩니다. 에이전트마다 다르게 하려면 <code>atalk card --human</code>.</p>
-      </section>
-      <section>
-        <h3>자동 정리</h3>
-        <div class="f"><span>자리 비움 후 자동 퇴장</span><input type="number" id="sGrace" min="1" placeholder="30"> 분
-          <label><input type="checkbox" id="sGraceOff"> 퇴장시키지 않음</label></div>
-        <div class="f"><span>오프라인 네임카드 자동 삭제</span><input type="number" id="sTtl" min="1" placeholder="24"> 시간
-          <label><input type="checkbox" id="sTtlOff"> 지우지 않음</label></div>
-        <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간).</p>
-      </section>
-      <section id="sAutoSec">
-        <h3>시작</h3>
-        <label class="f"><input type="checkbox" id="sAuto"> 로그인할 때 데몬 자동 시작</label>
-      </section>
-      <section>
-        <h3>데이터 폴더</h3>
-        <div class="path" id="sRoot"></div>
-        <p class="note" id="sRootInfo"></p>
-        <div class="f"><button type="button" class="btn2" id="sChange">위치 바꾸기…</button></div>
-        <div class="browser" id="browser" hidden>
-          <div class="bar"><button type="button" class="btn2" id="bUp" title="상위 폴더">↑</button><input type="text" id="bPath" placeholder="예: D:\atalk-data (없는 폴더면 새로 만듦)"><button type="button" class="btn2" id="bGo">열기</button></div>
-          <div class="dirs" id="bDirs"></div>
-          <div class="state"><span id="bState"></span>
-            <button type="button" class="btn2 primary" id="bMove" disabled>이 폴더로 이동</button>
-            <button type="button" class="btn2" id="bSwitch" disabled>이 폴더의 데이터로 전환</button></div>
-        </div>
-        <p class="note">이동: 지금 데이터를 빈 폴더로 복사하고 그 폴더를 씁니다. 원래 폴더는 백업으로 남습니다 (MOVED.txt).
-          전환: 이미 ATalk 데이터가 있는 폴더를 씁니다. 어느 쪽이든 데몬이 새 폴더로 다시 시작합니다.</p>
-      </section>
-      <section>
-        <h3>정보</h3>
-        <div class="note" id="sInfo"></div>
-      </section>
+      <div class="pane" data-p="general">
+        <section>
+          <h3>사람</h3>
+          <label class="f"><span>사용자 별칭</span><input type="text" id="sUser" maxlength="32" placeholder="사용자"></label>
+          <p class="note">사람이 직접 쓴 메시지에 "별칭@에이전트" 로 표시됩니다. 에이전트마다 다르게 하려면 <code>atalk card --human</code>.</p>
+        </section>
+        <section id="sAutoSec">
+          <h3>시작</h3>
+          <label class="f"><input type="checkbox" id="sAuto"> 로그인할 때 데몬 자동 시작</label>
+        </section>
+        <section>
+          <h3>포트</h3>
+          <div class="f"><span>데몬 포트</span><input type="number" id="sPort" min="1024" max="65535"><button type="button" class="btn2" id="sPortApply">바꾸기</button></div>
+          <p class="note" id="sPortNote">바꾸면 데몬이 새 포트로 다시 시작하고 화면도 새 주소로 옮깁니다. 훅·CLI·opencode 플러그인은 위치 파일(port.txt)을 읽어 자동으로 따라갑니다. 이미 실행 중인 Claude 세션의 <code>atalk listen</code> 은 다시 연결할 때 따라갑니다.</p>
+        </section>
+      </div>
+      <div class="pane" data-p="rooms" hidden>
+        <section>
+          <h3>새 대화방</h3>
+          <div class="f"><span>메시지 한도 기본값</span><input type="number" id="sLimit" min="10" placeholder="1000"> 개</div>
+          <p class="note">에이전트끼리 끝없이 주고받는 것을 막는 마지막 안전장치입니다. 이미 있는 방은 대화방 ⋯ 메뉴의 "메시지 한도" 로 바꿉니다.</p>
+        </section>
+        <section>
+          <h3>세션</h3>
+          <label class="f"><input type="checkbox" id="sResume"> 새 세션이 같은 폴더의 이전 세션 자리를 자동으로 이어받기</label>
+          <label class="f"><input type="checkbox" id="sAccept"> opencode 가 초대를 자동 수락 (방에 없을 때)</label>
+        </section>
+        <section>
+          <h3>자동 정리</h3>
+          <div class="f"><span>자리 비움 후 자동 퇴장</span><input type="number" id="sGrace" min="1" placeholder="30"> 분
+            <label><input type="checkbox" id="sGraceOff"> 퇴장시키지 않음</label></div>
+          <div class="f"><span>오프라인 네임카드 자동 삭제</span><input type="number" id="sTtl" min="1" placeholder="24"> 시간
+            <label><input type="checkbox" id="sTtlOff"> 지우지 않음</label></div>
+          <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간).</p>
+        </section>
+      </div>
+      <div class="pane" data-p="view" hidden>
+        <section>
+          <h3>새 메시지 알림 (이 브라우저)</h3>
+          <label class="f"><input type="checkbox" id="sNotify"> 브라우저 알림 (이 화면을 보고 있지 않을 때)</label>
+          <label class="f"><input type="checkbox" id="sSound"> 소리</label>
+          <label class="f"><input type="checkbox" id="sMineOnly"> 사람에게 온 메시지만 (방장에게 온 것, 사람 메시지에 대한 결과)</label>
+          <p class="note" id="sNotifyNote"></p>
+        </section>
+        <section>
+          <h3>테마 (이 브라우저)</h3>
+          <div class="f seg" id="sTheme"><label><input type="radio" name="theme" value="system"> 시스템</label><label><input type="radio" name="theme" value="light"> 밝게</label><label><input type="radio" name="theme" value="dark"> 어둡게</label></div>
+        </section>
+      </div>
+      <div class="pane" data-p="data" hidden>
+        <section>
+          <h3>데이터 폴더</h3>
+          <div class="path" id="sRoot"></div>
+          <p class="note" id="sRootInfo"></p>
+          <div class="f"><button type="button" class="btn2" id="sChange">위치 바꾸기…</button><a class="btn2" id="sBackup" href="/admin/backup">백업 내려받기 (zip)</a></div>
+          <div class="browser" id="browser" hidden>
+            <div class="bar"><button type="button" class="btn2" id="bUp" title="상위 폴더">↑</button><input type="text" id="bPath" placeholder="예: D:\atalk-data (없는 폴더면 새로 만듦)"><button type="button" class="btn2" id="bGo">열기</button></div>
+            <div class="dirs" id="bDirs"></div>
+            <div class="state"><span id="bState"></span>
+              <button type="button" class="btn2 primary" id="bMove" disabled>이 폴더로 이동</button>
+              <button type="button" class="btn2" id="bSwitch" disabled>이 폴더의 데이터로 전환</button></div>
+          </div>
+          <p class="note">이동: 지금 데이터를 빈 폴더로 복사하고 그 폴더를 씁니다. 원래 폴더는 백업으로 남습니다 (MOVED.txt).
+            전환: 이미 ATalk 데이터가 있는 폴더를 씁니다. 어느 쪽이든 데몬이 새 폴더로 다시 시작합니다.</p>
+        </section>
+        <section>
+          <h3>휴지통 (삭제한 대화방)</h3>
+          <div class="f"><span id="sTrash"></span><button type="button" class="btn2" id="sTrashEmpty">지금 비우기</button></div>
+          <div class="f"><span>보관 기간</span><input type="number" id="sTrashDays" min="1" placeholder="30"> 일
+            <label><input type="checkbox" id="sTrashOff"> 자동으로 비우지 않음</label></div>
+        </section>
+      </div>
+      <div class="pane" data-p="integ" hidden>
+        <section>
+          <h3>연동 상태</h3>
+          <div id="sInteg" class="integ"></div>
+          <p class="note">"다시 설치" 는 지금 실행 중인 atalk 로 스킬·훅·플러그인을 새로 씁니다. 새로 시작하는 세션부터 적용됩니다.</p>
+        </section>
+      </div>
+      <div class="pane" data-p="about" hidden>
+        <section><h3>정보</h3><div class="note" id="sInfo"></div></section>
+      </div>
     </div>
     <footer><span class="msg" id="setMsg"></span><button type="button" class="btn2" id="setCancel">닫기</button><button type="submit" class="btn2 primary">저장</button></footer>
   </form>
@@ -557,6 +622,14 @@ $("#mRename").onclick = () => {
   inp.onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) finish(true); if (e.key === "Escape") finish(false); };
   inp.onblur = () => finish(true);
 };
+$("#mLimit").onclick = async () => {
+  $("#menu").hidden = true;
+  const r = chat.room, cur = r.policy?.max_messages || 1000;
+  const v = prompt("'" + (r.title || r.room_id) + "' 방의 메시지 한도 (지금 " + cur + ", 사용 " + r.last_seq + ")", String(cur));
+  if (v === null) return;
+  try { await send("PATCH", "/rooms/" + encodeURIComponent(r.room_id), { max_messages: Number(v) }); loadChat(false); }
+  catch (err) { alert("바꾸지 못함: " + (err.message || err)); }
+};
 $("#mDelete").onclick = async () => {
   $("#menu").hidden = true;
   const r = chat.room;
@@ -646,6 +719,7 @@ $("#compose").onsubmit = async (e) => {
       body: JSON.stringify({ agent: via, text: text.startsWith("@") || !ownerId ? text : "@" + ownerId + " " + text }),
     }).then((r) => r.json());
     if (!res.ok) throw new Error(res.error?.message || "보내지 못함");
+    lastSentAt = Date.now();
     ta.value = ""; grow(); renderTargets();
     await loadChat(true);
   } catch (err) {
@@ -660,43 +734,160 @@ $("#view").onchange = (e) => { viewer = e.target.value; localSet("atalk.viewer",
 // ───────── 설정 ─────────
 const dlg = $("#settings");
 let info = null, cfg = null;
-const fmtBytes = (n) => n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+const fmtBytes = (n) => (n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(n ? 1 : 0, Math.round(n / 1024)) + " KB");
+document.querySelectorAll("#stabs button").forEach((b) => (b.onclick = () => {
+  document.querySelectorAll("#stabs button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".settings .pane").forEach((p) => (p.hidden = p.dataset.p !== b.dataset.p));
+  if (b.dataset.p === "integ") loadInteg();
+}));
+const numField = (v, el, off) => { $(off).checked = v === 0; $(el).value = v ? v : ""; $(el).disabled = v === 0; };
+const numVal = (el, off) => ($(off).checked ? 0 : $(el).value ? Number($(el).value) : null);
 async function openSettings() {
   $("#setMsg").textContent = ""; $("#browser").hidden = true;
   [info, cfg] = await Promise.all([j("/admin/info"), j("/config").then((r) => r.config || {})]);
+  // 일반
   $("#sUser").value = cfg.user || "";
-  const num = (v, el, off) => { $(off).checked = v === 0; $(el).value = v ? v : ""; $(el).disabled = v === 0; };
-  num(cfg.away_grace_min, "#sGrace", "#sGraceOff");
-  num(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
   $("#sAutoSec").hidden = info.os !== "windows";
   $("#sAuto").checked = !!info.autostart;
+  $("#sPort").value = info.port;
+  $("#sPort").disabled = $("#sPortApply").disabled = !!info.env_port;
+  // 대화방
+  $("#sLimit").value = cfg.default_max_messages || "";
+  $("#sResume").checked = cfg.auto_resume !== false;
+  $("#sAccept").checked = cfg.auto_accept_invites !== false;
+  numField(cfg.away_grace_min, "#sGrace", "#sGraceOff");
+  numField(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
+  // 알림·화면 (브라우저)
+  $("#sNotify").checked = prefs.notify; $("#sSound").checked = prefs.sound; $("#sMineOnly").checked = prefs.mineOnly;
+  notifyNote();
+  document.querySelectorAll('#sTheme input').forEach((r) => (r.checked = r.value === prefs.theme));
+  // 데이터
   $("#sRoot").textContent = info.root;
   $("#sRootInfo").textContent = "파일 " + info.data_files + "개 · " + fmtBytes(info.data_bytes) + (info.env_root ? " · ATALK_ROOT 환경 변수로 정해져 있어 여기서 바꿀 수 없음" : "");
   $("#sChange").disabled = !!info.env_root;
-  $("#sInfo").innerHTML = "데몬 PID " + info.pid + " · 포트 " + info.port + "<br>데이터 폴더 위치 파일: " + esc(info.root_pointer);
+  $("#sTrash").textContent = "삭제한 방 " + info.trash_count + "개 · " + fmtBytes(info.trash_bytes);
+  $("#sTrashEmpty").disabled = !info.trash_count;
+  numField(cfg.trash_retention_days, "#sTrashDays", "#sTrashOff");
+  // 정보
+  $("#sInfo").innerHTML = "데몬 PID " + info.pid + " · 포트 " + info.port + "<br>데이터 폴더: " + esc(info.root) + "<br>설정 폴더(위치 파일 root.txt, port.txt): " + esc(info.config_dir) +
+    (info.env_root || info.env_port ? "<br>환경 변수: " + esc([info.env_root && "ATALK_ROOT=" + info.env_root, info.env_port && "ATALK_PORT=" + info.env_port].filter(Boolean).join(", ")) : "");
   dlg.showModal();
 }
 $("#setBtn").onclick = () => openSettings().catch((e) => alert("설정을 불러오지 못함: " + e.message));
 $("#setClose").onclick = $("#setCancel").onclick = () => dlg.close();
-$("#sGraceOff").onchange = () => { $("#sGrace").disabled = $("#sGraceOff").checked; };
-$("#sTtlOff").onchange = () => { $("#sTtl").disabled = $("#sTtlOff").checked; };
+for (const [el, off] of [["#sGrace", "#sGraceOff"], ["#sTtl", "#sTtlOff"], ["#sTrashDays", "#sTrashOff"]]) $(off).onchange = () => { $(el).disabled = $(off).checked; };
 $("#sAuto").onchange = async () => {
   try { await send("PUT", "/admin/autostart", { on: $("#sAuto").checked }); $("#setMsg").textContent = "자동 시작 " + ($("#sAuto").checked ? "켬" : "끔"); }
   catch (e) { $("#sAuto").checked = !$("#sAuto").checked; $("#setMsg").textContent = e.message; }
 };
 $("#setForm").onsubmit = async (e) => {
   e.preventDefault();
-  const val = (el, off) => ($(off).checked ? 0 : $(el).value ? Number($(el).value) : null);
-  const next = { ...cfg, user: $("#sUser").value.trim(), away_grace_min: val("#sGrace", "#sGraceOff"), offline_ttl_hours: val("#sTtl", "#sTtlOff") };
-  for (const k of ["away_grace_min", "offline_ttl_hours"]) if (next[k] === null) delete next[k];
+  const next = { ...cfg, user: $("#sUser").value.trim(),
+    away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
+    default_max_messages: $("#sLimit").value ? Number($("#sLimit").value) : null,
+    auto_resume: $("#sResume").checked ? null : false, auto_accept_invites: $("#sAccept").checked ? null : false };
+  for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
   try {
     await fetch("/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) })
       .then((r) => r.json()).then((r) => { if (!r.ok) throw new Error(r.error?.message || "저장 실패"); });
+    savePrefs();
     alias = next.user || "사용자";
     dlg.close();
     if (chat) renderChat(false);
   } catch (err) { $("#setMsg").textContent = err.message; }
 };
+
+// 포트
+$("#sPortApply").onclick = async () => {
+  const port = Number($("#sPort").value);
+  if (!confirm("데몬 포트를 " + port + " 로 바꿀까요?\n데몬이 다시 시작하고 화면이 http://127.0.0.1:" + port + "/ 로 옮겨집니다.")) return;
+  try {
+    const r = await send("PUT", "/admin/port", { port });
+    $("#setMsg").textContent = "새 포트로 다시 시작하는 중…";
+    setTimeout(() => { location.href = "http://127.0.0.1:" + r.port + "/" + location.hash; }, 2500);
+  } catch (err) { $("#setMsg").textContent = err.message; }
+};
+
+// 휴지통
+$("#sTrashEmpty").onclick = async () => {
+  if (!confirm("삭제한 대화방 " + info.trash_count + "개의 기록을 완전히 지웁니다. 되살릴 수 없습니다. 계속할까요?")) return;
+  try { const r = await send("POST", "/admin/trash/empty"); $("#sTrash").textContent = r.removed + "개 지움"; $("#sTrashEmpty").disabled = true; }
+  catch (err) { $("#setMsg").textContent = err.message; }
+};
+
+// 연동 상태
+async function loadInteg() {
+  const st = (await j("/admin/integrations")).status;
+  const row = (ok, warn, name, detail, target) =>
+    '<div class="irow"><span class="ist ' + (ok ? (warn ? "warn" : "ok") : "no") + '">' + (ok ? (warn ? "!" : "✓") : "✗") + "</span><div><b>" + name + "</b><div class=\"note\">" + detail + "</div></div>" +
+    (target ? '<button type="button" class="btn2" data-t="' + target + '">' + (ok && !warn ? "다시 설치" : "설치") + "</button>" : "") + "</div>";
+  $("#sInteg").innerHTML =
+    row(st.in_path, false, "PATH 에 atalk 등록", esc(st.path_dir), "path") +
+    row(st.claude_skill && st.claude_hooks, !st.claude_skill_current, "Claude Code 스킬 + 훅",
+      (st.claude_skill ? (st.claude_skill_current ? "스킬 최신" : "스킬이 예전 버전") : "스킬 없음") + " · " + (st.claude_hooks ? "훅 4개 등록" : "훅 없음/일부") + "<br>" + esc(st.settings_file), "claude") +
+    row(st.opencode_plugin, !st.opencode_plugin_current, "opencode 플러그인",
+      (st.opencode_plugin ? (st.opencode_plugin_current ? "최신" : "예전 버전") : "없음") + "<br>" + esc(st.plugin_file), "opencode") +
+    '<div class="note">atalk 실행 파일: ' + esc(st.exe) + "</div>";
+  $("#sInteg").querySelectorAll("[data-t]").forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
+    try { const r = await send("POST", "/admin/integrations/install", { target: b.dataset.t }); $("#setMsg").textContent = r.done.join(" · "); loadInteg(); }
+    catch (err) { $("#setMsg").textContent = err.message; b.disabled = false; }
+  }));
+}
+
+// ───────── 이 브라우저의 설정: 알림, 테마 ─────────
+const prefs = { notify: false, sound: false, mineOnly: false, theme: "system" };
+try { Object.assign(prefs, JSON.parse(localGet("atalk.prefs") || "{}")); } catch {}
+function savePrefs() {
+  prefs.notify = $("#sNotify").checked; prefs.sound = $("#sSound").checked; prefs.mineOnly = $("#sMineOnly").checked;
+  prefs.theme = document.querySelector('#sTheme input:checked')?.value || "system";
+  localSet("atalk.prefs", JSON.stringify(prefs));
+  applyTheme();
+}
+function applyTheme() {
+  if (prefs.theme === "system") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.setAttribute("data-theme", prefs.theme);
+}
+applyTheme();
+document.querySelectorAll('#sTheme input').forEach((r) => (r.onchange = () => { prefs.theme = r.value; applyTheme(); }));
+function notifyNote() {
+  const p = typeof Notification === "undefined" ? "unsupported" : Notification.permission;
+  $("#sNotifyNote").textContent = p === "denied" ? "브라우저에서 알림이 차단돼 있습니다. 주소창의 사이트 설정에서 허용하세요."
+    : p === "unsupported" ? "이 브라우저는 알림을 지원하지 않습니다." : "";
+}
+$("#sNotify").onchange = async () => {
+  if ($("#sNotify").checked && typeof Notification !== "undefined" && Notification.permission === "default") await Notification.requestPermission();
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") $("#sNotify").checked = false;
+  notifyNote();
+};
+let audioCtx = null;
+function beep() {
+  try {
+    audioCtx ||= new AudioContext();
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine"; o.frequency.value = 880; g.gain.value = 0.0001;
+    o.connect(g).connect(audioCtx.destination);
+    const t = audioCtx.currentTime;
+    g.gain.exponentialRampToValueAtTime(0.15, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+    o.start(t); o.stop(t + 0.3);
+  } catch {}
+}
+let lastSentAt = 0;
+function onNewMessage(m) {
+  if (!m || m.type === "system" || (!prefs.notify && !prefs.sound)) return;
+  if (m.human && Date.now() - lastSentAt < 3000) return; // 내가 방금 이 화면에서 보낸 말
+  if (prefs.mineOnly) {
+    const owner = rooms.find((r) => r.room_id === m.room)?.owner;
+    if (!(m.to || []).includes(owner) && !(m.type === "result" && m.to?.length)) return;
+  }
+  const away = document.hidden || !document.hasFocus();
+  if (prefs.sound && (away || m.room !== selected)) beep();
+  if (prefs.notify && away && typeof Notification !== "undefined" && Notification.permission === "granted") {
+    const who = (m.human ? m.human + "@" : "") + nameOf(m.from);
+    const n = new Notification((rooms.find((r) => r.room_id === m.room)?.title || m.room) + " · " + who, { body: clean(m.body).slice(0, 200), tag: "atalk-" + m.room });
+    n.onclick = () => { window.focus(); openRoom(m.room); n.close(); };
+  }
+}
 
 // 데이터 폴더 고르기
 let bCur = null;
@@ -787,6 +978,7 @@ if (DATA) {
   const es = new EventSource("/events");
   ["message", "invite", "request", "membership", "log", "agent", "room", "config"].forEach((e) => es.addEventListener(e, refresh));
   es.addEventListener("config", () => loadAlias());
+  es.addEventListener("message", (e) => { try { onNewMessage(JSON.parse(e.data)); } catch {} });
   loadAlias();
   loadSide();
   if (location.hash.length > 1) openRoom(decodeURIComponent(location.hash.slice(1))); // http://127.0.0.1:7420/#방이름

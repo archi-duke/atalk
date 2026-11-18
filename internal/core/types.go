@@ -100,6 +100,14 @@ type Config struct {
 	AwayGraceMin *int `json:"away_grace_min,omitempty"`
 	// OfflineTTLHours 는 offline 카드를 자동 삭제할 때까지의 시간. 0 이면 지우지 않음. 없으면 24.
 	OfflineTTLHours *int `json:"offline_ttl_hours,omitempty"`
+	// DefaultMaxMessages 는 새 방의 메시지 한도. 없으면 1000.
+	DefaultMaxMessages *int `json:"default_max_messages,omitempty"`
+	// TrashRetentionDays 는 삭제한 방(trash/)을 보관하는 날 수. 0 이면 자동으로 비우지 않음. 없으면 30.
+	TrashRetentionDays *int `json:"trash_retention_days,omitempty"`
+	// AutoResume 이 false 면 새 세션이 이전 세션 자리를 자동으로 이어받지 않음. 없으면 켜짐.
+	AutoResume *bool `json:"auto_resume,omitempty"`
+	// AutoAcceptInvites 가 false 면 opencode 플러그인이 초대를 자동 수락하지 않음. 없으면 켜짐.
+	AutoAcceptInvites *bool `json:"auto_accept_invites,omitempty"`
 }
 
 var LogStates = []string{"received", "working", "done", "skipped", "failed"}

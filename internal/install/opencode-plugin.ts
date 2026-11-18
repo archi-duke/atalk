@@ -5,9 +5,21 @@
 // - 나에게 온 메시지가 있고 세션이 쉬고 있으면 세션에 직접 넣고, 답변을 result 로 자동 게시
 //   (task/chat 에만 자동 답변 → 에이전트끼리 끝없이 주고받지 않음)
 import type { Plugin } from "@opencode-ai/plugin"
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 
 const ATALK = "{{ATALK}}"
-const BASE = (process.env.ATALK_URL ?? "http://127.0.0.1:7420").replace(/\/+$/, "")
+const CONFIG_DIR = process.env.ATALK_CONFIG_DIR ?? "{{ATALK_CONFIG}}"
+// 데몬 주소: ATALK_URL → <설정 폴더>/port.txt (설정 화면에서 포트를 바꾸면 여기에 저장됨) → 7420
+function baseUrl() {
+  if (process.env.ATALK_URL) return process.env.ATALK_URL.replace(/\/+$/, "")
+  try {
+    const p = readFileSync(join(CONFIG_DIR, "port.txt"), "utf8").trim()
+    if (/^\d+$/.test(p)) return `http://127.0.0.1:${p}`
+  } catch {}
+  return "http://127.0.0.1:7420"
+}
+let BASE = baseUrl()
 const POLL_MS = 3000
 const SKIP = "[SKIP]"
 
@@ -23,13 +35,24 @@ type State = { id: string; busy: boolean; working: boolean; seen: Set<string> }
 const agentId = (sid: string) => "opencode_" + (sid.replace(/[^\p{L}\p{N}_-]/gu, "-").slice(0, 100) || "unknown")
 const enc = encodeURIComponent
 
-async function api(method: string, path: string, body?: unknown): Promise<any> {
-  const res = await fetch(BASE + path, {
+async function api(method: string, path: string, body?: unknown, retried = false): Promise<any> {
+  let res: Response
+  try {
+    res = await fetch(BASE + path, {
     method,
     headers: body === undefined ? undefined : { "content-type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(15000),
-  })
+    })
+  } catch (e) {
+    // 연결 실패: 설정에서 포트가 바뀌었을 수 있으니 주소를 다시 읽고 한 번 더
+    const nb = baseUrl()
+    if (!retried && nb !== BASE) {
+      BASE = nb
+      return api(method, path, body, true)
+    }
+    throw e
+  }
   const j: any = await res.json().catch(() => ({}))
   if (!res.ok || j.ok === false) throw new Error(j?.error?.message ?? `HTTP ${res.status}`)
   return j
@@ -114,7 +137,12 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     const lines: string[] = []
     // 방에 없을 때 받은 초대는 자동 수락 (ATALK_AUTO_ACCEPT=0 이면 끔).
     // 이미 방에 있으면 수락하는 순간 그 방에서 나가게 되므로 알림만 한다.
-    const auto = process.env.ATALK_AUTO_ACCEPT !== "0"
+    let auto = process.env.ATALK_AUTO_ACCEPT !== "0"
+    if (auto && (p.invites ?? []).length) {
+      try {
+        auto = (await api("GET", "/config")).config?.auto_accept_invites !== false // 설정 화면에서 끌 수 있음
+      } catch {}
+    }
     let inRoom = false
     if (auto && (p.invites ?? []).length) {
       try {

@@ -13,6 +13,7 @@
 ## 2. 폴더 구조
 
 데이터 폴더(`<ATALK_ROOT>`) 위치: `ATALK_ROOT` 환경 변수 → 위치 파일(`%APPDATA%\atalk\root.txt`, `ATALK_CONFIG_DIR` 로 바꿀 수 있음) → `~/.atalk`.
+데몬 포트: `ATALK_PORT` → `port.txt`(같은 설정 폴더) → 7420. 클라이언트 주소: `ATALK_URL` → `127.0.0.1:<포트>`. (`internal/paths`)
 위치 파일은 데이터 폴더 바깥에 있어야 데몬·로그인 자동 시작·CLI·훅이 같은 위치를 찾는다.
 
 ```
@@ -108,7 +109,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | GET | `/agents/:id/stream` | SSE (이 에이전트가 받을 이벤트) |
 | GET / POST | `/rooms` | 목록(`?include_closed=1`) / 생성 `{agent, room_id, title?}` |
 | GET | `/rooms/:r` | 방 정보 + 멤버 |
-| PATCH | `/rooms/:r` | 제목 변경 `{title, agent?}` (방 ID 는 폴더 이름이라 바꾸지 않음) |
+| PATCH | `/rooms/:r` | 제목 변경 `{title, agent?}` / 메시지 한도 `{max_messages}` (방 ID 는 폴더 이름이라 바꾸지 않음) |
 | DELETE | `/rooms/:r` | 방 삭제 → `{trash}`. 멤버는 모두 방에서 나오고, 방 폴더는 `<root>/trash/<방>-<시각>` 으로 옮김 |
 | POST | `/rooms/:r/invites` | `{agent, target}` (방장) |
 | POST | `/rooms/:r/invites/respond` | `{agent, accept}` |
@@ -117,7 +118,11 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | POST | `/rooms/:r/say` | 사람 메시지 `{agent, text}`. text 앞쪽 `@이름`(이름/id) 은 받는 대상. 대상에 통로 에이전트 자신이 있으면 그 에이전트도 받는다 |
 | GET / POST | `/rooms/:r/messages` | 읽기 `?after=&limit=` / 쓰기 `{agent, type?, to?, reply_to?, body}` |
 | GET / POST | `/rooms/:r/logs` | 처리 기록 읽기 `?agent=` / 쓰기 `{agent, seq, state, note?}` |
-| GET / PUT | `/config` | 이 PC 설정 `{user, away_grace_min, offline_ttl_hours}` (사용자 별칭 기본값, 자동 퇴장까지 분, 오프라인 카드 자동 삭제까지 시간 / 0=안 함) |
+| GET / PUT | `/config` | 이 PC 설정 `{user, away_grace_min, offline_ttl_hours, default_max_messages, trash_retention_days, auto_resume, auto_accept_invites}` |
+| POST | `/admin/trash/empty` | 휴지통 비우기 (trash_retention_days 가 지나면 한 시간마다 자동으로도 비움, 기본 30일) |
+| GET | `/admin/backup` | 데이터 폴더 zip (daemon.lock, daemon.log 제외) |
+| PUT | `/admin/port` | `{port}` → port.txt 저장 후 새 포트로 다시 시작 |
+| GET / POST | `/admin/integrations`, `/admin/integrations/install` | 연동 설치 상태 / `{target: claude\|opencode\|path}` 다시 설치 |
 | GET | `/admin/info` | 데이터 폴더, PID, 포트, 자동 시작, 위치 파일 경로, 데이터 크기 |
 | PUT | `/admin/autostart` | `{on}` 로그인 시 자동 시작 |
 | GET | `/admin/dirs?path=` | 폴더 탐색 (설정 화면). 빈 path 는 드라이브 목록(Windows) |

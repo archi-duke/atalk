@@ -22,6 +22,7 @@ import (
 	"atalk/internal/hook"
 	"atalk/internal/install"
 	"atalk/internal/mcpserver"
+	"atalk/internal/paths"
 	"atalk/internal/server"
 )
 
@@ -233,7 +234,7 @@ func main() {
 		}
 		port := a.num("port", 0)
 		if port == 0 {
-			port, _ = strconv.Atoi(envOr("ATALK_PORT", "7420"))
+			port = paths.Port()
 		}
 		release, err := daemon.Lock(root)
 		check(err)
@@ -251,8 +252,12 @@ func main() {
 		case <-srv.Restart: // 설정 화면에서 데이터 폴더를 옮김 → 새 위치로 다시 띄우고 끝낸다
 			_ = srv.Close()
 			release()
-			fmt.Println("데이터 폴더가 바뀌어 데몬을 다시 시작합니다:", daemon.DefaultRoot())
-			check(daemon.Start(strconv.Itoa(p)))
+			np := p
+			if srv.RestartPort > 0 { // 설정에서 포트를 바꿈
+				np = srv.RestartPort
+			}
+			fmt.Printf("설정이 바뀌어 데몬을 다시 시작합니다: %s, 포트 %d\n", daemon.DefaultRoot(), np)
+			check(daemon.Start(strconv.Itoa(np)))
 		}
 
 	case "mcp":

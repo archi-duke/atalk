@@ -10,19 +10,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
 	"atalk/internal/core"
+	"atalk/internal/paths"
 )
 
-func DefaultURL() string {
-	if u := os.Getenv("ATALK_URL"); u != "" {
-		return u
-	}
-	return "http://127.0.0.1:7420"
-}
+// DefaultURL 은 데몬 주소: ATALK_URL → 127.0.0.1:<paths.Port()>.
+func DefaultURL() string { return paths.URL() }
 
 type Error struct {
 	Status  int

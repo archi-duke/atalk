@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/rand"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -56,6 +57,7 @@ type Atalk struct {
 	lastSeq     map[string]int
 	cursors     map[string]map[string]int
 	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해, <root>/names.json)
+	trashSwept  time.Time         // 휴지통을 마지막으로 정리한 시각 (한 시간에 한 번)
 
 	subMu sync.Mutex
 	subs  map[chan Event]struct{}
@@ -607,6 +609,9 @@ func (c *Atalk) CreateRoom(agent, roomID, title string, maxMessages int) (v Room
 		}
 		if maxMessages <= 0 {
 			maxMessages = 1000
+			if cfg := c.readConfig(); cfg.DefaultMaxMessages != nil {
+				maxMessages = *cfg.DefaultMaxMessages
+			}
 		}
 		room := &Room{
 			RoomID: roomID, Title: title, Owner: ptr(agent), CreatedAt: c.ts(),
@@ -652,6 +657,84 @@ func (c *Atalk) RenameRoom(r, title, by string) (v RoomView, err error) {
 		return nil
 	})
 	return
+}
+
+// SetRoomLimit 는 방의 메시지 한도를 바꾼다.
+func (c *Atalk) SetRoomLimit(r string, n int) (v RoomView, err error) {
+	err = c.guard(func() error {
+		room, err := c.requireRoom(r, false)
+		if err != nil {
+			return err
+		}
+		if n < 10 || n > 1000000 {
+			return bad("invalid_limit", "메시지 한도는 10 ~ 1000000")
+		}
+		if room.Policy.MaxMessages != n {
+			room.Policy.MaxMessages = n
+			c.saveRoom(room)
+			c.systemMessage(r, fmt.Sprintf("메시지 한도 변경: %d", n), false)
+			c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "limit", "max_messages": n}})
+		}
+		v = c.roomView(room)
+		return nil
+	})
+	return
+}
+
+// TrashInfo 는 휴지통(삭제한 방)의 개수와 크기.
+func (c *Atalk) TrashInfo() (count int, size int64) {
+	dir := filepath.Join(c.Root, "trash")
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		count++
+		_ = filepath.WalkDir(filepath.Join(dir, e.Name()), func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				if fi, err := d.Info(); err == nil {
+					size += fi.Size()
+				}
+			}
+			return nil
+		})
+	}
+	return
+}
+
+// EmptyTrash 는 휴지통을 비운다. olderThan > 0 이면 그보다 오래된 것만.
+func (c *Atalk) EmptyTrash(olderThan time.Duration) (removed int, err error) {
+	err = c.guard(func() error {
+		dir := filepath.Join(c.Root, "trash")
+		entries, _ := os.ReadDir(dir)
+		now := c.now()
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if olderThan > 0 && now.Sub(trashTime(dir, e.Name())) <= olderThan {
+				continue
+			}
+			if os.RemoveAll(filepath.Join(dir, e.Name())) == nil {
+				removed++
+			}
+		}
+		return nil
+	})
+	return
+}
+
+// trashTime 은 trash/<방>-YYYYMMDD-HHMMSS 의 시각 (이름에서, 안 되면 폴더 수정 시각).
+func trashTime(dir, name string) time.Time {
+	if len(name) > 16 {
+		if t, err := time.Parse("20060102-150405", name[len(name)-15:]); err == nil {
+			return t
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(dir, name)); err == nil {
+		return fi.ModTime()
+	}
+	return time.Now()
 }
 
 // DeleteRoom 은 방을 지운다. 멤버는 모두 방에서 나오고(대기 상태), 방 폴더는 <root>/trash/<방>-<시각> 으로 옮겨진다.
@@ -1096,6 +1179,9 @@ func (c *Atalk) ResumePrevious(newID string) (rec *Recovery, from string, err er
 		if _, ok := c.memberships[newID]; ok {
 			return conflict("already_in_room", "이미 방에 있음")
 		}
+		if cfg := c.readConfig(); cfg.AutoResume != nil && !*cfg.AutoResume {
+			return notFound("no_previous", "자동 이어받기가 꺼져 있음 (설정)")
+		}
 		if nu.Cwd == nil {
 			return notFound("no_previous", "작업 폴더 정보가 없어 이전 세션을 찾을 수 없음")
 		}
@@ -1245,6 +1331,22 @@ func (c *Atalk) Sweep() error {
 			}
 		}
 		c.sweepOffline(now)
+		if now.Sub(c.trashSwept) > time.Hour {
+			c.trashSwept = now
+			days := 30
+			if cfg := c.readConfig(); cfg.TrashRetentionDays != nil {
+				days = *cfg.TrashRetentionDays
+			}
+			if days > 0 {
+				dir := filepath.Join(c.Root, "trash")
+				entries, _ := os.ReadDir(dir)
+				for _, e := range entries {
+					if e.IsDir() && now.Sub(trashTime(dir, e.Name())) > time.Duration(days)*24*time.Hour {
+						_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+					}
+				}
+			}
+		}
 		return nil
 	})
 }
@@ -1466,6 +1568,12 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		}
 		if in.OfflineTTLHours != nil && (*in.OfflineTTLHours < 0 || *in.OfflineTTLHours > 24*3650) {
 			return bad("invalid_ttl", "offline_ttl_hours 는 0(지우지 않음) ~ 87600 시간")
+		}
+		if in.DefaultMaxMessages != nil && (*in.DefaultMaxMessages < 10 || *in.DefaultMaxMessages > 1000000) {
+			return bad("invalid_limit", "default_max_messages 는 10 ~ 1000000")
+		}
+		if in.TrashRetentionDays != nil && (*in.TrashRetentionDays < 0 || *in.TrashRetentionDays > 3650) {
+			return bad("invalid_trash", "trash_retention_days 는 0(비우지 않음) ~ 3650 일")
 		}
 		cfg = in
 		must(writeJSONAtomic(c.configFile(), cfg))

@@ -42,6 +42,8 @@ type Server struct {
 	stopMu sync.Once
 	// Restart 는 데이터 폴더를 옮긴 뒤 데몬을 새 위치로 다시 띄워야 할 때 신호를 받는다 (main 이 처리).
 	Restart chan struct{}
+	// RestartPort 가 0 이 아니면 다시 시작할 때 이 포트로 (설정에서 포트 변경)
+	RestartPort int
 }
 
 func New(opts Options) (*Server, error) {
@@ -304,13 +306,21 @@ func (s *Server) routes() http.Handler {
 	})
 	h("PATCH /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
-			Agent string `json:"agent"` // 바꾼 에이전트 (사람이 화면에서 바꾸면 비움)
-			Title string `json:"title"`
+			Agent       string `json:"agent"` // 바꾼 에이전트 (사람이 화면에서 바꾸면 비움)
+			Title       string `json:"title"`
+			MaxMessages int    `json:"max_messages"`
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
-		room, err := c.RenameRoom(r.PathValue("r"), b.Title, b.Agent)
+		var room core.RoomView
+		var err error
+		if b.MaxMessages > 0 {
+			if room, err = c.SetRoomLimit(r.PathValue("r"), b.MaxMessages); err != nil || b.Title == "" {
+				return map[string]any{"room": room}, err
+			}
+		}
+		room, err = c.RenameRoom(r.PathValue("r"), b.Title, b.Agent)
 		return map[string]any{"room": room}, err
 	})
 	h("DELETE /rooms/{r}", func(w http.ResponseWriter, r *http.Request) (any, error) {

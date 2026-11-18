@@ -97,6 +97,9 @@ func listen(c *client.Client, id string) error {
 		for {
 			_ = c.SSE(ctx, "/agents/"+id+"/stream", func(string, []byte) { poke() })
 			time.Sleep(3 * time.Second)
+			if os.Getenv("ATALK_URL") == "" { // 설정에서 포트를 바꿨으면 새 주소로
+				c.Base = client.DefaultURL()
+			}
 			_ = daemon.Ensure(c) // 데몬이 죽었으면 다시 띄운다
 			poke()
 		}

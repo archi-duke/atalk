@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"atalk/internal/paths"
 )
 
 //go:embed skill.md
@@ -52,7 +54,59 @@ func DefaultPaths() Paths {
 // render 는 템플릿의 {{ATALK}}(명령 이름)와 {{ATALK_FULL}}(전체 경로)을 채운다.
 // 스킬은 PATH 에 등록된 `atalk` 를 쓰고, 플러그인은 PATH 와 무관하게 전체 경로를 쓴다.
 func render(t, cmd string) string {
-	return strings.NewReplacer("{{ATALK_FULL}}", Exe(), "{{ATALK}}", cmd).Replace(t)
+	return strings.NewReplacer("{{ATALK_FULL}}", Exe(), "{{ATALK_CONFIG}}", filepath.ToSlash(paths.ConfigDir()), "{{ATALK}}", cmd).Replace(t)
+}
+
+// Status 는 연동 설치 상태. *Current 는 지금 실행 파일 기준으로 다시 만든 내용과 같은지 (다르면 다시 설치 필요).
+type Status struct {
+	Exe                   string `json:"exe"`
+	PathDir               string `json:"path_dir"`
+	InPath                bool   `json:"in_path"`
+	ClaudeSkill           bool   `json:"claude_skill"`
+	ClaudeSkillCurrent    bool   `json:"claude_skill_current"`
+	ClaudeHooks           bool   `json:"claude_hooks"`
+	OpencodePlugin        bool   `json:"opencode_plugin"`
+	OpencodePluginCurrent bool   `json:"opencode_plugin_current"`
+	SkillFile             string `json:"skill_file"`
+	SettingsFile          string `json:"settings_file"`
+	PluginFile            string `json:"plugin_file"`
+}
+
+func Check(p Paths) Status {
+	st := Status{Exe: Exe(), PathDir: PathDir(), InPath: InUserPath(PathDir()),
+		SkillFile: p.skillFile(), SettingsFile: p.settingsFile(), PluginFile: p.pluginFile()}
+	if b, err := os.ReadFile(p.skillFile()); err == nil {
+		st.ClaudeSkill = true
+		st.ClaudeSkillCurrent = string(b) == render(skillTmpl, "atalk")
+	}
+	if b, err := os.ReadFile(p.pluginFile()); err == nil {
+		st.OpencodePlugin = true
+		st.OpencodePluginCurrent = string(b) == render(pluginTmpl, Exe())
+	}
+	if b, err := os.ReadFile(p.settingsFile()); err == nil {
+		var s map[string]any
+		if json.Unmarshal(b, &s) == nil {
+			hooks, _ := s["hooks"].(map[string]any)
+			all := hooks != nil
+			for _, h := range hookEvents {
+				want := fmt.Sprintf(`"%s" hook claude-code %s`, Exe(), h.arg)
+				found := false
+				list, _ := hooks[h.event].([]any)
+				for _, item := range list {
+					m, _ := item.(map[string]any)
+					inner, _ := m["hooks"].([]any)
+					for _, x := range inner {
+						if hm, _ := x.(map[string]any); hm["command"] == want {
+							found = true
+						}
+					}
+				}
+				all = all && found
+			}
+			st.ClaudeHooks = all
+		}
+	}
+	return st
 }
 
 func (p Paths) skillFile() string    { return filepath.Join(p.Claude, "skills", "atalk", "SKILL.md") }
