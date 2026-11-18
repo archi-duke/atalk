@@ -371,7 +371,7 @@ func (c *Atalk) roomView(room *Room) RoomView {
 	v.Invites = slices.Clone(room.Invites)
 	v.Requests = slices.Clone(room.Requests)
 	for _, e := range c.membersOf(room.RoomID) {
-		v.Members = append(v.Members, RoomMember{Agent: e.agent, Name: c.nameOf(e.agent), Role: e.m.Role, State: e.m.State})
+		v.Members = append(v.Members, RoomMember{Agent: e.agent, Name: c.nameOf(e.agent), Role: e.m.Role, State: e.m.State, Cursor: c.cursors[room.RoomID][e.agent]})
 	}
 	return v
 }

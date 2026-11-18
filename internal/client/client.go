@@ -111,6 +111,27 @@ func (c *Client) HealthInfo() (h struct {
 	return
 }
 
+// Export 는 방 대화를 메신저 형식 HTML 로 받는다.
+func (c *Client) Export(room string) ([]byte, error) {
+	res, err := c.HTTP.Get(c.Base + "/rooms/" + esc(room) + "/export")
+	if err != nil {
+		return nil, &Error{0, "unreachable", err.Error()}
+	}
+	defer res.Body.Close()
+	b, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != 200 {
+		var env struct {
+			Error struct{ Code, Message string } `json:"error"`
+		}
+		_ = json.Unmarshal(b, &env)
+		return nil, &Error{res.StatusCode, env.Error.Code, env.Error.Message}
+	}
+	return b, nil
+}
+
 func (c *Client) Config() (cfg core.Config, err error) {
 	var out struct {
 		Config core.Config `json:"config"`

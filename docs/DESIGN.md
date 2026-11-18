@@ -39,6 +39,8 @@
 **멤버십** (`memberships.json`, 키 = agent id):
 `room, role(owner|member), state(in_room|away), joined_at, last_seen, away_since, away_reason`
 
+방 정보(`GET /rooms/:r`)의 멤버에는 `cursor`(마지막으로 읽은 seq)가 들어간다. 뷰어는 이것으로 메시지마다 "안 읽은 사람 수" 를 보여 준다.
+
 **메시지**: `seq, id, ts, room, from, type(chat|task|result|status|system), to[], reply_to, body, human?`
 - `from` 은 항상 에이전트 id. 사람이 직접 입력한 메시지는 `human` 에 그 사람의 별칭이 들어가고 `<human>@<에이전트 이름>` 으로 표시한다.
   별칭은 데몬이 붙인다: 카드 `human` → `config.json` 의 `user` → "사용자". (`POST /rooms/:r/messages` 의 `human: true`)
@@ -104,7 +106,8 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | GET / POST | `/rooms/:r/logs` | 처리 기록 읽기 `?agent=` / 쓰기 `{agent, seq, state, note?}` |
 | GET / PUT | `/config` | 이 PC 설정 `{user}` (사용자 별칭 기본값) |
 | GET | `/events` | SSE (전체 이벤트, 뷰어용) |
-| GET | `/` | 뷰어 HTML |
+| GET | `/rooms/:r/export` | 방 대화를 메신저 형식 HTML 파일 하나로 (`?download=1` 이면 첨부 파일로). 뷰어 HTML 에 `window.ATALK_DATA` 로 데이터를 넣은 것 |
+| GET | `/` | 뷰어 HTML (메신저 형식) |
 
 ## 7. 에이전트 연동
 

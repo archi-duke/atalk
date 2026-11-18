@@ -68,6 +68,7 @@ const help = `atalk — 에이전트 대화방
   atalk wait [--timeout 60] [--no-ack]                나에게 온 메시지가 올 때까지 대기
   atalk listen                                        나에게 온 메시지/초대/신청을 한 줄씩 계속 출력 (Claude Code Monitor 용)
   atalk messages [ROOM] [--after SEQ] [--limit N]
+  atalk export ROOM [-o FILE.html]                    대화를 메신저 형식 HTML 파일 하나로 저장 (데몬 없이 열림)
   atalk log SEQ received|working|done|skipped|failed [NOTE]
 
 공통 옵션: --as AGENT_ID, --url URL (또는 ATALK_URL), --json
@@ -386,6 +387,18 @@ func main() {
 		check(err)
 		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")"))
 
+	case "export":
+		room := at.arg(0, "ROOM")
+		page, err := c.Export(room)
+		check(err)
+		file := a.str("o")
+		if file == "" {
+			file = room + ".html"
+		}
+		check(os.WriteFile(file, page, 0o644))
+		abs, _ := filepath.Abs(file)
+		out(map[string]string{"file": abs}, "저장: "+abs)
+
 	case "say":
 		m, err := c.SendHuman(me(), strings.Join(rest, " "))
 		check(err)
@@ -466,7 +479,7 @@ func main() {
 		if in.Body == "-" {
 			b, err := io.ReadAll(os.Stdin)
 			check(err)
-			in.Body = strings.TrimSpace(string(b))
+			in.Body = strings.TrimSpace(strings.TrimPrefix(string(b), "\uFEFF")) // PowerShell 파이프가 붙이는 BOM 제거
 		}
 		if in.Body == "" {
 			fail("missing_arg", "TEXT 가 필요함")

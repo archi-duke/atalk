@@ -119,6 +119,8 @@ type RoomMember struct {
 	Name  string `json:"name"`
 	Role  string `json:"role"`
 	State string `json:"state"`
+	// Cursor 는 이 멤버가 마지막으로 읽은 seq (메신저 화면의 "안 읽은 사람 수" 계산용)
+	Cursor int `json:"cursor"`
 }
 
 type RoomView struct {

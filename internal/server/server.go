@@ -3,6 +3,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -83,6 +85,44 @@ func (s *Server) Listen() (int, error) {
 		}
 	}()
 	return ln.Addr().(*net.TCPAddr).Port, nil
+}
+
+// ExportHTML 은 방 하나의 대화를 메신저 형식 HTML 파일 하나로 만든다.
+func (s *Server) ExportHTML(roomID string) ([]byte, error) {
+	c := s.Core
+	room, err := c.GetRoom(roomID)
+	if err != nil {
+		return nil, err
+	}
+	msgs := []core.Message{}
+	for after := 0; ; {
+		page, err := c.ReadMessages(roomID, after, 1000)
+		if err != nil {
+			return nil, err
+		}
+		msgs = append(msgs, page...)
+		if len(page) < 1000 {
+			break
+		}
+		after = page[len(page)-1].Seq
+	}
+	logs, err := c.ReadLogs(roomID, "")
+	if err != nil {
+		return nil, err
+	}
+	agents, err := c.ListAgents("", "")
+	if err != nil {
+		return nil, err
+	}
+	data, err := json.Marshal(map[string]any{ // json.Marshal 은 < > & 를 \u003c 등으로 바꾸므로 <script> 안에 안전
+		"room": room, "messages": msgs, "logs": logs, "agents": agents,
+		"exported_at": time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+	})
+	if err != nil {
+		return nil, err
+	}
+	tag := append(append([]byte("<script>window.ATALK_DATA="), data...), []byte(";</script>")...)
+	return bytes.Replace(viewerHTML, []byte("<!--ATALK_DATA-->"), tag, 1), nil
 }
 
 func (s *Server) Close() error {
@@ -321,6 +361,19 @@ func (s *Server) routes() http.Handler {
 	// ── 뷰어 ──
 	h("GET /events", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		s.serveSSE(w, r, func(core.Event) bool { return true })
+		return skip{}, nil
+	})
+	// 대화 내보내기: 뷰어 HTML 에 방 데이터를 넣은 파일 하나 (데몬 없이 열어 볼 수 있음)
+	h("GET /rooms/{r}/export", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		page, err := s.ExportHTML(r.PathValue("r"))
+		if err != nil {
+			return nil, err
+		}
+		w.Header().Set("content-type", "text/html; charset=utf-8")
+		if boolQ(r, "download") {
+			w.Header().Set("content-disposition", "attachment; filename*=UTF-8''"+url.PathEscape(r.PathValue("r"))+".html")
+		}
+		_, _ = w.Write(page)
 		return skip{}, nil
 	})
 	h("GET /{$}", func(w http.ResponseWriter, r *http.Request) (any, error) {
