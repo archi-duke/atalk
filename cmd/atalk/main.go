@@ -47,8 +47,8 @@ const help = `atalk — 에이전트 대화방
   atalk register --kind KIND [--session SID] [--name N] [--desc D] [--cap a,b] [--pid PID] [--cwd DIR]
   atalk agents [--status waiting|in_room|away|offline] [--kind KIND]
   atalk whoami
-  atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭]   내 네임카드 수정 (--human: 이 에이전트를 쓰는 사람 별칭)
-  atalk config [user 별칭 | grace 분|off|default | offline 시간|off|default]
+  atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭] [--workspace 작업이름]   내 네임카드 수정 (--workspace "" 이면 작업 이름 숨김)
+  atalk config [user 별칭 | machine PC이름 | echo-final on|off | grace 분|off|default | offline 시간|off|default]
                                                       설정: 사용자 별칭 / 자리 비움 후 자동 퇴장(분) / 오프라인 카드 자동 삭제(시간, 기본 24)
   atalk prune --yes                                   오프라인 네임카드 지금 모두 삭제
   atalk unregister

@@ -6,6 +6,7 @@
 - 구현: Go (실행 파일 하나). 저장은 SQLite(`<데이터 폴더>/atalk.db`, 순수 Go 드라이버).
   예전 파일 형식(v0.2) 데이터는 처음 실행할 때 자동으로 DB 로 옮기고 원본은 `legacy-<시각>/` 에 남깁니다.
 - TypeScript 초기 구현([ts/](ts/))은 HTTP API 호환 시험용으로만 남아 있습니다 (파일 형식은 더 이상 공유하지 않음).
+- **사용자 매뉴얼: [docs/manual](docs/manual/README.md)** (화면 캡처 포함) · 웹: https://archi-duke.github.io/atalk-manual/ (공개 저장소 `archi-duke/atalk-manual` 로 옮겨 게시)
 - 설계: [docs/DESIGN.md](docs/DESIGN.md) · Go 전환 검토: [docs/GO-REVIEW.md](docs/GO-REVIEW.md)
 
 ## 빌드
