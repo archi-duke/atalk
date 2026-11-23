@@ -61,8 +61,8 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		out = sessionStart(c, kind, in)
 	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장을 실시간으로 기록 + 작업 중 신호 갱신
 		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), true)
-		if texts := turnTexts(in.TranscriptPath); len(texts) > 0 {
-			_ = c.EchoReply(core.MakeAgentID(kind, in.SessionID), texts, false)
+		if texts, prompt := turnTexts(in.TranscriptPath); len(texts) > 0 {
+			_ = c.EchoReply(core.MakeAgentID(kind, in.SessionID), texts, false, prompt)
 		}
 	case "stop":
 		out = stop(c, kind, in)
@@ -164,11 +164,11 @@ func stop(c *client.Client, kind string, in Input) any {
 	id := core.MakeAgentID(kind, in.SessionID)
 	// CLI 입력을 기록했으면 이번 턴의 응답 문장 중 아직 기록 안 된 것을 남기고 턴을 닫는다 (기록할 입력이 없으면 데몬이 무시).
 	// transcript 에 중간 문장이 빠지는 경우가 있어, 훅이 주는 마지막 응답이 없으면 덧붙인다.
-	texts := turnTexts(in.TranscriptPath)
+	texts, prompt := turnTexts(in.TranscriptPath)
 	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
 		texts = append(texts, last)
 	}
-	_ = c.EchoReply(id, texts, true)
+	_ = c.EchoReply(id, texts, true, prompt)
 	u, err := c.Unread(id, false)
 	if err != nil {
 		return nil
@@ -281,13 +281,15 @@ func prompt(c *client.Client, kind string, in Input) any {
 
 // turnTexts 는 Claude Code transcript(JSONL) 에서 마지막 사람 입력 이후에 쓴 응답 문장들(CLI 의 흰색 ●)을 순서대로 꺼낸다.
 // 도구 호출·결과는 뺀다. 작업 도중 끼어든 알림(<task-notification> 등)은 경계로 보지 않는다.
-func turnTexts(path string) []string {
+// 함께 이번 턴을 시작한 사람 입력(prompt)도 돌려준다 — 데몬이 응답을 기다리는 CLI 입력과 같은지 확인하는 데 쓴다
+// (사람이 입력한 말이 대기열에 들어간 동안 끝난 앞선 턴의 문장이 그 입력의 응답으로 붙지 않게).
+func turnTexts(path string) (texts []string, prompt string) {
 	if path == "" {
-		return nil
+		return nil, ""
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	defer f.Close()
 	const tail = 4 << 20 // 끝에서 4MB 만 읽는다
@@ -296,13 +298,13 @@ func turnTexts(path string) []string {
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return nil
+		return nil, ""
 	}
 	lines := strings.Split(string(b), "\n")
-	var texts []string // 뒤에서부터 모은다
-	done := func() []string {
+	// texts 는 뒤에서부터 모은다
+	done := func() ([]string, string) {
 		slices.Reverse(texts)
-		return texts
+		return texts, prompt
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e struct {
@@ -311,6 +313,11 @@ func turnTexts(path string) []string {
 			Message struct {
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
+			// 작업 도중 사람이 보낸 말은 user 항목이 아니라 queued_command 첨부로 들어온다 (그 뒤 문장은 그 말에 대한 응답)
+			Attachment struct {
+				Type   string `json:"type"`
+				Prompt string `json:"prompt"`
+			} `json:"attachment"`
 		}
 		if json.Unmarshal([]byte(lines[i]), &e) != nil {
 			continue
@@ -329,6 +336,11 @@ func turnTexts(path string) []string {
 			_ = json.Unmarshal(e.Message.Content, &blocks)
 		}
 		switch e.Type {
+		case "attachment":
+			if e.Attachment.Type == "queued_command" && strings.TrimSpace(e.Attachment.Prompt) != "" && !core.IsSystemPrompt(e.Attachment.Prompt) {
+				prompt = e.Attachment.Prompt
+				return done()
+			}
 		case "assistant":
 			var parts []string
 			for _, bl := range blocks {
@@ -345,6 +357,7 @@ func turnTexts(path string) []string {
 			}
 			for _, bl := range blocks {
 				if bl.Type == "text" && !core.IsSystemPrompt(bl.Text) { // 사람이 입력한 프롬프트 → 여기까지가 이번 턴
+					prompt = bl.Text
 					return done()
 				}
 			}

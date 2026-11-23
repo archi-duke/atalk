@@ -2079,13 +2079,20 @@ const echoPendingMaxAge = 12 * time.Hour
 // texts 는 그 턴에서 지금까지 쓴 문장 전부 (CLI 의 흰색 ●). 이미 기록한 문장은 건너뛰고 새 문장만 하나씩 남기므로
 // 도구를 쓸 때마다 보내면 실시간으로 쌓인다. final 이면 그 턴을 닫는다 (뒤에 오는 알림 처리 응답 등은 남기지 않음).
 // 응답을 받는 중인 CLI 입력이 없으면(방 메시지를 처리한 턴 등) 아무것도 하지 않는다 — 그 응답은 result 로 이미 게시된다.
-func (c *Atalk) EchoReply(agent string, texts []string, final bool) (out []Message, err error) {
+// prompt 가 있으면(Claude) 이번 턴을 시작한 사람 입력이 응답을 기다리는 CLI 입력과 같을 때만 기록한다.
+// 사람이 입력한 말이 대기열에 들어간 동안 앞선 턴(알림 처리 등)이 끝나면 그 턴의 문장이 엉뚱하게 붙고 기록이 닫히던 문제를 막는다.
+func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt string) (out []Message, err error) {
 	err = c.guard(func() error {
 		m, ok := c.memberships[agent]
 		if !ok || m.EchoOpen == 0 {
 			return nil
 		}
 		seq := m.EchoOpen
+		if prompt != "" {
+			if q, ok := c.st.MessagesBySeq(m.Room, []int{seq})[seq]; ok && !samePrompt(q.Body, prompt) {
+				return nil // 다른(앞선) 턴의 응답 — 기록하지 않고, 기다리는 입력의 기록도 닫지 않는다
+			}
+		}
 		if final {
 			m.EchoOpen = 0
 			c.saveMemberships()
@@ -2144,6 +2151,20 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool) (out []Messa
 		return nil
 	})
 	return
+}
+
+// samePrompt 는 CLI 입력 기록(잘렸을 수 있음)과 transcript 의 입력이 같은 말인지 본다 (앞 200자 비교, 공백 정리).
+func samePrompt(recorded, prompt string) bool {
+	norm := func(s string) []rune {
+		r := []rune(strings.Join(strings.Fields(s), " "))
+		if len(r) > 200 {
+			r = r[:200]
+		}
+		return r
+	}
+	a, b := norm(recorded), norm(prompt)
+	n := min(len(a), len(b))
+	return n > 0 && string(a[:n]) == string(b[:n])
 }
 
 // SplitMentions 는 본문 앞쪽의 "@이름" 토큰들을 떼어 낸다. "@오프1 @오프2 안녕" → [오프1 오프2], "안녕".
