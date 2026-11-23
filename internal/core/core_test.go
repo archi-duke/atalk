@@ -969,6 +969,30 @@ func TestEchoPrompt(t *testing.T) {
 	}
 }
 
+// 이름표를 이어받은 새 세션이 초대로 들어와도 이전 자리를 이어받는다 (같은 에이전트가 두 번 보이지 않게).
+func TestInviteTakesOverPreviousSeat(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	owner := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m", Pid: i(100), Cwd: s("D:/m")})).Agent.ID
+	ok(c.CreateRoom(owner, "r", "", 0))
+	old := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Name: s("오1"), Pid: i(700), Cwd: s("D:/op1")})).Agent.ID
+	e.alive[700] = true
+	ok(c.Invite(owner, "r", old))
+	ok(c.RespondInvite(old, "r", true))
+	check(t, c.MarkAway(old, "opencode_exit"))
+	e.alive[700] = false
+	nu := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o2", Pid: i(800), Cwd: s("D:/op1")}))
+	e.alive[800] = true
+	if nu.InheritedFrom != old || nu.Agent.Name != "오1" {
+		t.Fatalf("이름표 이어받기: %+v", nu)
+	}
+	ok(c.Invite(owner, "r", nu.Agent.ID))
+	ok(c.RespondInvite(nu.Agent.ID, "r", true))
+	if got := members(t, c, "r"); len(got) != 2 || !slices.Contains(got, nu.Agent.ID) || slices.Contains(got, old) {
+		t.Fatalf("이전 자리를 이어받아 멤버는 방장+새 오1 둘이어야 함: %v", got)
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
