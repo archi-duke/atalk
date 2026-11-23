@@ -72,6 +72,11 @@
   .agent-detail span { min-width:0; overflow-wrap:anywhere; }
   .agent-detail code { font:11.5px ui-monospace,Consolas,monospace; }
   .agent-detail button { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:6px; padding:0 6px; font-size:11px; cursor:pointer; margin-left:4px; }
+  /* 바로가기 모드 (Ctrl/⌘ 누름): 커서와 테두리로 "에이전트를 클릭하면 그 CLI 창으로" 를 알린다 */
+  body.focus-mode, body.focus-mode * { cursor:var(--cur-focus) !important; }
+  body.focus-mode [data-agent], body.focus-mode [data-agent] * { cursor:var(--cur-focus-hit) !important; }
+  body.focus-mode [data-agent] { outline:1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset:2px; border-radius:6px; }
+  body.focus-mode [data-agent]:hover { outline:2px solid var(--accent); }
   #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--fg); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:13px; z-index:1000; max-width:90vw; box-shadow:0 4px 16px rgba(0,0,0,.2); }
   .prune { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 16px 8px; font-size:11.5px; color:var(--muted); }
   .prune button { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; }
@@ -537,7 +542,35 @@ document.addEventListener("click", (e) => {
   if (!el) return;
   e.preventDefault(); e.stopPropagation();
   focusAgent(el.dataset.agent);
+  setFocusMode(false); focusModeDone = true; // 클릭하면 원래 포인터로 (Ctrl 을 뗐다 다시 누르면 다시 바로가기 모드)
 }, true);
+
+// 바로가기 모드 커서: 속이 빈 "창 + 바깥 화살표"(새 창으로 열기 기호) → 에이전트 위에서는 채워진 모양.
+// 흰 외곽선을 둘러 밝은·어두운 테마 모두에서 보이게 한다.
+(() => {
+  const svg = (body) => 'url("data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' + body + "</svg>") + '") 12 12, pointer';
+  const win = "M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5";
+  const arrow = "M14 3h7v7M21 3l-9 9";
+  const hollow = '<g fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="' + win + '" stroke="#fff" stroke-width="4.5"/><path d="' + arrow + '" stroke="#fff" stroke-width="4.5"/>' +
+    '<path d="' + win + '" stroke="#1c1d1f" stroke-width="2"/><path d="' + arrow + '" stroke="#1c1d1f" stroke-width="2"/></g>';
+  const filled = '<rect x="2.5" y="2.5" width="19" height="19" rx="4" fill="#2f6fde" stroke="#fff" stroke-width="1.5"/>' +
+    '<path d="M10 7.5h6.5V14M16.5 7.5 8 16" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+  document.documentElement.style.setProperty("--cur-focus", svg(hollow));
+  document.documentElement.style.setProperty("--cur-focus-hit", svg(filled));
+})();
+let focusModeDone = false;
+function setFocusMode(on) { if (!DATA) document.body.classList.toggle("focus-mode", on); }
+document.addEventListener("keydown", (e) => { if ((e.key === "Control" || e.key === "Meta") && !focusModeDone) setFocusMode(true); });
+document.addEventListener("keyup", (e) => { if (e.key === "Control" || e.key === "Meta") { focusModeDone = false; setFocusMode(false); } });
+window.addEventListener("blur", () => { focusModeDone = false; setFocusMode(false); });
+// 다른 창에서 Ctrl 을 누른 채 들어온 경우도 마우스를 움직이면 맞춘다
+document.addEventListener("mousemove", (e) => {
+  const held = e.ctrlKey || e.metaKey;
+  if (!held) focusModeDone = false;
+  const want = held && !focusModeDone;
+  if (document.body.classList.contains("focus-mode") !== want) setFocusMode(want);
+});
 function senderLabel(m) {
   return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "")
     : esc(nameOf(m.from)) + (m.echo ? '<span class="tag" title="CLI 입력에 대한 에이전트의 응답. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 응답</span>' : "");
