@@ -347,6 +347,7 @@
         <section>
           <h3>세션</h3>
           <label class="f"><input type="checkbox" id="sEcho"> 에이전트 창(CLI)에 입력한 말과 그 응답을 대화방에 기록하기 (기록만, 다른 에이전트에게 알리지 않음)</label>
+          <label class="f" style="padding-left:22px"><input type="checkbox" id="sEchoFinal"> 결과만 기록 — 작업 중간에 쓴 문장은 빼고 마지막 답만 (끄면 문장마다 실시간으로)</label>
           <label class="f"><input type="checkbox" id="sResume"> 새 세션이 같은 폴더의 이전 세션 이름표를 이어받기 (방에는 입장 명령을 받을 때 원래 자리로)</label>
           <label class="f"><input type="checkbox" id="sAccept"> opencode 가 초대를 자동 수락 (방에 없을 때)</label>
         </section>
@@ -963,6 +964,7 @@ async function openSettings() {
   $("#sLimit").value = cfg.default_max_messages || "";
   $("#sResume").checked = cfg.auto_resume !== false;
   $("#sEcho").checked = cfg.echo_prompts !== false;
+  $("#sEchoFinal").checked = !!cfg.echo_final_only;
   $("#sAccept").checked = cfg.auto_accept_invites !== false;
   numField(cfg.away_grace_min, "#sGrace", "#sGraceOff");
   numField(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
@@ -994,7 +996,7 @@ $("#setForm").onsubmit = async (e) => {
   const next = { ...cfg, user: $("#sUser").value.trim(), machine_name: $("#sMachine").value.trim() || null,
     away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
     default_max_messages: $("#sLimit").value ? Number($("#sLimit").value) : null,
-    auto_resume: $("#sResume").checked ? null : false, echo_prompts: $("#sEcho").checked ? null : false, auto_accept_invites: $("#sAccept").checked ? null : false };
+    auto_resume: $("#sResume").checked ? null : false, echo_prompts: $("#sEcho").checked ? null : false, echo_final_only: $("#sEchoFinal").checked ? true : null, auto_accept_invites: $("#sAccept").checked ? null : false };
   for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
   try {
     await fetch("/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) })

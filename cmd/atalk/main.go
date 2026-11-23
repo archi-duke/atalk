@@ -420,6 +420,8 @@ func main() {
 			switch rest[0] {
 			case "user":
 				cfg.User = strings.Join(rest[1:], " ")
+			case "echo-final": // CLI 응답을 결과만 기록 (on) / 문장마다 실시간 (off)
+				cfg.EchoFinalOnly = at.arg(1, "on | off") == "on"
 			case "machine":
 				cfg.MachineName = strings.Join(rest[1:], " ") // 비우면 기본 이름 (PC-XXXX)
 			case "offline":
@@ -449,7 +451,7 @@ func main() {
 					cfg.AwayGraceMin = &n
 				}
 			default:
-				fail("bad_arg", "atalk config [user 별칭 | machine PC이름 | grace 분|off|default | offline 시간|off|default]")
+				fail("bad_arg", "atalk config [user 별칭 | machine PC이름 | echo-final on|off | grace 분|off|default | offline 시간|off|default]")
 			}
 			cfg, err = c.SetConfig(cfg)
 			check(err)

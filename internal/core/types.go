@@ -132,6 +132,8 @@ type Config struct {
 	AutoAcceptInvites *bool `json:"auto_accept_invites,omitempty"`
 	// EchoPrompts 가 false 면 에이전트 창(CLI)에 입력한 말을 대화방에 기록하지 않음. 없으면 켜짐.
 	EchoPrompts *bool `json:"echo_prompts,omitempty"`
+	// EchoFinalOnly 가 true 면 CLI 응답 중 작업 중간에 쓴 문장은 빼고 마지막 답만 기록한다. 없으면 꺼짐 (문장마다 실시간 기록).
+	EchoFinalOnly bool `json:"echo_final_only,omitempty"`
 	// MachineName 은 이 PC 의 이름 (에이전트 목록에 보임). 없으면 "PC-" + PC ID 앞 4자리. 호스트 이름은 쓰지 않는다.
 	MachineName string `json:"machine_name,omitempty"`
 }
