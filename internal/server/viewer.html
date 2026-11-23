@@ -72,6 +72,12 @@
   .agent-detail span { min-width:0; overflow-wrap:anywhere; }
   .agent-detail code { font:11.5px ui-monospace,Consolas,monospace; }
   .agent-detail button { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:6px; padding:0 6px; font-size:11px; cursor:pointer; margin-left:4px; }
+  /* 바로가기 모드 (Ctrl/⌘ 누름): 커서와 테두리로 "에이전트를 클릭하면 그 CLI 창으로" 를 알린다 */
+  body.focus-mode, body.focus-mode * { cursor:var(--cur-focus) !important; }
+  body.focus-mode [data-agent], body.focus-mode [data-agent] * { cursor:var(--cur-focus-hit) !important; }
+  body.focus-mode [data-agent] { outline:1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset:2px; border-radius:6px; }
+  body.focus-mode [data-agent]:hover { outline:2px solid var(--accent); }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--fg); color:var(--bg); padding:8px 14px; border-radius:8px; font-size:13px; z-index:1000; max-width:90vw; box-shadow:0 4px 16px rgba(0,0,0,.2); }
   .prune { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 16px 8px; font-size:11.5px; color:var(--muted); }
   .prune button { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; }
 
@@ -510,12 +516,61 @@ function md(src) {
 }
 // 말풍선 본문: 마크다운으로 렌더
 function fmt(s) { return md(s); }
+const FOCUS_HINT = "Ctrl+클릭: 이 에이전트의 CLI 창을 맨 앞으로";
 function avatar(m) {
-  if (m.human) return '<div class="ava" style="background:#e0a526">' + esc([...m.human][0] || "?") + "</div>";
+  if (m.human) return '<div class="ava" style="background:#e0a526" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + esc([...m.human][0] || "?") + "</div>";
   const a = agents[m.from];
   const color = KIND_COLOR[a?.kind] || "#8a9099";
-  return '<div class="ava" style="background:' + color + '" title="' + esc(a?.kind || "") + '">' + esc([...nameOf(m.from)][0] || "?") + "</div>";
+  return '<div class="ava" style="background:' + color + '" data-agent="' + esc(m.from) + '" title="' + esc(a?.kind || "") + " · " + FOCUS_HINT + '">' + esc([...nameOf(m.from)][0] || "?") + "</div>";
 }
+// 에이전트(아바타·이름·멤버·목록)를 Ctrl+클릭(맥은 ⌘+클릭) → 그 에이전트의 CLI 창을 맨 앞으로 (이 PC 에서 실행 중일 때)
+function toast(msg) {
+  let t = document.getElementById("toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => (t.hidden = true), 2500);
+}
+async function focusAgent(id) {
+  try {
+    const r = await fetch("/agents/" + encodeURIComponent(id) + "/focus", { method: "POST" }).then((x) => x.json());
+    toast(r.ok ? nameOf(id) + " 창을 앞으로 가져왔습니다" : (r.error?.message || "창을 찾지 못했습니다"));
+  } catch { toast("데몬에 연결할 수 없습니다"); }
+}
+document.addEventListener("click", (e) => {
+  if (DATA || !(e.ctrlKey || e.metaKey)) return;
+  const el = e.target.closest("[data-agent]");
+  if (!el) return;
+  e.preventDefault(); e.stopPropagation();
+  focusAgent(el.dataset.agent);
+  setFocusMode(false); focusModeDone = true; // 클릭하면 원래 포인터로 (Ctrl 을 뗐다 다시 누르면 다시 바로가기 모드)
+}, true);
+
+// 바로가기 모드 커서: 속이 빈 "창 + 바깥 화살표"(새 창으로 열기 기호) → 에이전트 위에서는 채워진 모양.
+// 흰 외곽선을 둘러 밝은·어두운 테마 모두에서 보이게 한다.
+(() => {
+  const svg = (body) => 'url("data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">' + body + "</svg>") + '") 12 12, pointer';
+  const win = "M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5";
+  const arrow = "M14 3h7v7M21 3l-9 9";
+  const hollow = '<g fill="none" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="' + win + '" stroke="#fff" stroke-width="4.5"/><path d="' + arrow + '" stroke="#fff" stroke-width="4.5"/>' +
+    '<path d="' + win + '" stroke="#1c1d1f" stroke-width="2"/><path d="' + arrow + '" stroke="#1c1d1f" stroke-width="2"/></g>';
+  const filled = '<rect x="2.5" y="2.5" width="19" height="19" rx="4" fill="#2f6fde" stroke="#fff" stroke-width="1.5"/>' +
+    '<path d="M10 7.5h6.5V14M16.5 7.5 8 16" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
+  document.documentElement.style.setProperty("--cur-focus", svg(hollow));
+  document.documentElement.style.setProperty("--cur-focus-hit", svg(filled));
+})();
+let focusModeDone = false;
+function setFocusMode(on) { if (!DATA) document.body.classList.toggle("focus-mode", on); }
+document.addEventListener("keydown", (e) => { if ((e.key === "Control" || e.key === "Meta") && !focusModeDone) setFocusMode(true); });
+document.addEventListener("keyup", (e) => { if (e.key === "Control" || e.key === "Meta") { focusModeDone = false; setFocusMode(false); } });
+window.addEventListener("blur", () => { focusModeDone = false; setFocusMode(false); });
+// 다른 창에서 Ctrl 을 누른 채 들어온 경우도 마우스를 움직이면 맞춘다
+document.addEventListener("mousemove", (e) => {
+  const held = e.ctrlKey || e.metaKey;
+  if (!held) focusModeDone = false;
+  const want = held && !focusModeDone;
+  if (document.body.classList.contains("focus-mode") !== want) setFocusMode(want);
+});
 function senderLabel(m) {
   return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "")
     : esc(nameOf(m.from)) + (m.echo ? '<span class="tag" title="CLI 입력에 대한 에이전트의 응답. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 응답</span>' : "");
@@ -556,7 +611,7 @@ function renderSide() {
     const groups = [...pcs.values()].sort((p, q) => (q.local - p.local) || (p.host.name || "").localeCompare(q.host.name || ""));
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
-      return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
+      return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
         '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + (STATUS_KO[x.status] || x.status) + "</span></div>" +
         '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
@@ -615,7 +670,7 @@ function agentDetail(x) {
 function cardPresence(room) {
   if (room.closed_at || !room.members.length) return "";
   return '<div class="pres">' + presenceRows(room, roomLogs[room.room_id] || []).map((r) =>
-    '<span class="' + (r.cls === "off" ? "off-t" : "") + '" title="' + esc(r.m.name + ": " + r.text + " — " + r.title) + '"><span class="pd ' + r.cls + '"></span>' +
+    '<span class="' + (r.cls === "off" ? "off-t" : "") + '" data-agent="' + esc(r.m.agent) + '" title="' + esc(r.m.name + ": " + r.text + " — " + r.title) + " · " + FOCUS_HINT + '"><span class="pd ' + r.cls + '"></span>' +
     esc(r.m.name) + "</span>").join("") + "</div>";
 }
 document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
@@ -668,7 +723,7 @@ function renderChat(scroll) {
   $("#purpose").textContent = room.description ? "목적: " + room.description : "";
   $("#purpose").title = room.description || "";
   $("#sub").textContent = (room.owner ? "" : "방장 없음 · ") + "멤버 " + room.members.length + (room.closed_at ? " · 닫힌 방" : "") + (DATA ? " · " + new Date(DATA.exported_at).toLocaleString("ko-KR") + " 내보냄" : "");
-  $("#members").innerHTML = room.members.map((m) => '<span><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
+  $("#members").innerHTML = room.members.map((m) => '<span data-agent="' + esc(m.agent) + '" title="' + FOCUS_HINT + '"><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
   renderCompose(room);
   renderPresence(room, chat.logs || []);
   if (DATA) $("#menuWrap").style.display = "none";
@@ -713,7 +768,7 @@ function renderChat(scroll) {
     const meta = '<div class="meta">' + (unread ? '<span class="n">' + unread + "</span>" : "") + (lastInGroup ? "<span>" + hhmm(m.ts) + "</span>" : "") + "</div>";
     html += '<div class="m' + (mine ? " mine" : "") + (first ? " first" : "") + '" id="s' + m.seq + '" title="#' + m.seq + '">' +
       (first ? avatar(m) : '<div class="ava blank"></div>') + '<div class="col">' +
-      (first && !mine ? '<div class="who">' + senderLabel(m) + "</div>" : "") +
+      (first && !mine ? '<div class="who" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + senderLabel(m) + "</div>" : "") +
       '<div class="line"><div class="bubble">' + inner + "</div>" + meta + "</div>" +
       (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>";
   });

@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"atalk/internal/core"
+	"atalk/internal/daemon"
 )
 
 //go:embed viewer.html
@@ -273,6 +275,27 @@ func (s *Server) routes() http.Handler {
 		}
 		m, err := c.EchoPrompt(r.PathValue("id"), b.Text)
 		return map[string]any{"recorded": m != nil, "message": m}, err
+	})
+	// CLI 창 앞으로: 이 PC 에서 돌고 있는 에이전트의 터미널 창을 맨 앞으로 올린다 (웹에서 Ctrl+클릭).
+	// 창을 찾을 때 콘솔에 잠깐 붙어야 해서 데몬이 아니라 도우미 프로세스(atalk focus-window)가 한다.
+	h("POST /agents/{id}/focus", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		v, err := c.GetAgent(r.PathValue("id"))
+		if err != nil {
+			return nil, err
+		}
+		if !v.Local || v.Pid == nil || v.Status == "offline" {
+			return nil, &core.Error{Status: 409, Code: "not_running_here", Message: "이 PC 에서 실행 중인 에이전트만 창을 앞으로 가져올 수 있음"}
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		cmd := exec.Command(exe, "focus-window", "--pid", strconv.Itoa(*v.Pid))
+		daemon.HideCmd(cmd)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return nil, &core.Error{Status: 409, Code: "focus_failed", Message: strings.TrimSpace(string(out))}
+		}
+		return map[string]any{}, nil
 	})
 	// 임시 세션 확정: 사람이 이 세션에 처음 입력함 (이전 세션 이름표·자리를 그때 넘겨받는다)
 	h("POST /agents/{id}/activate", func(w http.ResponseWriter, r *http.Request) (any, error) {

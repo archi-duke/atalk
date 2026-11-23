@@ -23,6 +23,7 @@ import (
 	"atalk/internal/install"
 	"atalk/internal/mcpserver"
 	"atalk/internal/paths"
+	"atalk/internal/procs"
 	"atalk/internal/server"
 )
 
@@ -335,6 +336,18 @@ func main() {
 			lines = append(lines, l)
 		}
 		out(agents, orText(strings.Join(lines, "\n"), "(등록된 에이전트 없음)"))
+
+	case "focus-window": // 도우미: 데몬이 웹의 Ctrl+클릭 요청으로 실행 (에이전트 터미널 창을 맨 앞으로)
+		if a.has("dry") { // 확인용: 창을 찾기만 함
+			title, how, err := procs.FindWindow(a.num("pid", 0))
+			check(err)
+			fmt.Printf("%s  (%s)\n", title, how)
+			return
+		}
+		if err := procs.FocusWindow(a.num("pid", 0)); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
 
 	case "whoami":
 		id := me()
