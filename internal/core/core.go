@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -1784,6 +1785,24 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 	return
 }
 
+// systemTag 는 입력 전체가 태그 블록 하나인지 본다: <task-notification>…</task-notification>, <bash-input>…</bash-input> 등.
+var systemTag = regexp.MustCompile(`^<([a-zA-Z][a-zA-Z0-9_-]*)(\s[^>]*)?>[\s\S]*</([a-zA-Z][a-zA-Z0-9_-]*)>$`)
+
+// IsSystemPrompt 는 사람이 입력한 말이 아니라 에이전트 도구가 입력처럼 넣은 것인지 본다
+// (Claude Code 의 Monitor·백그라운드 작업 알림, 시스템 알림, 셸·명령 출력 등). 사람이 붙여 넣은 <pasted_content> 는 사람의 입력이다.
+func IsSystemPrompt(text string) bool {
+	t := strings.TrimSpace(text)
+	for _, p := range []string{"<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<local-command-", "<command-name>", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>"} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
+	}
+	if m := systemTag.FindStringSubmatch(t); m != nil && m[1] == m[3] && m[1] != "pasted_content" {
+		return true
+	}
+	return false
+}
+
 // EchoMax 는 CLI 입력 기록 한 건의 최대 글자 수 (붙여 넣은 긴 내용은 잘라서 남긴다).
 const EchoMax = 4000
 
@@ -1792,6 +1811,11 @@ const EchoMax = 4000
 // 방에 없거나, 설정이 꺼져 있거나, 방 메시지 한도에 닿았으면 아무것도 하지 않는다 (입력을 막지 않음).
 func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 	err = c.guard(func() error {
+		if IsSystemPrompt(text) {
+			// 사람이 아니라 시스템이 넣은 입력(Monitor 알림 등) → 기록하지 않고, 그 턴의 응답도 남지 않게 짝을 지운다
+			delete(c.echoPending, agent)
+			return nil
+		}
 		if cfg := c.readConfig(); cfg.EchoPrompts != nil && !*cfg.EchoPrompts {
 			return nil
 		}

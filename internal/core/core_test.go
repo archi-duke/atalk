@@ -838,6 +838,31 @@ func TestBackfillHosts(t *testing.T) {
 	}
 }
 
+func TestIsSystemPrompt(t *testing.T) {
+	for _, s := range []string{
+		"<task-notification>\n<task-id>x</task-id>\n</task-notification>",
+		"  <system-reminder>hi</system-reminder>",
+		"[SYSTEM NOTIFICATION - NOT USER INPUT] ...",
+		"<bash-input>ls</bash-input>",
+		"<local-command-stdout>ok</local-command-stdout>",
+		"<some-new-tag attr=\"1\">\nbody\n</some-new-tag>",
+	} {
+		if !IsSystemPrompt(s) {
+			t.Errorf("시스템 입력으로 봐야 함: %q", s)
+		}
+	}
+	for _, s := range []string{
+		"이 폴더 정리해 줘",
+		"<div> 태그 고쳐 줘",
+		"<pasted_content id=\"1\">붙여 넣은 글</pasted_content>",
+		"설명 <b>굵게</b>",
+	} {
+		if IsSystemPrompt(s) {
+			t.Errorf("사람 입력인데 시스템으로 봄: %q", s)
+		}
+	}
+}
+
 func TestWorkspaceLabelHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -893,6 +918,18 @@ func TestEchoPrompt(t *testing.T) {
 		if u := ok(c.Unread(who, true)); len(u.Messages) != 0 {
 			t.Fatalf("응답 기록도 전달되면 안 됨: %+v", u.Messages)
 		}
+	}
+	// 시스템이 넣은 입력(Monitor 알림 등)은 기록하지 않고, 그 턴의 응답도 남기지 않는다
+	ok(c.EchoPrompt(a, "진짜 입력"))
+	notice := "<task-notification>\n<task-id>b1</task-id>\n<summary>Monitor event: \"온도\"</summary>\n</task-notification>"
+	if m := ok(c.EchoPrompt(a, notice)); m != nil {
+		t.Fatal("Monitor 알림은 기록하면 안 됨")
+	}
+	if r := ok(c.EchoReply(a, "알림 처리 응답")); r != nil {
+		t.Fatal("알림 턴의 응답이 이전 입력의 응답으로 붙으면 안 됨")
+	}
+	if m := ok(c.EchoPrompt(a, "이거 봐 줘\n\n<pasted_content id=\"1\">\n<task-notification>x</task-notification>\n</pasted_content id=\"1\">")); m == nil {
+		t.Fatal("사람이 붙여 넣은 내용이 있는 입력은 기록해야 함")
 	}
 	f := false
 	ok(c.SetConfig(Config{EchoPrompts: &f}))
