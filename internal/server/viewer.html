@@ -455,7 +455,7 @@ function renderSide() {
     const offline = list.filter((x) => x.status === "offline");
     const STATUS_KO = { in_room: "방에 있음", away: "자리 비움", waiting: "대기", offline: "오프라인" };
     const OS_KO = { windows: "Windows", mac: "macOS", linux: "Linux" };
-    // PC 별로 묶는다: 이 PC 가 먼저, 그다음 PC 이름 순. PC 가 하나뿐이면 머리줄은 생략
+    // PC 별로 묶는다: 이 PC 가 먼저, 그다음 PC 이름 순. PC 가 하나여도 머리줄을 보여 어느 PC 인지 알게 한다
     const pcs = new Map();
     for (const x of list) {
       const k = x.host?.id || "?";
@@ -473,7 +473,7 @@ function renderSide() {
     };
     $("#list").innerHTML = (offline.length
       ? '<div class="prune">오프라인 ' + offline.length + '개 · 하루 지나면 자동 삭제<button id="pruneAll">모두 삭제</button></div>' : "") +
-      (groups.map((g) => (groups.length > 1 || !g.local
+      (groups.map((g) => (true
         ? '<div class="pc-head">🖥 ' + esc(g.host.name || "알 수 없는 PC") + (g.local ? ' <span class="here">이 PC</span>' : "") + (OS_KO[g.host.os] ? " · " + OS_KO[g.host.os] : "") + "</div>" : "") +
         g.items.map(row).join("")).join("") || '<div class="empty">등록된 에이전트 없음</div>');
     $("#list").querySelectorAll(".row[data-a]").forEach((el) => (el.onclick = (e) => {

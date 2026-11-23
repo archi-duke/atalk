@@ -119,7 +119,7 @@ func New(opts Options) (*Atalk, error) {
 		}
 		moveLegacy(root, c.now())
 	}
-	if err = c.guard(func() error { c.load(); return nil }); err != nil {
+	if err = c.guard(func() error { c.load(); c.backfillHosts(); return nil }); err != nil {
 		st.Close()
 		return nil, err
 	}
@@ -563,6 +563,29 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		return nil
 	})
 	return
+}
+
+// backfillHosts 는 PC 정보·작업 이름이 생기기 전에 등록된 카드(이 PC 것)에 그 값을 채운다.
+// 실행 중인 세션은 다시 등록하지 않으므로 데몬이 시작할 때 한 번 채운다. 사용자가 바꾼 작업 이름(숨김 포함)은 건드리지 않는다.
+func (c *Atalk) backfillHosts() {
+	for _, card := range c.agents {
+		if !c.isLocal(card) {
+			continue
+		}
+		changed := false
+		if card.Host == nil {
+			card.Host, changed = &Host{ID: c.machineID, OS: LocalOS()}, true
+		}
+		if card.Cwd != nil && card.WorkspaceID == "" {
+			card.WorkspaceID, changed = WorkspaceID(c.machineID, LocalOS(), *card.Cwd), true
+		}
+		if card.Cwd != nil && card.Workspace == nil {
+			card.Workspace, changed = ptr(WorkspaceLabel(*card.Cwd)), true
+		}
+		if changed {
+			c.saveCard(card)
+		}
+	}
 }
 
 // LocalOS 는 이 PC 의 OS 를 windows | mac | linux | 그 밖(GOOS) 으로.
