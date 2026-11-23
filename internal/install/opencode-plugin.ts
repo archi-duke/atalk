@@ -325,8 +325,19 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     return `[ATalk] ${room} #${msg.seq} → ${msg.to?.length ? msg.to.map((id: string) => names[id] ?? id).join(", ") : "방 전체"}\n${msg.human}@${names[agent] ?? agent}: ${msg.body}`
   }
 
+  // TUI 플러그인(atalk-tui.ts)이 이 프로세스에서 이전 세션으로 복귀시킨 카드를 찾아 메시지 전달 대상에 넣는다
+  async function adoptResumed() {
+    try {
+      const list: any[] = (await api("GET", "/agents?kind=opencode")).agents ?? []
+      for (const a of list) {
+        if (a.pid === process.pid && !a.provisional && a.session_id && !sessions.has(a.session_id)) await track(a.session_id)
+      }
+    } catch {}
+  }
+
   const timer = setInterval(() => {
     for (const sid of sessions.keys()) void pump(sid)
+    void adoptResumed()
   }, POLL_MS)
 
   return {

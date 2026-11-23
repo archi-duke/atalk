@@ -22,6 +22,11 @@ var skillTmpl string
 //go:embed opencode-plugin.ts
 var pluginTmpl string
 
+// TUI 플러그인: TUI 에서 이전 세션을 고르면 바로 그 방으로 복귀시킨다 (opencode 는 세션 선택을 서버 플러그인에 알려 주지 않음)
+//
+//go:embed opencode-tui-plugin.ts
+var tuiPluginTmpl string
+
 // Exe 는 atalk 실행 파일의 절대 경로 (슬래시 구분 — bash 와 JSON 에서 그대로 쓰기 위해).
 func Exe() string {
 	p, err := os.Executable()
@@ -112,6 +117,7 @@ func Check(p Paths) Status {
 func (p Paths) skillFile() string    { return filepath.Join(p.Claude, "skills", "atalk", "SKILL.md") }
 func (p Paths) settingsFile() string { return filepath.Join(p.Claude, "settings.json") }
 func (p Paths) pluginFile() string   { return filepath.Join(p.Opencode, "plugin", "atalk.ts") }
+func (p Paths) tuiPluginFile() string { return filepath.Join(p.Opencode, "plugin", "atalk-tui.ts") }
 
 func writeFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -270,6 +276,10 @@ func Opencode(p Paths) ([]string, error) {
 		return done, err
 	}
 	done = append(done, "플러그인: "+p.pluginFile())
+	if err := writeFile(p.tuiPluginFile(), render(tuiPluginTmpl, Exe())); err != nil {
+		return done, err
+	}
+	done = append(done, "TUI 플러그인: "+p.tuiPluginFile())
 	if _, err := os.Stat(p.skillFile()); err != nil {
 		f, err := Skill(p)
 		if err != nil {
@@ -337,6 +347,7 @@ func Uninstall(p Paths, target string) ([]string, error) {
 		}
 	}
 	if target == "opencode" || target == "all" {
+		_ = os.Remove(p.tuiPluginFile())
 		if err := os.Remove(p.pluginFile()); err == nil {
 			done = append(done, "플러그인 삭제: "+p.pluginFile())
 		}
