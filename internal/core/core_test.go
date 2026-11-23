@@ -1108,6 +1108,50 @@ func TestClaudeStartupThenResume(t *testing.T) {
 	}
 }
 
+// 이전 세션으로 복귀하면, 그 사이 이름표를 넘겨받아 방에 들어갔던 세션(지금 안 쓰임)의 자리를 되찾는다.
+func TestResumeReclaimsSeatFromSuccessor(t *testing.T) {
+	for _, viaRequest := range []bool{true, false} {
+		e := newEnv(t)
+		c := e.core()
+		owner := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m", Pid: i(100), Cwd: s("D:/m")})).Agent.ID
+		ok(c.CreateRoom(owner, "r", "", 0))
+		a := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "a", Name: s("오1"), Pid: i(700), Cwd: s("D:/op1")})).Agent.ID
+		e.alive[700] = true
+		ok(c.Invite(owner, "r", a))
+		ok(c.RespondInvite(a, "r", true))
+		check(t, c.MarkAway(a, "exit"))
+		e.alive[700] = false
+		if !viaRequest { // a 의 자리가 유예로 정리된 뒤 b 가 초대로 새 자리에 들어간 경우
+			e.clock = e.clock.Add(2 * time.Minute)
+			c.Sweep()
+		}
+		b := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "b", Pid: i(800), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+		e.alive[800] = true
+		if viaRequest {
+			check(t, c.Activate(b))
+			ok(c.RequestJoin(b, "r", "")) // a 의 자리를 넘겨받음
+		} else {
+			ok(c.Invite(owner, "r", b))
+			ok(c.RespondInvite(b, "r", true))
+		}
+		check(t, c.MarkAway(b, "opencode_exit"))
+		e.alive[800] = false
+		// 사용자가 a 세션으로 복귀
+		e.alive[900] = true
+		back := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "a", Pid: i(900), Cwd: s("D:/op1"), Provisional: true}))
+		if back.Agent.Room == nil || *back.Agent.Room != "r" || back.Agent.Status != StateInRoom {
+			t.Fatalf("viaRequest=%v: 복귀한 a 가 그 방에: %+v", viaRequest, back.Agent)
+		}
+		got := members(t, c, "r")
+		if len(got) != 2 || !slices.Contains(got, a) || slices.Contains(got, b) {
+			t.Fatalf("viaRequest=%v: 오1 은 하나(a): %v", viaRequest, got)
+		}
+		if v := ok(c.GetAgent(b)); v.RetiredBy == nil || *v.RetiredBy != a {
+			t.Fatalf("viaRequest=%v: b 는 a 에게 넘어감: %+v", viaRequest, v.RetiredBy)
+		}
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
