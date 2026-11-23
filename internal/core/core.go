@@ -860,6 +860,22 @@ func (c *Atalk) reclaimFromSuccessor(id, successor string) *Recovery {
 	return nil
 }
 
+// sameProcessInRoom 은 같은 PC·같은 프로세스·같은 종류의 다른(확정된) 세션이 방에 들어가 있는지 본다.
+func (c *Atalk) sameProcessInRoom(card *AgentCard) bool {
+	if card.Pid == nil || !c.isLocal(card) {
+		return false
+	}
+	for oid, o := range c.agents {
+		if oid == card.ID || o.Provisional || o.Kind != card.Kind || o.Pid == nil || *o.Pid != *card.Pid || !c.isLocal(o) {
+			continue
+		}
+		if _, ok := c.memberships[oid]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // dropProvisionalSuccessors 는 이전 세션(id)이 돌아왔을 때, 그 이름표를 이어받으려던 임시 카드들을 지운다.
 // 같은 프로세스(opencode 한 개)가 켜자마자 만든 쓰지 않은 임시 세션도 지운다 (사용자가 그 프로세스에서 다른 세션으로 복귀함).
 func (c *Atalk) dropProvisionalSuccessors(id string) {
@@ -2170,6 +2186,10 @@ func (c *Atalk) sweepOffline(now time.Time) {
 		off := c.statusOf(id) == "offline"
 		if off && card.Provisional { // 한 번도 쓰지 않고 끝난 임시 세션은 바로 지운다
 			c.removeCard(id, "쓰지 않고 끝난 새 세션")
+			continue
+		}
+		if card.Provisional && c.sameProcessInRoom(card) { // 같은 프로세스가 이미 다른 세션으로 방에 있음 → 켜면서 만든 빈 세션은 쓸 일이 없다
+			c.removeCard(id, "같은 프로세스가 다른 세션으로 방에 복귀함 (쓰지 않은 새 세션)")
 			continue
 		}
 		switch {

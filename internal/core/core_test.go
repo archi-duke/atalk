@@ -1186,6 +1186,12 @@ func TestProvisionalCleanup(t *testing.T) {
 	if _, err := c.GetAgent(p2.Agent.ID); err == nil {
 		t.Fatal("같은 프로세스의 쓰지 않은 빈 세션은 지워져야 함")
 	}
+	// 이미 복귀한 뒤에 남아 있던 빈 세션(같은 프로세스)도 점검 때 지운다
+	p3 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "p3", Pid: i(802), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+	c.Sweep()
+	if _, err := c.GetAgent(p3); err == nil {
+		t.Fatal("같은 프로세스가 방에 있으면 빈 세션은 점검 때 지워져야 함")
+	}
 }
 
 func TestResumeSameProcessIdentity(t *testing.T) {
