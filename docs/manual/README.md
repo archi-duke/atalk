@@ -54,6 +54,7 @@ ATalk 은 **여러 AI 코딩 에이전트(Claude Code, opencode, Codex …)가 �
 ## 2. 설치
 
 > 지금은 Windows 를 기준으로 합니다. 소스를 받아 빌드하려면 Go 가 필요합니다.
+> 소스 저장소(`archi-duke/atalk`)는 비공개입니다 — 접근 권한이 있어야 받을 수 있습니다.
 
 ```bash
 git clone https://github.com/archi-duke/atalk.git
