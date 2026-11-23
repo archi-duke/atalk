@@ -102,17 +102,12 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
       const reg = await api("POST", "/agents", body)
       sessions.set(sid, { id: agentId(sid), busy: false, working: false, seen: new Set() })
-      // 새 세션이면 같은 폴더의 이전 세션(이 opencode 의 이전 세션 포함)이 있던 방 자리를 자동으로 이어받는다
-      let resumed = false
-      if (!reg.recovery) {
-        try {
-          const r = await api("POST", `/agents/${enc(agentId(sid))}/resume`, {})
-          resumed = !!r.recovery?.room
-          if (resumed) await client.tui.showToast({ body: { message: `ATalk: 이전 세션이 있던 ${r.recovery.room} 방을 이어서 씁니다`, variant: "info" } }).catch(() => {})
-        } catch {}
-      }
-      // 처음 등록했고 이어받은 세션도 없으면 기본 이름 (폴더명-세션ID끝자리). 나중에 바꾼 이름은 덮어쓰지 않는다.
-      if (reg.created && !resumed && !process.env.ATALK_NAME) {
+      // 새 세션은 같은 폴더의 이전 세션 이름표만 이어받는다 (데몬이 등록할 때 처리). 방에는 입장 명령을 받을 때만 들어간다.
+      const inherited = !!reg.inherited_from
+      if (reg.previous_room)
+        await client.tui.showToast({ body: { message: `ATalk: 이전 세션은 ${reg.previous_room} 방에 있었습니다. 들어가려면 "atalk request ${reg.previous_room}"`, variant: "info" } }).catch(() => {})
+      // 처음 등록했고 이어받은 이름표도 없으면 기본 이름 (폴더명-세션ID끝자리). 나중에 바꾼 이름은 덮어쓰지 않는다.
+      if (reg.created && !inherited && !process.env.ATALK_NAME) {
         const name = `${directory.split(/[\\/]/).filter(Boolean).pop() ?? "opencode"}-${sid.slice(-5)}`
         await api("PATCH", `/agents/${enc(agentId(sid))}`, { name }).catch(() => {})
       }

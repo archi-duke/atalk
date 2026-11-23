@@ -362,7 +362,8 @@ func (s *Server) routes() http.Handler {
 			return nil, err
 		}
 		room, err := c.RequestJoin(b.Agent, r.PathValue("r"), b.Note)
-		return map[string]any{"room": room}, err
+		// joined: 신청 대신 바로 들어감 (자리 비움이던 내 자리, 또는 이전 세션의 자리)
+		return map[string]any{"room": room, "joined": err == nil && c.RoomOf(b.Agent) == r.PathValue("r")}, err
 	})
 	h("POST /rooms/{r}/requests/respond", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {

@@ -208,7 +208,11 @@ type RegisterInput struct {
 type RegisterResult struct {
 	Agent    AgentView `json:"agent"`
 	Created  bool      `json:"created"`
-	Recovery *Recovery `json:"recovery"`
+	Recovery *Recovery `json:"recovery"` // 같은 세션이 다시 등록했고 방에 있으면 (예: 대화 압축)
+	// 새 세션이 같은 폴더의 이전 세션 이름표(이름·설명·능력)를 이어받았으면 그 세션 id.
+	// 방 자리는 이어받지 않는다: PreviousRoom 에 있던 방은 입장 명령(request)을 받으면 승인 없이 원래 자리로 들어간다.
+	InheritedFrom string `json:"inherited_from,omitempty"`
+	PreviousRoom  string `json:"previous_room,omitempty"`
 }
 
 type CardPatch struct {

@@ -95,7 +95,11 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 - **같은 프로세스의 세션 ID 바뀜(Claude 다시 열기)**: 훅에는 새 세션 ID 가 오지만 Bash 의 `CLAUDE_CODE_SESSION_ID` 는 예전 ID 로 남는다.
   claude-code 카드를 등록할 때 같은 PID 의 다른 claude-code 카드가 방에 없으면 `retired_by` = 새 카드로 표시하고(방에 있으면 아래 자동 이어받기가 처리),
   CLI 는 환경 변수에서 정한 ID 가 retired 면 `retired_by` 를 끝까지 따라간다. opencode 는 프로세스 하나에 세션이 여럿이라 제외.
-- **자동 이어받기(resume)**: 에이전트가 새 세션으로 시작하면(Claude SessionStart 훅, opencode 플러그인) `POST /agents/:id/resume` 으로 위 조건의 이전 세션 중 가장 최근 것을 자동으로 이어받는다.
+- **시작할 때는 이름표만, 방은 입장 명령으로**: 새 세션을 등록(`POST /agents`)하면 같은 kind·같은 cwd 의 이전 세션(끝났거나 away, 또는 같은 pid) 중 가장 최근 것의
+  이름/설명/능력/사람 별칭을 이어받고(이름을 직접 준 경우 제외), 이전 카드에 `retired_by` 를 붙인다. 응답에 `inherited_from`, `previous_room`.
+  **방에는 자동으로 들어가지 않는다.** 이전 카드의 방 자리는 away 로 남고, 새 세션이 그 방에 `request` 하면 승인 없이 그 자리(역할·cursor·처리 기록)를 이어받는다(응답 `joined: true`).
+  away 유예가 지나면 보통처럼 퇴장 처리된다. 자기 자리가 away 인 방에 `request` 해도 바로 복귀한다. 설정 `auto_resume=false` 면 이름표도 이어받지 않는다.
+  `POST /agents/:id/resume` 은 API 호환용으로 남아 있지만 훅·플러그인은 더 부르지 않는다.
 - **시작 시 점검**: 카드나 방이 없는 멤버십을 지우고, 방장이 없는 방은 방장을 다시 정한다.
 - **오프라인 카드 정리**: 10초 점검 때 방에 없는 카드가 offline(pid 죽음 또는 retired)이면 `offline_since` 를 적고, 다시 살아나면 지운다.
   `offline_since` 가 설정의 `offline_ttl_hours`(기본 24, 0 = 안 함)를 넘으면 카드를 지운다. 지운 카드의 이름은 `names` 표에 남겨 지난 대화 표시에 쓴다 (`GET /names`).
@@ -129,7 +133,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | DELETE | `/rooms/:r` | 방 삭제 → `{trash}`. 멤버는 모두 방에서 나오고, 방과 대화 기록은 휴지통(`trash` 표)으로 |
 | POST | `/rooms/:r/invites` | `{agent, target}` (방장) |
 | POST | `/rooms/:r/invites/respond` | `{agent, accept}` |
-| POST | `/rooms/:r/requests` | `{agent, note?}` |
+| POST | `/rooms/:r/requests` | `{agent, note?}` → `{room, joined}` (joined: 신청 대신 바로 들어감 — 내 away 자리 또는 이전 세션 자리) |
 | POST | `/rooms/:r/requests/respond` | `{agent, target, approve}` (방장) |
 | POST | `/rooms/:r/say` | 사람 메시지 `{agent, text}`. text 앞쪽 `@이름`(이름/id) 은 받는 대상. 대상에 통로 에이전트 자신이 있으면 그 에이전트도 받는다 |
 | GET / POST | `/rooms/:r/messages` | 읽기 `?after=&limit=` / 쓰기 `{agent, type?, to?, reply_to?, body}` |

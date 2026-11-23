@@ -308,8 +308,13 @@ func (c *Client) RespondInvite(agent, room string, accept bool) error {
 	return c.call("POST", "/rooms/"+esc(room)+"/invites/respond", map[string]any{"agent": agent, "accept": accept}, nil, 0)
 }
 
-func (c *Client) RequestJoin(agent, room, note string) error {
-	return c.call("POST", "/rooms/"+esc(room)+"/requests", map[string]string{"agent": agent, "note": note}, nil, 0)
+// RequestJoin 은 참여 신청을 보낸다. joined 가 true 면 신청 대신 바로 들어감 (내 자리·이전 세션의 자리).
+func (c *Client) RequestJoin(agent, room, note string) (joined bool, err error) {
+	var out struct {
+		Joined bool `json:"joined"`
+	}
+	err = c.call("POST", "/rooms/"+esc(room)+"/requests", map[string]string{"agent": agent, "note": note}, &out, 0)
+	return out.Joined, err
 }
 
 func (c *Client) RespondRequest(agent, room, target string, approve bool) error {

@@ -522,6 +522,9 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		c.agents[id] = &card
 		c.saveCard(&card)
 		c.retireSameProcess(&card)
+		if !had && (in.Name == nil || *in.Name == "") {
+			res.InheritedFrom, res.PreviousRoom = c.inheritCard(&card)
+		}
 
 		if m, ok := c.memberships[id]; ok {
 			if m.State == StateAway {
@@ -538,6 +541,77 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		return nil
 	})
 	return
+}
+
+// inheritCard: 새로 시작한 세션이 같은 종류·같은 작업 폴더의 이전 세션(끝났거나 자리 비움, 또는 같은 프로세스) 이름표를
+// 이어받는다. 이름·설명·능력·사람 별칭을 옮기고 이전 카드는 retired_by 로 표시한다.
+// 방 자리는 옮기지 않는다 — 이전 카드가 방에 있었으면 자리 비움으로 두고, 새 세션이 그 방에 입장(request)하면
+// 승인 없이 그 자리(역할·읽은 위치)를 이어받는다. 자리 비움 유예가 지나면 보통처럼 퇴장 처리된다.
+func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
+	if card.Cwd == nil {
+		return
+	}
+	if cfg := c.readConfig(); cfg.AutoResume != nil && !*cfg.AutoResume {
+		return
+	}
+	var best *AgentCard
+	for id, old := range c.agents {
+		if id == card.ID || old.Kind != card.Kind || old.Cwd == nil || !samePath(*old.Cwd, *card.Cwd) {
+			continue
+		}
+		if old.RetiredBy != nil && *old.RetiredBy != card.ID { // 이미 다른 세션이 이어받음 (그 세션이 후보)
+			continue
+		}
+		samePid := card.Pid != nil && old.Pid != nil && *card.Pid == *old.Pid
+		m := c.memberships[id]
+		ended := old.OfflineSince != nil || (old.Pid != nil && !c.isAlive(*old.Pid)) || (m != nil && m.State == StateAway)
+		if !samePid && !ended {
+			continue // 아직 살아 있는 다른 세션
+		}
+		if best == nil || old.UpdatedAt > best.UpdatedAt {
+			best = old
+		}
+	}
+	if best == nil {
+		return
+	}
+	card.Name, card.Description = best.Name, best.Description
+	if len(card.Capabilities) == 0 {
+		card.Capabilities = slices.Clone(best.Capabilities)
+	}
+	if card.Human == nil {
+		card.Human = best.Human
+	}
+	c.saveCard(card)
+	best.RetiredBy = ptr(card.ID)
+	best.UpdatedAt = c.ts()
+	c.saveCard(best)
+	if m, ok := c.memberships[best.ID]; ok {
+		c.markAway(best.ID, "새 세션 "+card.ID+" 이 이름표를 이어받음")
+		room = m.Room
+	}
+	return best.ID, room
+}
+
+// predecessorIn 은 r 방에 자리가 있는 카드 중 retired_by 를 따라가면 agent 에 닿는 것(= agent 의 이전 세션)을 찾는다.
+func (c *Atalk) predecessorIn(agent, r string) string {
+	for id, m := range c.memberships {
+		if m.Room != r || id == agent {
+			continue
+		}
+		cur := id
+		for i := 0; i < 8; i++ {
+			a, ok := c.agents[cur]
+			if !ok || a.RetiredBy == nil {
+				break
+			}
+			cur = *a.RetiredBy
+			if cur == agent {
+				return id
+			}
+		}
+	}
+	return ""
 }
 
 // retireSameProcess: Claude Code 는 프로세스 하나에 세션이 하나다. 세션을 다시 열면(resume) 훅에는 새 세션 ID 가 오지만
@@ -943,7 +1017,23 @@ func (c *Atalk) RequestJoin(agent, r, note string) (v RoomView, err error) {
 			return err
 		}
 		if m, ok := c.memberships[agent]; ok && m.Room == r {
-			return conflict("already_member", "이미 이 방 멤버")
+			if m.State != StateAway {
+				return conflict("already_member", "이미 이 방 멤버")
+			}
+			c.markBack(agent) // 자리 비움이던 내 자리로 돌아옴
+			v = c.roomView(room)
+			return nil
+		}
+		// 이전 세션(이름표를 이어받은 카드)이 이 방에 자리가 있으면 승인 없이 그 자리를 이어받는다
+		if pred := c.predecessorIn(agent, r); pred != "" {
+			if _, ok := c.memberships[agent]; ok {
+				c.leaveInternal(agent, "move", r+" 방으로 이동")
+			}
+			if _, err := c.takeoverLocked(agent, pred); err != nil {
+				return err
+			}
+			v = c.roomView(room)
+			return nil
 		}
 		for _, q := range room.Requests {
 			if q.Agent == agent && q.Status == "pending" {
@@ -1373,6 +1463,16 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 		c.emit(Event{Type: "membership", To: []string{newID}, Data: map[string]any{"agent": newID, "room": m.Room, "action": "takeover", "from": oldID}})
 		return c.buildRecovery(newID, 30), nil
 	}
+}
+
+// RoomOf 는 agent 가 들어가 있는 방 (없으면 "").
+func (c *Atalk) RoomOf(agent string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m, ok := c.memberships[agent]; ok && m.State != StateAway {
+		return m.Room
+	}
+	return ""
 }
 
 func samePath(a, b string) bool {
