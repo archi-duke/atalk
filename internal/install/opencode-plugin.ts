@@ -354,13 +354,17 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             break
           case "session.status": {
             const st = sessions.get(p.sessionID)
-            if (st) st.busy = p.status?.type !== "idle"
-            else await trackById(p.sessionID)
+            if (st) {
+              const busy = p.status?.type !== "idle"
+              if (busy !== st.busy) api("POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
+              st.busy = busy
+            } else await trackById(p.sessionID)
             break
           }
           case "session.idle": {
             const st = sessions.get(p.sessionID)
             if (st) {
+              if (st.busy) api("POST", `/agents/${enc(st.id)}/activity`, { busy: false }).catch(() => {})
               st.busy = false
               if (st.echoPending) {
                 st.echoPending = false

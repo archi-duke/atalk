@@ -301,6 +301,16 @@ func (s *Server) routes() http.Handler {
 	h("POST /agents/{id}/activate", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]any{}, c.Activate(r.PathValue("id"))
 	})
+	// 작업 중 표시: {busy} — 훅(Claude)·플러그인(opencode)이 일을 시작·끝낼 때
+	h("POST /agents/{id}/activity", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Busy bool `json:"busy"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, c.SetActivity(r.PathValue("id"), b.Busy)
+	})
 	h("POST /agents/{id}/away", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
 			Reason string `json:"reason"`

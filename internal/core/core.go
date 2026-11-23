@@ -54,6 +54,7 @@ type Atalk struct {
 	AwayGrace time.Duration
 	isAlive   func(int) bool
 	machineID string
+	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
 	now       func() time.Time
 
 	mu          sync.Mutex
@@ -454,6 +455,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v := AgentView{AgentCard: *card, Status: c.statusOf(card.ID)}
 	v.Capabilities = slices.Clone(card.Capabilities)
 	v.Local = c.isLocal(card)
+	v.Busy = c.isBusy(card.ID)
 	h := Host{ID: c.machineID, OS: LocalOS()}
 	if card.Host != nil {
 		h = *card.Host
@@ -475,7 +477,7 @@ func (c *Atalk) roomView(room *Room) RoomView {
 	v.Invites = slices.Clone(room.Invites)
 	v.Requests = slices.Clone(room.Requests)
 	for _, e := range c.membersOf(room.RoomID) {
-		v.Members = append(v.Members, RoomMember{Agent: e.agent, Name: c.nameOf(e.agent), Role: e.m.Role, State: e.m.State, Cursor: c.cursors[room.RoomID][e.agent]})
+		v.Members = append(v.Members, RoomMember{Agent: e.agent, Name: c.nameOf(e.agent), Role: e.m.Role, State: e.m.State, Cursor: c.cursors[room.RoomID][e.agent], Busy: c.isBusy(e.agent)})
 	}
 	return v
 }
@@ -1622,11 +1624,46 @@ func (c *Atalk) fixOwner(room *Room, why string) {
 
 // ───────────────────────── away / 복귀 / 이어받기 ─────────────────────────
 
+// busyTimeout 동안 일한다는 신호(입력·도구 사용)가 없으면 쉬는 것으로 본다 (Esc 로 중단해 끝 신호가 안 온 경우 등).
+const busyTimeout = 15 * time.Minute
+
+func (c *Atalk) isBusy(agent string) bool {
+	t, ok := c.busy[agent]
+	if !ok || c.now().Sub(t) > busyTimeout {
+		return false
+	}
+	return c.statusOf(agent) != "offline" && c.statusOf(agent) != StateAway
+}
+
+// SetActivity 는 에이전트가 일을 시작했는지(busy)·끝냈는지 기록한다. 훅(Claude: 입력·도구·응답 끝)과 플러그인(opencode: 세션 상태)이 부른다.
+// 방 메시지를 처리하는 일이든 CLI 에서 사람이 시킨 일이든 "작업 중" 으로 보인다.
+func (c *Atalk) SetActivity(agent string, busy bool) error {
+	return c.guard(func() error {
+		if _, err := c.requireAgent(agent); err != nil {
+			return err
+		}
+		was := c.isBusy(agent)
+		if c.busy == nil {
+			c.busy = map[string]time.Time{}
+		}
+		if busy {
+			c.busy[agent] = c.now()
+		} else {
+			delete(c.busy, agent)
+		}
+		if was != busy {
+			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "activity", "busy": busy}})
+		}
+		return nil
+	})
+}
+
 func (c *Atalk) MarkAway(agent, reason string) error {
 	return c.guard(func() error {
 		if _, err := c.requireAgent(agent); err != nil {
 			return err
 		}
+		delete(c.busy, agent)
 		if reason == "" {
 			reason = "away"
 		}

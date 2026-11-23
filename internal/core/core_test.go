@@ -1244,6 +1244,36 @@ func TestLocalAutoAcceptInvite(t *testing.T) {
 	}
 }
 
+// 작업 중 표시: 훅·플러그인이 알린 대로, 방에 없어도(CLI 에서 일함) 보이고, 끝나거나 15분 신호가 없거나 자리 비움이면 꺼진다.
+func TestActivityBusy(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	check(t, c.SetActivity(a, true))
+	if !ok(c.GetAgent(a)).Busy {
+		t.Fatal("방에 없어도 CLI 에서 일하면 작업 중")
+	}
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b))
+	if r := ok(c.GetRoom("r")); !r.Members[0].Busy && !r.Members[1].Busy {
+		t.Fatalf("방 멤버에도 작업 중 표시: %+v", r.Members)
+	}
+	check(t, c.SetActivity(a, false))
+	if ok(c.GetAgent(a)).Busy {
+		t.Fatal("끝나면 대기")
+	}
+	check(t, c.SetActivity(b, true))
+	e.clock = e.clock.Add(16 * time.Minute)
+	if ok(c.GetAgent(b)).Busy {
+		t.Fatal("15분 동안 신호가 없으면 대기로")
+	}
+	check(t, c.SetActivity(b, true))
+	check(t, c.MarkAway(b, "exit"))
+	if ok(c.GetAgent(b)).Busy {
+		t.Fatal("자리 비움이면 작업 중 아님")
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()

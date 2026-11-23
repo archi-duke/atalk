@@ -160,6 +160,7 @@ type Host struct {
 // AgentView 는 API 로 내보내는 카드. 다른 PC 의 카드는 cwd·pid 를 빼고 보낸다 (그 PC 밖에서는 의미도 없고 노출만 된다).
 type AgentView struct {
 	AgentCard
+	Busy   bool   `json:"busy,omitempty"` // 지금 일하는 중 (CLI 에서 받은 일 포함, 훅·플러그인이 알림)
 	Local  bool   `json:"local"`  // 이 데몬과 같은 PC 에서 실행 중
 	Status string  `json:"status"` // waiting | in_room | away | offline
 	Room   *string `json:"room"`
@@ -173,6 +174,7 @@ type RoomMember struct {
 	State string `json:"state"`
 	// Cursor 는 이 멤버가 마지막으로 읽은 seq (메신저 화면의 "안 읽은 사람 수" 계산용)
 	Cursor int `json:"cursor"`
+	Busy   bool `json:"busy,omitempty"` // 지금 일하는 중 (CLI 에서 받은 일 포함)
 }
 
 type RoomView struct {
