@@ -63,7 +63,6 @@ type Atalk struct {
 	lastSeq     map[string]int
 	cursors     map[string]map[string]int
 	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해)
-	echoPending map[string]int    // 에이전트별로 아직 응답을 기록하지 않은 CLI 입력 기록의 seq (메모리에만)
 	trashSwept  time.Time         // 휴지통을 마지막으로 정리한 시각 (한 시간에 한 번)
 	cfg         Config            // 설정 (DB meta.config 의 사본)
 
@@ -1812,8 +1811,8 @@ const EchoMax = 4000
 func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 	err = c.guard(func() error {
 		if IsSystemPrompt(text) {
-			// 사람이 아니라 시스템이 넣은 입력(Monitor 알림 등) → 기록하지 않고, 그 턴의 응답도 남지 않게 짝을 지운다
-			delete(c.echoPending, agent)
+			// 사람이 아니라 시스템이 넣은 입력(Monitor 알림 등) → 기록하지 않는다.
+			// 응답 짝은 건드리지 않는다: 알림은 사람의 요청을 처리하는 도중에도 들어오므로, 그 요청의 응답은 그대로 남아야 한다.
 			return nil
 		}
 		if cfg := c.readConfig(); cfg.EchoPrompts != nil && !*cfg.EchoPrompts {
@@ -1844,31 +1843,52 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 			c.saveMemberships()
 		}
 		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
-		if c.echoPending == nil {
-			c.echoPending = map[string]int{}
-		}
-		c.echoPending[agent] = out.Seq
 		msg = &out
 		return nil
 	})
 	return
 }
 
+// echoPendingMaxAge 보다 오래된 CLI 입력에는 응답을 붙이지 않는다 (응답 기록이 빠졌던 옛 입력에 엉뚱한 응답이 붙지 않게).
+const echoPendingMaxAge = 12 * time.Hour
+
+// pendingEcho 는 대화 기록에서 agent 의 가장 최근 CLI 입력 기록 중 아직 응답 기록이 없는 것을 찾는다.
+// 메모리가 아니라 기록에서 찾으므로 데몬을 다시 시작해도, 중간에 알림이 끼어도 짝이 유지된다.
+func (c *Atalk) pendingEcho(agent, room string) (int, bool) {
+	msgs := c.st.Messages(room, max(0, c.lastSeq[room]-300), 0)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		x := msgs[i]
+		if x.From != agent || !x.Echo {
+			continue
+		}
+		if x.Human == "" { // 가장 최근 기록이 응답 → 기다리는 입력 없음
+			return 0, false
+		}
+		if IsSystemPrompt(x.Body) { // 예전 버전이 입력으로 남긴 알림
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339Nano, x.TS); err == nil && c.now().Sub(t) > echoPendingMaxAge {
+			return 0, false
+		}
+		return x.Seq, true
+	}
+	return 0, false
+}
+
 // EchoReply 는 CLI 입력 기록(EchoPrompt)에 대한 에이전트의 응답을 기록한다 (reply_to = 그 입력, 알림 없음).
 // 아직 응답을 기록하지 않은 CLI 입력이 있을 때만 남긴다. 방 메시지를 처리한 응답은 result 로 이미 게시되므로 남기지 않는다.
 func (c *Atalk) EchoReply(agent, text string) (msg *Message, err error) {
 	err = c.guard(func() error {
-		seq, ok := c.echoPending[agent]
-		if !ok {
-			return nil
-		}
-		delete(c.echoPending, agent)
 		m, ok := c.memberships[agent]
 		if !ok {
 			return nil
 		}
 		room, err := c.requireRoom(m.Room, true)
-		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages || seq > c.lastSeq[m.Room] {
+		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+			return nil
+		}
+		seq, ok := c.pendingEcho(agent, m.Room)
+		if !ok {
 			return nil
 		}
 		text = strings.TrimSpace(text)
