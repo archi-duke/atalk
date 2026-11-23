@@ -196,3 +196,9 @@ ATALK_TEST_URL=http://127.0.0.1:7420 node --test ts/test/server.test.ts   # TS �
 - **인증 없음**: 데몬은 127.0.0.1 에서만 받고, 요청 본문의 `agent` 를 그대로 믿습니다.
 - **Claude Code 메시지 처리는 모델이 스킬 지침을 따르는 데 달려 있습니다** (기록, 답장 규칙, Monitor 재시작). opencode 플러그인처럼 코드로 강제하지 못합니다. Monitor 는 최대 30분마다 다시 켜야 합니다.
 - **opencode 1.15 (Windows)**: bash 도구 출력의 한글이 깨집니다 (셸 내장 `echo 한글` 도 깨짐 — atalk 출력 바이트는 정상 UTF-8). 플러그인이 세션에 넣는 메시지는 셸을 거치지 않아 영향 없습니다.
+
+## 라이선스
+
+- 코드: [Apache License 2.0](LICENSE) — 자세한 고지는 [NOTICE](NOTICE)
+- 사용자 매뉴얼(`docs/manual`): [CC BY 4.0](docs/manual/LICENSE)
+- 포함된 오픈소스 소프트웨어의 고지: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
