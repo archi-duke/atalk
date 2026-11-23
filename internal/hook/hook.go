@@ -59,6 +59,10 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	switch event {
 	case "session-start":
 		out = sessionStart(c, kind, in)
+	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장을 실시간으로 기록
+		if texts := turnTexts(in.TranscriptPath); len(texts) > 0 {
+			_ = c.EchoReply(core.MakeAgentID(kind, in.SessionID), texts, false)
+		}
 	case "stop":
 		out = stop(c, kind, in)
 	case "prompt":
@@ -152,15 +156,13 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 
 func stop(c *client.Client, kind string, in Input) any {
 	id := core.MakeAgentID(kind, in.SessionID)
-	// CLI 입력을 기록했으면 그에 대한 응답(이번 턴에 쓴 텍스트 전부)도 기록한다 (기록할 입력이 없으면 데몬이 무시).
-	// transcript 에 중간 텍스트가 빠지는 경우가 있어, 훅이 주는 마지막 응답이 없으면 뒤에 붙인다.
-	reply := lastAssistantText(in.TranscriptPath)
-	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !strings.Contains(reply, last) {
-		reply = strings.TrimSpace(reply + "\n\n" + last)
+	// CLI 입력을 기록했으면 이번 턴의 응답 문장 중 아직 기록 안 된 것을 남기고 턴을 닫는다 (기록할 입력이 없으면 데몬이 무시).
+	// transcript 에 중간 문장이 빠지는 경우가 있어, 훅이 주는 마지막 응답이 없으면 덧붙인다.
+	texts := turnTexts(in.TranscriptPath)
+	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
+		texts = append(texts, last)
 	}
-	if reply != "" {
-		_ = c.EchoReply(id, reply)
-	}
+	_ = c.EchoReply(id, texts, true)
 	u, err := c.Unread(id, false)
 	if err != nil {
 		return nil
@@ -265,15 +267,15 @@ func prompt(c *client.Client, kind string, in Input) any {
 	return block(fmt.Sprintf("[ATalk] %s #%d → %s\n%s@%s: %s", m.Room, m.Seq, to, m.Human, me, m.Body))
 }
 
-// lastAssistantText 는 Claude Code transcript(JSONL) 에서 마지막 사용자 입력 이후에 쓴 응답 텍스트를 모두(CLI 에 ● 로 보이는 것들)
-// 순서대로 꺼낸다. 도구 호출·결과는 뺀다. 그 사이에 응답 텍스트가 없으면 "" — 이전 턴의 답을 잘못 가져오지 않게 한다.
-func lastAssistantText(path string) string {
+// turnTexts 는 Claude Code transcript(JSONL) 에서 마지막 사람 입력 이후에 쓴 응답 문장들(CLI 의 흰색 ●)을 순서대로 꺼낸다.
+// 도구 호출·결과는 뺀다. 작업 도중 끼어든 알림(<task-notification> 등)은 경계로 보지 않는다.
+func turnTexts(path string) []string {
 	if path == "" {
-		return ""
+		return nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return nil
 	}
 	defer f.Close()
 	const tail = 4 << 20 // 끝에서 4MB 만 읽는다
@@ -282,13 +284,13 @@ func lastAssistantText(path string) string {
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return ""
+		return nil
 	}
 	lines := strings.Split(string(b), "\n")
 	var texts []string // 뒤에서부터 모은다
-	done := func() string {
+	done := func() []string {
 		slices.Reverse(texts)
-		return strings.TrimSpace(strings.Join(texts, "\n\n"))
+		return texts
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e struct {
@@ -330,7 +332,7 @@ func lastAssistantText(path string) string {
 				continue
 			}
 			for _, bl := range blocks {
-				if bl.Type == "text" { // 사람이 입력한 프롬프트 (tool_result 가 아님) → 여기까지가 이번 턴
+				if bl.Type == "text" && !core.IsSystemPrompt(bl.Text) { // 사람이 입력한 프롬프트 → 여기까지가 이번 턴
 					return done()
 				}
 			}

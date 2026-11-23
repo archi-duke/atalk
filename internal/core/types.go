@@ -41,6 +41,8 @@ type Membership struct {
 	LastSeen   string  `json:"last_seen"`
 	AwaySince  *string `json:"away_since"`
 	AwayReason *string `json:"away_reason"`
+	// EchoOpen 은 응답을 기록 중인 CLI 입력 기록의 seq (그 턴이 끝나면 0). 멤버십과 함께 저장되어 데몬을 다시 시작해도 유지된다.
+	EchoOpen int `json:"echo_open,omitempty"`
 }
 
 type MembershipEvent struct {

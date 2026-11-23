@@ -131,7 +131,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       const text = (m.parts ?? []).filter((p: any) => p.type === "text" && !p.synthetic && p.text).map((p: any) => p.text).join("\n").trim()
       if (text) texts.unshift(text)
     }
-    if (texts.length) await api("POST", `/agents/${enc(st.id)}/echo`, { text: texts.join("\n\n"), reply: true })
+    if (texts.length) await api("POST", `/agents/${enc(st.id)}/echo`, { texts, reply: true, final: true })
   }
 
   // 이벤트에 세션 정보가 없을 때: 서브에이전트(자식 세션)인지 확인하고 등록

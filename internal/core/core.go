@@ -1843,6 +1843,8 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 			c.saveMemberships()
 		}
 		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
+		m.EchoOpen = out.Seq // 이 입력의 응답을 받기 시작 (턴이 끝나면 닫힘)
+		c.saveMemberships()
 		msg = &out
 		return nil
 	})
@@ -1852,54 +1854,57 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 // echoPendingMaxAge 보다 오래된 CLI 입력에는 응답을 붙이지 않는다 (응답 기록이 빠졌던 옛 입력에 엉뚱한 응답이 붙지 않게).
 const echoPendingMaxAge = 12 * time.Hour
 
-// pendingEcho 는 대화 기록에서 agent 의 가장 최근 CLI 입력 기록 중 아직 응답 기록이 없는 것을 찾는다.
-// 메모리가 아니라 기록에서 찾으므로 데몬을 다시 시작해도, 중간에 알림이 끼어도 짝이 유지된다.
-func (c *Atalk) pendingEcho(agent, room string) (int, bool) {
-	msgs := c.st.Messages(room, max(0, c.lastSeq[room]-300), 0)
-	for i := len(msgs) - 1; i >= 0; i-- {
-		x := msgs[i]
-		if x.From != agent || !x.Echo {
-			continue
-		}
-		if x.Human == "" { // 가장 최근 기록이 응답 → 기다리는 입력 없음
-			return 0, false
-		}
-		if IsSystemPrompt(x.Body) { // 예전 버전이 입력으로 남긴 알림
-			continue
-		}
-		if t, err := time.Parse(time.RFC3339Nano, x.TS); err == nil && c.now().Sub(t) > echoPendingMaxAge {
-			return 0, false
-		}
-		return x.Seq, true
-	}
-	return 0, false
-}
-
-// EchoReply 는 CLI 입력 기록(EchoPrompt)에 대한 에이전트의 응답을 기록한다 (reply_to = 그 입력, 알림 없음).
-// 아직 응답을 기록하지 않은 CLI 입력이 있을 때만 남긴다. 방 메시지를 처리한 응답은 result 로 이미 게시되므로 남기지 않는다.
-func (c *Atalk) EchoReply(agent, text string) (msg *Message, err error) {
+// EchoReply 는 CLI 입력 기록(EchoPrompt)에 대한 에이전트의 응답 문장들을 기록한다 (reply_to = 그 입력, 알림 없음).
+// texts 는 그 턴에서 지금까지 쓴 문장 전부 (CLI 의 흰색 ●). 이미 기록한 문장은 건너뛰고 새 문장만 하나씩 남기므로
+// 도구를 쓸 때마다 보내면 실시간으로 쌓인다. final 이면 그 턴을 닫는다 (뒤에 오는 알림 처리 응답 등은 남기지 않음).
+// 응답을 받는 중인 CLI 입력이 없으면(방 메시지를 처리한 턴 등) 아무것도 하지 않는다 — 그 응답은 result 로 이미 게시된다.
+func (c *Atalk) EchoReply(agent string, texts []string, final bool) (out []Message, err error) {
 	err = c.guard(func() error {
 		m, ok := c.memberships[agent]
-		if !ok {
+		if !ok || m.EchoOpen == 0 {
 			return nil
+		}
+		seq := m.EchoOpen
+		if final {
+			m.EchoOpen = 0
+			c.saveMemberships()
 		}
 		room, err := c.requireRoom(m.Room, true)
-		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+		if err != nil || seq > c.lastSeq[m.Room] {
 			return nil
 		}
-		seq, ok := c.pendingEcho(agent, m.Room)
-		if !ok {
-			return nil
+		// 오래된 입력에는 붙이지 않는다 (턴이 비정상으로 끝나 닫히지 않은 경우)
+		if q, ok := c.st.MessagesBySeq(m.Room, []int{seq})[seq]; ok {
+			if t, err := time.Parse(time.RFC3339Nano, q.TS); err == nil && c.now().Sub(t) > echoPendingMaxAge {
+				m.EchoOpen = 0
+				c.saveMemberships()
+				return nil
+			}
 		}
-		text = strings.TrimSpace(text)
-		if text == "" {
-			return nil
+		have := map[string]bool{}
+		for _, x := range c.st.Messages(m.Room, seq, 0) {
+			if x.From == agent && x.Echo && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {
+				have[x.Body] = true
+			}
 		}
-		if r := []rune(text); len(r) > EchoMax { // 응답은 결론이 끝에 있으므로 앞부분을 생략한다
-			text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
+		for _, text := range texts {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			if r := []rune(text); len(r) > EchoMax { // 결론이 끝에 있으므로 앞부분을 생략한다
+				text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
+			}
+			if have[text] {
+				continue
+			}
+			if c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+				break
+			}
+			s := seq
+			out = append(out, c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &s, Body: text, Echo: true}))
+			have[text] = true
 		}
-		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &seq, Body: text, Echo: true})
-		msg = &out
 		return nil
 	})
 	return

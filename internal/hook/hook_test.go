@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestLastAssistantText(t *testing.T) {
+func TestTurnTexts(t *testing.T) {
 	dir := t.TempDir()
 	write := func(lines ...string) string {
 		p := filepath.Join(dir, "t.jsonl")
@@ -23,14 +23,16 @@ func TestLastAssistantText(t *testing.T) {
 	interim := `{"type":"assistant","message":{"content":[{"type":"text","text":"세어 보겠습니다."}]}}`
 	final := `{"type":"assistant","message":{"content":[{"type":"text","text":"42개입니다."}]}}`
 
-	if got := lastAssistantText(write(final, user, interim, toolUse, toolRes, final, meta)); got != "세어 보겠습니다.\n\n42개입니다." {
-		t.Fatalf("이번 턴의 응답 텍스트 전부(이전 턴 제외): %q", got)
+	notice := `{"type":"user","message":{"content":[{"type":"text","text":"<task-notification>\n<task-id>x</task-id>\n</task-notification>"}]}}`
+	got := strings.Join(turnTexts(write(final, user, interim, toolUse, toolRes, notice, final, meta)), "|")
+	if got != "세어 보겠습니다.|42개입니다." {
+		t.Fatalf("이번 턴의 응답 문장 전부(이전 턴 제외, 중간 알림은 경계 아님): %q", got)
 	}
 	// 마지막 입력 뒤에 응답 텍스트가 없으면 이전 턴 답을 가져오면 안 됨
-	if got := lastAssistantText(write(user, final, user, toolUse, toolRes)); got != "" {
+	if got := turnTexts(write(user, final, user, toolUse, toolRes)); len(got) != 0 {
 		t.Fatalf("이전 턴 답을 가져옴: %q", got)
 	}
-	if got := lastAssistantText(""); got != "" || lastAssistantText(filepath.Join(dir, "없음.jsonl")) != "" {
+	if len(turnTexts("")) != 0 || len(turnTexts(filepath.Join(dir, "없음.jsonl"))) != 0 {
 		t.Fatal("경로 없음")
 	}
 }

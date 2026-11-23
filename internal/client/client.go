@@ -197,9 +197,10 @@ func (c *Client) EchoPrompt(id, text string) error {
 	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"text": text}, nil, 0)
 }
 
-// EchoReply 는 직전 CLI 입력 기록에 대한 에이전트의 응답을 기록한다 (알림 없음). 기록할 입력이 없으면 아무것도 안 함.
-func (c *Client) EchoReply(id, text string) error {
-	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"text": text, "reply": true}, nil, 0)
+// EchoReply 는 응답을 받는 중인 CLI 입력에 대한 에이전트의 응답 문장들을 기록한다 (새 문장만, 알림 없음).
+// final 이면 그 턴을 닫는다. 응답을 받는 중인 입력이 없으면 아무것도 안 함.
+func (c *Client) EchoReply(id string, texts []string, final bool) error {
+	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"texts": texts, "reply": true, "final": final}, nil, 0)
 }
 
 func (c *Client) Away(id, reason string) error {
