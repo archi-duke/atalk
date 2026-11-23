@@ -1152,6 +1152,48 @@ func TestResumeReclaimsSeatFromSuccessor(t *testing.T) {
 	}
 }
 
+// 쓰지 않은 임시 카드: 끝나면 지우고, 서로 이어받지 않고, 같은 프로세스에서 이전 세션으로 복귀하면 지운다.
+func TestProvisionalCleanup(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	owner := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m", Pid: i(100), Cwd: s("D:/m")})).Agent.ID
+	ok(c.CreateRoom(owner, "r", "", 0))
+	o1 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Name: s("오1"), Pid: i(700), Cwd: s("D:/op1")})).Agent.ID
+	e.alive[700] = true
+	ok(c.Invite(owner, "r", o1))
+	ok(c.RespondInvite(o1, "r", true))
+	check(t, c.MarkAway(o1, "opencode_exit"))
+	e.alive[700] = false
+	// opencode 를 켰다 끔 (빈 세션만 생김) → 끝나면 지워짐
+	e.alive[801] = true
+	p1 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "p1", Pid: i(801), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+	e.alive[801] = false
+	c.Sweep()
+	if _, err := c.GetAgent(p1); err == nil {
+		t.Fatal("쓰지 않고 끝난 임시 카드는 지워져야 함")
+	}
+	// 다시 켬 → 빈 세션은 이전 임시 카드가 아니라 진짜 이전 세션(o1)을 가리킴
+	e.alive[802] = true
+	p2 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "p2", Pid: i(802), Cwd: s("D:/op1"), Provisional: true}))
+	if p2.InheritedFrom != o1 {
+		t.Fatalf("임시 카드끼리 이어받으면 안 됨: %s", p2.InheritedFrom)
+	}
+	// 같은 opencode 에서 o1 세션으로 복귀 → o1 은 방으로, 같은 프로세스의 빈 세션 카드는 정리
+	back := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Pid: i(802), Cwd: s("D:/op1"), Provisional: true}))
+	if back.Agent.Room == nil || *back.Agent.Room != "r" {
+		t.Fatalf("복귀: %+v", back.Agent.Room)
+	}
+	if _, err := c.GetAgent(p2.Agent.ID); err == nil {
+		t.Fatal("같은 프로세스의 쓰지 않은 빈 세션은 지워져야 함")
+	}
+	// 이미 복귀한 뒤에 남아 있던 빈 세션(같은 프로세스)도 점검 때 지운다
+	p3 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "p3", Pid: i(802), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+	c.Sweep()
+	if _, err := c.GetAgent(p3); err == nil {
+		t.Fatal("같은 프로세스가 방에 있으면 빈 세션은 점검 때 지워져야 함")
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
