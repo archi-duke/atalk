@@ -321,7 +321,15 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     "chat.message": async (input, output) => {
       const tp: any = (output.parts as any[]).find((p) => p.type === "text" && !p.synthetic)
       const raw = String(tp?.text ?? "").trim()
-      if (!tp || !raw.startsWith(HUMAN_PREFIX)) return
+      if (!tp) return
+      if (!raw.startsWith(HUMAN_PREFIX)) {
+        // 사람이 입력한 말을 방에 대화 기록으로 남긴다 (알림 없음). 플러그인이 넣은 "[ATalk]" 메시지·/명령은 빼고.
+        if (raw && !raw.startsWith("[ATalk]") && !raw.startsWith("/")) {
+          const st = sessions.get(input.sessionID)
+          if (st) api("POST", `/agents/${enc(st.id)}/echo`, { text: raw }).catch(() => {})
+        }
+        return
+      }
       let note: string
       try {
         await trackById(input.sessionID)

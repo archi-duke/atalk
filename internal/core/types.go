@@ -101,6 +101,8 @@ type Message struct {
 	// Human 은 사람이 직접 입력한 메시지일 때 그 사람의 별칭. 표시는 "<human>@<에이전트 이름>".
 	// 에이전트(모델)가 쓴 메시지는 비어 있다.
 	Human string `json:"human,omitempty"`
+	// Echo 는 사람이 에이전트 창(CLI)에 직접 입력한 말을 대화 기록으로만 남긴 것. 어떤 에이전트에게도 전달·알림하지 않는다.
+	Echo bool `json:"echo,omitempty"`
 }
 
 // Config 는 <root>/config.json. 이 PC 의 공통 설정.
@@ -118,6 +120,8 @@ type Config struct {
 	AutoResume *bool `json:"auto_resume,omitempty"`
 	// AutoAcceptInvites 가 false 면 opencode 플러그인이 초대를 자동 수락하지 않음. 없으면 켜짐.
 	AutoAcceptInvites *bool `json:"auto_accept_invites,omitempty"`
+	// EchoPrompts 가 false 면 에이전트 창(CLI)에 입력한 말을 대화방에 기록하지 않음. 없으면 켜짐.
+	EchoPrompts *bool `json:"echo_prompts,omitempty"`
 	// MachineName 은 이 PC 의 이름 (에이전트 목록에 보임). 없으면 "PC-" + PC ID 앞 4자리. 호스트 이름은 쓰지 않는다.
 	MachineName string `json:"machine_name,omitempty"`
 }

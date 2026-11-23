@@ -192,6 +192,11 @@ func (c *Client) Unregister(id string) error {
 	return c.call("DELETE", "/agents/"+esc(id), nil, nil, 0)
 }
 
+// EchoPrompt 는 사람이 에이전트 창에 입력한 말을 그 에이전트의 방에 기록만 한다 (알림 없음). 방에 없으면 아무것도 안 함.
+func (c *Client) EchoPrompt(id, text string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]string{"text": text}, nil, 0)
+}
+
 func (c *Client) Away(id, reason string) error {
 	return c.call("POST", "/agents/"+esc(id)+"/away", map[string]string{"reason": reason}, nil, 0)
 }
@@ -421,6 +426,9 @@ func (c *Client) SSE(ctx context.Context, path string, onEvent func(event string
 // Author 는 메시지 작성자 표시: 사람이 직접 쓴 메시지는 "<사람>@<에이전트> (사람)", 아니면 에이전트 이름.
 func Author(m core.Message, agentName string) string {
 	if m.Human != "" {
+		if m.Echo { // 에이전트 창(CLI)에 입력한 말의 기록 — 이미 그 에이전트가 받은 입력
+			return m.Human + "@" + agentName + " (사람, CLI 입력 기록)"
+		}
 		return m.Human + "@" + agentName + " (사람)"
 	}
 	return agentName

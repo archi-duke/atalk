@@ -848,6 +848,42 @@ func TestWorkspaceLabelHome(t *testing.T) {
 	}
 }
 
+// CLI 입력 기록: 방에 있을 때만 남고, 자신을 포함해 누구의 unread 에도 들어가지 않는다.
+func TestEchoPrompt(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, _ := setup(t, c)
+	if m := ok(c.EchoPrompt(a, "방 없을 때")); m != nil {
+		t.Fatal("방에 없으면 기록하지 않음")
+	}
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b))
+	ok(c.RespondInvite(b, "r", true))
+	ok(c.Unread(a, true))
+	ok(c.Unread(b, true))
+	m := ok(c.EchoPrompt(a, "  이 폴더 정리해 줘  "))
+	if m == nil || !m.Echo || m.Human == "" || m.Body != "이 폴더 정리해 줘" || len(m.To) != 1 || m.To[0] != a {
+		t.Fatalf("기록 내용: %+v", m)
+	}
+	for _, who := range []string{a, b} {
+		if u := ok(c.Unread(who, true)); len(u.Messages) != 0 {
+			t.Fatalf("%s 에게 전달되면 안 됨: %+v", who, u.Messages)
+		}
+	}
+	if all := ok(c.ReadMessages("r", 0, 100)); all[len(all)-1].Seq != m.Seq {
+		t.Fatal("대화 기록에는 남아야 함")
+	}
+	long := ok(c.EchoPrompt(a, strings.Repeat("가", EchoMax+10)))
+	if n := len([]rune(long.Body)); n > EchoMax+20 || !strings.HasSuffix(long.Body, "(길어서 생략)") {
+		t.Fatalf("긴 입력은 잘라야 함: %d", n)
+	}
+	f := false
+	ok(c.SetConfig(Config{EchoPrompts: &f}))
+	if m := ok(c.EchoPrompt(a, "꺼짐")); m != nil {
+		t.Fatal("설정이 꺼져 있으면 기록하지 않음")
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
