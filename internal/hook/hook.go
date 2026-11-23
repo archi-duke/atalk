@@ -32,6 +32,9 @@ type Input struct {
 	StopHookActive bool   `json:"stop_hook_active"`
 	Reason         string `json:"reason"` // SessionEnd
 	Prompt         string `json:"prompt"` // UserPromptSubmit
+	TranscriptPath string `json:"transcript_path"`
+	// LastAssistantMessage 는 Stop 훅에 오는 마지막 응답 (Claude Code 버전에 따라 없을 수 있어 transcript 로 대신 읽는다)
+	LastAssistantMessage string `json:"last_assistant_message"`
 }
 
 // Run 은 stdin 에서 훅 입력을 읽고 stdout 에 훅 출력을 쓴다.
@@ -149,6 +152,15 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 
 func stop(c *client.Client, kind string, in Input) any {
 	id := core.MakeAgentID(kind, in.SessionID)
+	// CLI 입력을 기록했으면 그에 대한 응답(이번 턴에 쓴 텍스트 전부)도 기록한다 (기록할 입력이 없으면 데몬이 무시).
+	// transcript 에 중간 텍스트가 빠지는 경우가 있어, 훅이 주는 마지막 응답이 없으면 뒤에 붙인다.
+	reply := lastAssistantText(in.TranscriptPath)
+	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !strings.Contains(reply, last) {
+		reply = strings.TrimSpace(reply + "\n\n" + last)
+	}
+	if reply != "" {
+		_ = c.EchoReply(id, reply)
+	}
 	u, err := c.Unread(id, false)
 	if err != nil {
 		return nil
@@ -251,6 +263,80 @@ func prompt(c *client.Client, kind string, in Input) any {
 		to = strings.Join(ns, ", ")
 	}
 	return block(fmt.Sprintf("[ATalk] %s #%d → %s\n%s@%s: %s", m.Room, m.Seq, to, m.Human, me, m.Body))
+}
+
+// lastAssistantText 는 Claude Code transcript(JSONL) 에서 마지막 사용자 입력 이후에 쓴 응답 텍스트를 모두(CLI 에 ● 로 보이는 것들)
+// 순서대로 꺼낸다. 도구 호출·결과는 뺀다. 그 사이에 응답 텍스트가 없으면 "" — 이전 턴의 답을 잘못 가져오지 않게 한다.
+func lastAssistantText(path string) string {
+	if path == "" {
+		return ""
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const tail = 4 << 20 // 끝에서 4MB 만 읽는다
+	if fi, err := f.Stat(); err == nil && fi.Size() > tail {
+		_, _ = f.Seek(fi.Size()-tail, io.SeekStart)
+	}
+	b, err := io.ReadAll(f)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(b), "\n")
+	var texts []string // 뒤에서부터 모은다
+	done := func() string {
+		slices.Reverse(texts)
+		return strings.TrimSpace(strings.Join(texts, "\n\n"))
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		var e struct {
+			Type    string `json:"type"`
+			IsMeta  bool   `json:"isMeta"`
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		}
+		if json.Unmarshal([]byte(lines[i]), &e) != nil {
+			continue
+		}
+		var blocks []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		var str string
+		if json.Unmarshal(e.Message.Content, &str) == nil {
+			blocks = append(blocks, struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}{"text", str})
+		} else {
+			_ = json.Unmarshal(e.Message.Content, &blocks)
+		}
+		switch e.Type {
+		case "assistant":
+			var parts []string
+			for _, bl := range blocks {
+				if bl.Type == "text" && strings.TrimSpace(bl.Text) != "" {
+					parts = append(parts, bl.Text)
+				}
+			}
+			if len(parts) > 0 {
+				texts = append(texts, strings.TrimSpace(strings.Join(parts, "\n")))
+			}
+		case "user":
+			if e.IsMeta {
+				continue
+			}
+			for _, bl := range blocks {
+				if bl.Type == "text" { // 사람이 입력한 프롬프트 (tool_result 가 아님) → 여기까지가 이번 턴
+					return done()
+				}
+			}
+		}
+	}
+	return done()
 }
 
 // listenReminder: 방에 있는 Claude 세션의 메시지 알림(atalk listen)이 꺼져 있으면, 사용자의 아무 입력에나

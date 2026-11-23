@@ -62,6 +62,7 @@ type Atalk struct {
 	lastSeq     map[string]int
 	cursors     map[string]map[string]int
 	pastNames   map[string]string // 지운 카드의 이름 (지난 대화에서 이름을 보여 주기 위해)
+	echoPending map[string]int    // 에이전트별로 아직 응답을 기록하지 않은 CLI 입력 기록의 seq (메모리에만)
 	trashSwept  time.Time         // 휴지통을 마지막으로 정리한 시각 (한 시간에 한 번)
 	cfg         Config            // 설정 (DB meta.config 의 사본)
 
@@ -1819,6 +1820,41 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 			c.saveMemberships()
 		}
 		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
+		if c.echoPending == nil {
+			c.echoPending = map[string]int{}
+		}
+		c.echoPending[agent] = out.Seq
+		msg = &out
+		return nil
+	})
+	return
+}
+
+// EchoReply 는 CLI 입력 기록(EchoPrompt)에 대한 에이전트의 응답을 기록한다 (reply_to = 그 입력, 알림 없음).
+// 아직 응답을 기록하지 않은 CLI 입력이 있을 때만 남긴다. 방 메시지를 처리한 응답은 result 로 이미 게시되므로 남기지 않는다.
+func (c *Atalk) EchoReply(agent, text string) (msg *Message, err error) {
+	err = c.guard(func() error {
+		seq, ok := c.echoPending[agent]
+		if !ok {
+			return nil
+		}
+		delete(c.echoPending, agent)
+		m, ok := c.memberships[agent]
+		if !ok {
+			return nil
+		}
+		room, err := c.requireRoom(m.Room, true)
+		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages || seq > c.lastSeq[m.Room] {
+			return nil
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		if r := []rune(text); len(r) > EchoMax { // 응답은 결론이 끝에 있으므로 앞부분을 생략한다
+			text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
+		}
+		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &seq, Body: text, Echo: true})
 		msg = &out
 		return nil
 	})

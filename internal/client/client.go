@@ -194,7 +194,12 @@ func (c *Client) Unregister(id string) error {
 
 // EchoPrompt 는 사람이 에이전트 창에 입력한 말을 그 에이전트의 방에 기록만 한다 (알림 없음). 방에 없으면 아무것도 안 함.
 func (c *Client) EchoPrompt(id, text string) error {
-	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]string{"text": text}, nil, 0)
+	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"text": text}, nil, 0)
+}
+
+// EchoReply 는 직전 CLI 입력 기록에 대한 에이전트의 응답을 기록한다 (알림 없음). 기록할 입력이 없으면 아무것도 안 함.
+func (c *Client) EchoReply(id, text string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"text": text, "reply": true}, nil, 0)
 }
 
 func (c *Client) Away(id, reason string) error {
@@ -425,11 +430,13 @@ func (c *Client) SSE(ctx context.Context, path string, onEvent func(event string
 // FormatMessages 는 에이전트에게 보여 줄 메시지 텍스트를 만든다.
 // Author 는 메시지 작성자 표시: 사람이 직접 쓴 메시지는 "<사람>@<에이전트> (사람)", 아니면 에이전트 이름.
 func Author(m core.Message, agentName string) string {
-	if m.Human != "" {
-		if m.Echo { // 에이전트 창(CLI)에 입력한 말의 기록 — 이미 그 에이전트가 받은 입력
-			return m.Human + "@" + agentName + " (사람, CLI 입력 기록)"
-		}
+	switch {
+	case m.Human != "" && m.Echo: // 에이전트 창(CLI)에 입력한 말의 기록 — 이미 그 에이전트가 받은 입력
+		return m.Human + "@" + agentName + " (사람, CLI 입력 기록)"
+	case m.Human != "":
 		return m.Human + "@" + agentName + " (사람)"
+	case m.Echo: // 그 입력에 대한 에이전트의 응답 기록
+		return agentName + " (CLI 응답 기록)"
 	}
 	return agentName
 }
