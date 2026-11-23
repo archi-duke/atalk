@@ -91,7 +91,9 @@ func envPtr(k string) *string {
 
 func sessionStart(c *client.Client, kind string, in Input) any {
 	cwd := orDefault(in.Cwd, mustGetwd())
-	reg := core.RegisterInput{Kind: kind, SessionID: in.SessionID, Cwd: &cwd, Name: envPtr("ATALK_NAME"), Description: envPtr("ATALK_DESCRIPTION")}
+	// 새 세션은 임시로 등록한다: 사람이 처음 입력할 때 확정되어 그때 이전 세션의 이름표·자리를 넘겨받는다.
+	// (켜자마자 /resume 으로 이전 세션을 열면 이 임시 카드는 정리되고 이전 세션이 그 방으로 돌아간다)
+	reg := core.RegisterInput{Kind: kind, SessionID: in.SessionID, Cwd: &cwd, Name: envPtr("ATALK_NAME"), Description: envPtr("ATALK_DESCRIPTION"), Provisional: true}
 	if pid := procs.FindAgentPID(); pid > 0 {
 		reg.Pid = &pid
 	}
@@ -234,6 +236,9 @@ func stop(c *client.Client, kind string, in Input) any {
 // 모델을 거치지 않고 원문 그대로 방에 올리고, 모델로는 보내지 않는다(block).
 func prompt(c *client.Client, kind string, in Input) any {
 	text := strings.TrimSpace(in.Prompt)
+	if text != "" && !core.IsSystemPrompt(text) { // 사람이 입력함 → 임시 세션 확정
+		_ = c.Activate(core.MakeAgentID(kind, in.SessionID))
+	}
 	if !strings.HasPrefix(text, client.HumanPrefix) {
 		// 방에 있으면 사람이 입력한 말을 대화 기록으로 남긴다 (/명령 제외, 알림 없음)
 		if text != "" && !strings.HasPrefix(text, "/") {

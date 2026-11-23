@@ -274,6 +274,10 @@ func (s *Server) routes() http.Handler {
 		m, err := c.EchoPrompt(r.PathValue("id"), b.Text)
 		return map[string]any{"recorded": m != nil, "message": m}, err
 	})
+	// 임시 세션 확정: 사람이 이 세션에 처음 입력함 (이전 세션 이름표·자리를 그때 넘겨받는다)
+	h("POST /agents/{id}/activate", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]any{}, c.Activate(r.PathValue("id"))
+	})
 	h("POST /agents/{id}/away", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
 			Reason string `json:"reason"`
