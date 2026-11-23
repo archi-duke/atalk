@@ -181,6 +181,24 @@
   .m.mine .bubble { background:var(--mine); color:var(--mine-fg); border-radius:14px 4px 14px 14px; }
   .m:not(.first) .bubble { border-radius:14px; }
   .bubble code { font:12.5px ui-monospace,Consolas,monospace; background:var(--quote); padding:0 4px; border-radius:4px; }
+  /* 마크다운 본문 */
+  .md { white-space:normal; }
+  .md > :first-child { margin-top:0; } .md > :last-child { margin-bottom:0; }
+  .md p { margin:0 0 6px; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin:8px 0 4px; line-height:1.3; }
+  .md h1 { font-size:1.25em; } .md h2 { font-size:1.15em; } .md h3 { font-size:1.05em; } .md h4, .md h5, .md h6 { font-size:1em; }
+  .md ul, .md ol { margin:2px 0 6px; padding-left:20px; }
+  .md li { margin:1px 0; }
+  .md blockquote { margin:4px 0 6px; padding:2px 8px; border-left:3px solid var(--muted); color:var(--muted); }
+  .md hr { border:none; border-top:1px solid var(--line); margin:8px 0; }
+  .md pre { margin:4px 0 6px; padding:8px 10px; background:var(--quote); border-radius:6px; overflow-x:auto; white-space:pre; }
+  .md pre code { background:none; padding:0; font-size:12px; }
+  .md .tbl { overflow-x:auto; margin:4px 0 6px; }
+  .md table { border-collapse:collapse; font-size:12.5px; }
+  .md th, .md td { border:1px solid var(--line); padding:3px 8px; text-align:left; vertical-align:top; }
+  .md th { background:var(--quote); font-weight:600; }
+  .md a { color:var(--accent); }
+  .m.mine .md a { color:inherit; text-decoration:underline; }
   .chip { display:inline-block; font-size:11px; font-weight:700; margin-bottom:4px; }
   .chip.task { color:var(--task); } .chip.result { color:var(--result); } .chip.status { color:var(--status); }
   .chip .to { font-weight:400; color:var(--muted); margin-left:4px; }
@@ -417,10 +435,77 @@ function shortWhen(ts) {
   return dayKey(ts) === dayKey(now.toISOString()) ? hhmm(ts) : d.toLocaleDateString("ko-KR", { month: "numeric", day: "numeric" });
 }
 function clean(s) { return String(s ?? "").replace(/^﻿/, ""); }
-// 가벼운 서식: `코드`, **굵게**
-function fmt(s) {
-  return esc(clean(s)).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+// 마크다운 렌더 (외부 라이브러리 없이). 원문은 먼저 전부 이스케이프하므로 메시지 안의 HTML 은 실행되지 않는다.
+// 지원: 제목, 굵게/기울임/취소선, `코드`, ```코드 블록```, 목록(- * + 1.), 인용(>), 표, 구분선, [링크](http…), 주소 자동 링크
+function mdInline(s) {
+  const codes = [];
+  s = s.replace(/`([^`\n]+)`/g, (_, c) => "\u0000" + (codes.push("<code>" + c + "</code>") - 1) + "\u0000");
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) => '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + t + "</a>")
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (_, p, u) => p + '<a href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + "</a>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>").replace(/__([^_\n]+)__/g, "<b>$1</b>")
+    .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<i>$2</i>").replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, "$1<i>$2</i>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[i]);
 }
+function md(src) {
+  const lines = esc(clean(src)).replace(/\r\n?/g, "\n").split("\n");
+  const out = [];
+  let para = [];
+  const flush = () => { if (para.length) { out.push("<p>" + para.map(mdInline).join("<br>") + "</p>"); para = []; } };
+  const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    let m;
+    if ((m = l.match(/^\s*(```|~~~)\s*([\w+-]*)\s*$/))) { // 코드 블록
+      flush();
+      const fence = m[1], body = [];
+      while (++i < lines.length && !lines[i].trim().startsWith(fence)) body.push(lines[i]);
+      out.push("<pre><code>" + body.join("\n") + "</code></pre>");
+      continue;
+    }
+    if (!l.trim()) { flush(); continue; }
+    if ((m = l.match(/^(#{1,6})\s+(.*?)\s*#*\s*$/))) { flush(); out.push("<h" + m[1].length + ">" + mdInline(m[2]) + "</h" + m[1].length + ">"); continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { flush(); out.push("<hr>"); continue; }
+    if (/^\s*\|.*\|\s*$/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(lines[i + 1])) { // 표
+      flush();
+      const head = cells(l);
+      let html = '<div class="tbl"><table><thead><tr>' + head.map((c) => "<th>" + mdInline(c) + "</th>").join("") + "</tr></thead><tbody>";
+      i++;
+      while (i + 1 < lines.length && /^\s*\|.*\|\s*$/.test(lines[i + 1])) html += "<tr>" + cells(lines[++i]).map((c) => "<td>" + mdInline(c) + "</td>").join("") + "</tr>";
+      out.push(html + "</tbody></table></div>");
+      continue;
+    }
+    if (/^\s*&gt;\s?/.test(l)) { // 인용 (이스케이프된 >)
+      flush();
+      const q = [];
+      for (; i < lines.length && /^\s*&gt;\s?/.test(lines[i]); i++) q.push(lines[i].replace(/^\s*&gt;\s?/, ""));
+      i--;
+      out.push("<blockquote>" + q.map(mdInline).join("<br>") + "</blockquote>");
+      continue;
+    }
+    if ((m = l.match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/))) { // 목록 (들여쓰기는 한 단계 안쪽 목록으로)
+      flush();
+      const ordered = /\d/.test(m[2]);
+      let html = ordered ? "<ol>" : "<ul>";
+      for (; i < lines.length; i++) {
+        const x = lines[i].match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+        if (!x) {
+          if (lines[i].trim() && /^\s{2,}/.test(lines[i])) { html = html.replace(/<\/li>$/, "<br>" + mdInline(lines[i].trim()) + "</li>"); continue; } // 이어지는 줄
+          break;
+        }
+        html += x[1].length >= 2 ? '<li style="margin-left:16px;list-style-type:circle">' + mdInline(x[3]) + "</li>" : "<li>" + mdInline(x[3]) + "</li>";
+      }
+      i--;
+      out.push(html + (ordered ? "</ol>" : "</ul>"));
+      continue;
+    }
+    para.push(l);
+  }
+  flush();
+  return out.join("");
+}
+// 말풍선 본문: 마크다운으로 렌더
+function fmt(s) { return md(s); }
 function avatar(m) {
   if (m.human) return '<div class="ava" style="background:#e0a526">' + esc([...m.human][0] || "?") + "</div>";
   const a = agents[m.from];
@@ -500,7 +585,8 @@ function renderSide() {
   const sorted = [...rooms].sort((p, q) => (previews[q.room_id]?.ts || "").localeCompare(previews[p.room_id]?.ts || ""));
   $("#list").innerHTML = sorted.map((x) => {
     const p = previews[x.room_id];
-    const prev = p ? (p.type === "system" ? clean(p.body) : (p.human ? p.human + "@" : "") + nameOf(p.from) + ": " + clean(p.body)) : "메시지 없음";
+    const plain = (t) => clean(t).replace(/**|__|~~|`/g, "").replace(/^s{0,3}(#{1,6}|>|[-*+]|d+[.)])s+/gm, ""); // 미리보기는 마크다운 기호를 걷어 낸다
+    const prev = p ? (p.type === "system" ? clean(p.body) : (p.human ? p.human + "@" : "") + nameOf(p.from) + ": " + plain(p.body)) : "메시지 없음";
     return '<div class="row' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><div class="room-ico">' + esc([...(x.title || x.room_id)][0]) + "</div>" +
       '<div class="txt"><div class="top"><span class="title">' + esc(x.title || x.room_id) + ' <span class="when">' + x.members.length + "</span>" + (x.closed_at ? ' <span class="when">닫힘</span>' : "") +
       '</span><span class="when">' + shortWhen(p?.ts) + '</span></div><div class="prev">' + esc(prev.split("\n")[0]) + "</div>" + cardPresence(x) + "</div></div>";
@@ -610,13 +696,13 @@ function renderChat(scroll) {
     let inner = "";
     if (m.type !== "chat") {
       const to = (m.to || []).length ? '<span class="to">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span>" : "";
-      inner += '<span class="chip ' + m.type + '">' + (TYPE_KO[m.type] || m.type) + to + "</span>\n";
+      inner += '<span class="chip ' + m.type + '">' + (TYPE_KO[m.type] || m.type) + to + "</span>";
     } else if ((m.to || []).length) {
-      inner += '<span class="chip status"><span class="to" style="margin:0">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span></span>\n";
+      inner += '<span class="chip status"><span class="to" style="margin:0">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span></span>";
     }
     const q = m.reply_to ? bySeq[m.reply_to] : null;
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
-    inner += fmt(m.body);
+    inner += '<div class="md">' + fmt(m.body) + "</div>";
 
     const lg = Object.values(logs[m.seq] || {}).map((e) =>
       '<span class="' + e.state + '">' + esc(nameOf(e.agent)) + " " + (STATE_KO[e.state] || e.state) + (e.state === "failed" && e.note ? " (" + esc(e.note) + ")" : "") + "</span>").join(" · ");
