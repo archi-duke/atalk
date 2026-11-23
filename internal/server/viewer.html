@@ -86,6 +86,7 @@
   .settings .note { font-size:11.5px; color:var(--muted); margin:2px 0 0; }
   .settings .path { font:12.5px ui-monospace,Consolas,monospace; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:5px 8px; word-break:break-all; }
   .settings .btn2 { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:4px 12px; cursor:pointer; font-size:12.5px; }
+  .settings a.btn2 { color:var(--fg); text-decoration:none; display:inline-block; }
   .settings .btn2.primary { background:var(--mine); color:var(--mine-fg); border-color:transparent; font-weight:700; }
   .settings .btn2:disabled { opacity:.45; cursor:default; }
   .settings footer { display:flex; justify-content:flex-end; gap:8px; padding:12px 18px; border-top:1px solid var(--line); align-items:center; }
@@ -106,6 +107,7 @@
   .browser .dirs { max-height:180px; overflow:auto; font-size:13px; }
   .browser .dirs div { padding:4px 10px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .browser .dirs div:hover { background:var(--hover); }
+  .browser .dirs div.sel { background:var(--accent, #3b6fd8); color:#fff; }
   .browser .state { padding:6px 10px; font-size:12px; color:var(--muted); border-top:1px solid var(--line); display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
   .browser .state b { color:var(--fg); }
 
@@ -344,14 +346,12 @@
           <p class="note" id="sRootInfo"></p>
           <div class="f"><button type="button" class="btn2" id="sChange">위치 바꾸기…</button><a class="btn2" id="sBackup" href="/admin/backup">백업 내려받기 (zip)</a></div>
           <div class="browser" id="browser" hidden>
-            <div class="bar"><button type="button" class="btn2" id="bUp" title="상위 폴더">↑</button><input type="text" id="bPath" placeholder="예: D:\atalk-data (없는 폴더면 새로 만듦)"><button type="button" class="btn2" id="bGo">열기</button></div>
+            <div class="bar"><button type="button" class="btn2" id="bUp" title="상위 폴더">↑</button><input type="text" id="bPath" placeholder="예: D:\atalks (없는 폴더면 새로 만듦)"><button type="button" class="btn2" id="bNew" title="지금 폴더 안에 새 폴더 이름을 정합니다">새 폴더…</button><button type="button" class="btn2 primary" id="bMove">이동</button></div>
             <div class="dirs" id="bDirs"></div>
-            <div class="state"><span id="bState"></span>
-              <button type="button" class="btn2 primary" id="bMove" disabled>이 폴더로 이동</button>
-              <button type="button" class="btn2" id="bSwitch" disabled>이 폴더의 데이터로 전환</button></div>
+            <div class="state"><span id="bState"></span></div>
           </div>
-          <p class="note">이동: 지금 데이터를 빈 폴더로 복사하고 그 폴더를 씁니다. 원래 폴더는 백업으로 남습니다 (MOVED.txt).
-            전환: 이미 ATalk 데이터가 있는 폴더를 씁니다. 어느 쪽이든 데몬이 새 폴더로 다시 시작합니다.</p>
+          <p class="note">폴더를 한 번 누르면 선택, 두 번 누르면 들어갑니다. 경로를 직접 입력해도 됩니다. <b>이동</b>을 누르면 그때 적용되고 데몬이 새 폴더로 다시 시작합니다.
+            빈 폴더·없는 폴더 → 지금 데이터를 복사해 옮깁니다 (원래 폴더는 백업으로 남음, MOVED.txt). ATalk 데이터가 이미 있는 폴더 → 그 데이터로 전환합니다.</p>
         </section>
         <section>
           <h3>휴지통 (삭제한 대화방)</h3>
@@ -957,37 +957,67 @@ function onNewMessage(m) {
   }
 }
 
-// 데이터 폴더 고르기
-let bCur = null;
+// 데이터 폴더 고르기: 한 번 누르면 선택, 두 번 누르면 들어감. "이동" 을 눌러야 적용된다.
+let bCur = null; // 지금 열어 둔(목록을 보고 있는) 폴더
+const isAbsPath = (p) => /^[a-zA-Z]:[\\/]/.test(p) || p.startsWith("/") || p.startsWith("\\\\");
+const joinPath = (base, name) => base.replace(/[\\/]+$/, "") + (base.includes("/") && !base.includes("\\") ? "/" : "\\") + name;
+const sameRoot = (p) => !!p && p.replace(/[\\/]+$/, "").toLowerCase() === info.root.replace(/[\\/]+$/, "").toLowerCase();
+// 경로가 어떤 폴더인지 본다: missing(없음 → 새로 만듦) | empty | has_data | 그 밖(비어 있지 않음)
+async function inspect(path) {
+  path = (path ?? "").trim();
+  if (!path || !isAbsPath(path)) return { path, bad: true };
+  const r = await j("/admin/dirs?path=" + encodeURIComponent(path));
+  return r.ok ? r : { path, missing: true };
+}
+function describe(t) {
+  return !t.path ? "폴더를 고르거나 경로를 입력하세요" : t.bad ? "전체 경로를 입력하세요 (예: D:\\atalks)" : sameRoot(t.path) ? "지금 쓰는 폴더" :
+    t.has_data ? "<b>ATalk 데이터가 있는 폴더</b> — 이동하면 그 데이터로 전환" : t.missing ? "<b>새 폴더</b> — 이동하면 만들어서 옮김" :
+    t.empty ? "<b>빈 폴더</b> — 이동 가능" : "비어 있지 않은 폴더 — 새 폴더… 로 이름을 덧붙이세요";
+}
+let bSeq = 0;
+async function showState(path) {
+  const n = ++bSeq, t = await inspect(path);
+  if (n === bSeq) $("#bState").innerHTML = describe(t);
+}
 async function browse(path) {
   const r = await j("/admin/dirs?path=" + encodeURIComponent(path ?? ""));
-  if (!r.ok) {
-    // 없는 폴더: 새로 만들어 옮길 수 있음
-    bCur = { path, missing: true };
-    $("#bPath").value = path; $("#bDirs").innerHTML = '<div style="color:var(--muted)">없는 폴더입니다. 이동하면 새로 만듭니다.</div>';
-  } else {
-    bCur = r;
-    $("#bPath").value = r.path;
-    $("#bDirs").innerHTML = r.dirs.map((d) => '<div data-d="' + esc(d) + '">📁 ' + esc(d) + "</div>").join("") || '<div style="color:var(--muted)">하위 폴더 없음</div>';
-    $("#bDirs").querySelectorAll("[data-d]").forEach((el) => (el.onclick = () =>
-      browse(r.drives ? el.dataset.d : r.path.replace(/[\\/]+$/, "") + (r.path.includes("/") && !r.path.includes("\\") ? "/" : "\\") + el.dataset.d)));
-  }
-  const same = bCur.path && bCur.path.toLowerCase() === info.root.toLowerCase();
-  const canMove = !!bCur.path && !same && (bCur.missing || bCur.empty);
-  const canSwitch = !!bCur.path && !same && !!bCur.has_data;
-  $("#bMove").disabled = !canMove; $("#bSwitch").disabled = !canSwitch;
-  $("#bState").innerHTML = !bCur.path ? "드라이브를 고르세요" : same ? "지금 쓰는 폴더" : bCur.has_data ? "<b>ATalk 데이터가 있는 폴더</b> → 전환 가능" :
-    bCur.missing ? "<b>새 폴더</b> → 이동 가능" : bCur.empty ? "<b>빈 폴더</b> → 이동 가능" : "비어 있지 않은 폴더 — 새 폴더 이름을 경로에 덧붙이세요";
+  if (!r.ok) { $("#bState").textContent = "폴더를 열 수 없음: " + path; return; }
+  bCur = r;
+  $("#bPath").value = r.path;
+  $("#bDirs").innerHTML = r.dirs.map((d) => '<div data-d="' + esc(d) + '">📁 ' + esc(d) + "</div>").join("") || '<div style="color:var(--muted)">하위 폴더 없음</div>';
+  $("#bDirs").querySelectorAll("[data-d]").forEach((el) => {
+    const full = r.drives ? el.dataset.d : joinPath(r.path, el.dataset.d);
+    el.onclick = () => { // 선택
+      $("#bDirs").querySelectorAll(".sel").forEach((x) => x.classList.remove("sel"));
+      el.classList.add("sel"); $("#bPath").value = full; showState(full);
+    };
+    el.ondblclick = () => browse(full); // 들어가기
+  });
+  showState(r.path);
 }
 $("#sChange").onclick = () => { $("#browser").hidden = false; browse(info.root.replace(/[\\/][^\\/]+[\\/]?$/, "") || ""); };
 $("#bUp").onclick = () => browse(bCur?.parent ?? "");
-$("#bGo").onclick = () => browse($("#bPath").value.trim());
-$("#bPath").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); browse($("#bPath").value.trim()); } };
-async function moveRoot(mode) {
+$("#bPath").onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); $("#bMove").click(); } };
+let bTimer = 0;
+$("#bPath").oninput = () => { clearTimeout(bTimer); bTimer = setTimeout(() => showState($("#bPath").value), 300); };
+$("#bNew").onclick = () => {
+  const base = $("#bPath").value.trim() || bCur?.path || "";
+  if (!isAbsPath(base)) { $("#bState").textContent = "먼저 드라이브나 폴더를 고르세요"; return; }
+  const name = "atalk-data", v = joinPath(base, name), inp = $("#bPath");
+  inp.value = v; inp.focus(); inp.setSelectionRange(v.length - name.length, v.length); // 이름 부분만 골라 둠 → 바로 덮어쓰기
+  showState(v);
+};
+$("#bMove").onclick = async () => {
   const target = $("#bPath").value.trim();
+  const t = await inspect(target);
+  $("#bState").innerHTML = describe(t);
+  if (t.bad || sameRoot(t.path)) return;
+  const mode = t.has_data ? "switch" : t.missing || t.empty ? "move" : "";
+  if (!mode) return;
   const what = mode === "move" ? "지금 데이터를 " + target + " 로 복사하고 그 폴더를 씁니다.\n원래 폴더(" + info.root + ")는 백업으로 남습니다."
-    : target + " 에 있는 ATalk 데이터로 전환합니다.\n지금 폴더(" + info.root + ")의 데이터는 그대로 남지만 더는 쓰지 않습니다.";
+    : target + " 에 이미 있는 ATalk 데이터로 전환합니다.\n지금 폴더(" + info.root + ")의 데이터는 그대로 남지만 더는 쓰지 않습니다.";
   if (!confirm(what + "\n\n데몬이 새 폴더로 다시 시작합니다. 계속할까요?")) return;
+  $("#bMove").disabled = true;
   $("#setMsg").textContent = mode === "move" ? "복사하는 중…" : "전환하는 중…";
   try {
     const r = await send("POST", "/admin/move-root", { path: target, mode });
@@ -998,9 +1028,8 @@ async function moveRoot(mode) {
     }
     $("#setMsg").textContent = "데몬이 아직 응답하지 않습니다. 잠시 뒤 새로고침하세요.";
   } catch (err) { $("#setMsg").textContent = err.message; }
-}
-$("#bMove").onclick = () => moveRoot("move");
-$("#bSwitch").onclick = () => moveRoot("switch");
+  $("#bMove").disabled = false;
+};
 
 // ───────── 대화방 목록 폭 조절 ─────────
 (() => {
