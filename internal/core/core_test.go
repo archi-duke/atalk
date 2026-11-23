@@ -852,16 +852,16 @@ func TestEchoReplyAfterRestart(t *testing.T) {
 	}))
 	check(t, c.Close())
 	c = e.core()
-	if r := ok(c.EchoReply(a, "표시했습니다")); r == nil || *r.ReplyTo != req.Seq {
+	if r := ok(c.EchoReply(a, []string{"표시했습니다"}, true)); len(r) != 1 || *r[0].ReplyTo != req.Seq {
 		t.Fatalf("재시작 뒤에도 요청에 응답이 붙어야 함: %+v", r)
 	}
-	if r := ok(c.EchoReply(a, "또")); r != nil {
-		t.Fatal("이미 응답한 입력에 두 번 붙으면 안 됨")
+	if r := ok(c.EchoReply(a, []string{"또"}, true)); len(r) != 0 {
+		t.Fatal("턴을 닫은 뒤에는 붙으면 안 됨")
 	}
 	// 오래된 입력에는 붙이지 않는다
 	ok(c.EchoPrompt(a, "옛 입력"))
 	e.clock = e.clock.Add(13 * time.Hour)
-	if r := ok(c.EchoReply(a, "한참 뒤 응답")); r != nil {
+	if r := ok(c.EchoReply(a, []string{"한참 뒤 응답"}, true)); len(r) != 0 {
 		t.Fatal("12시간 넘은 입력에는 응답을 붙이지 않음")
 	}
 }
@@ -932,14 +932,17 @@ func TestEchoPrompt(t *testing.T) {
 	}
 	// 응답 기록: 기록하지 않은 CLI 입력이 있을 때만, reply_to = 그 입력. 두 번째 응답(입력 없음)은 남기지 않는다
 	q := ok(c.EchoPrompt(a, "상태 알려 줘"))
-	r := ok(c.EchoReply(a, "  다 괜찮습니다  "))
-	if r == nil || !r.Echo || r.Human != "" || r.ReplyTo == nil || *r.ReplyTo != q.Seq || r.Body != "다 괜찮습니다" {
-		t.Fatalf("응답 기록: %+v", r)
+	// 실시간: 도구를 쓸 때마다 지금까지의 문장 전부를 보내도 새 문장만 하나씩 남는다
+	if r := ok(c.EchoReply(a, []string{"  확인해 보겠습니다  "}, false)); len(r) != 1 || r[0].Body != "확인해 보겠습니다" || !r[0].Echo || r[0].Human != "" || *r[0].ReplyTo != q.Seq {
+		t.Fatalf("첫 문장: %+v", r)
 	}
-	if again := ok(c.EchoReply(a, "방 메시지 처리한 응답")); again != nil {
-		t.Fatal("기록할 CLI 입력이 없으면 응답을 남기지 않음")
+	if r := ok(c.EchoReply(a, []string{"확인해 보겠습니다", "다 괜찮습니다"}, true)); len(r) != 1 || r[0].Body != "다 괜찮습니다" {
+		t.Fatalf("새 문장만: %+v", r)
 	}
-	if again := ok(c.EchoReply(b, "남의 응답")); again != nil {
+	if again := ok(c.EchoReply(a, []string{"방 메시지 처리한 응답"}, true)); len(again) != 0 {
+		t.Fatal("턴이 닫힌 뒤(방 메시지·알림 처리 응답)는 남기지 않음")
+	}
+	if again := ok(c.EchoReply(b, []string{"남의 응답"}, true)); len(again) != 0 {
 		t.Fatal("CLI 입력이 없던 에이전트의 응답은 남기지 않음")
 	}
 	for _, who := range []string{a, b} {
@@ -953,7 +956,7 @@ func TestEchoPrompt(t *testing.T) {
 	if m := ok(c.EchoPrompt(a, notice)); m != nil {
 		t.Fatal("Monitor 알림은 기록하면 안 됨")
 	}
-	if r := ok(c.EchoReply(a, "요청 처리 결과")); r == nil || *r.ReplyTo != req.Seq {
+	if r := ok(c.EchoReply(a, []string{"요청 처리 결과"}, true)); len(r) != 1 || *r[0].ReplyTo != req.Seq {
 		t.Fatalf("중간에 알림이 와도 요청의 응답은 기록돼야 함: %+v", r)
 	}
 	if m := ok(c.EchoPrompt(a, "이거 봐 줘\n\n<pasted_content id=\"1\">\n<task-notification>x</task-notification>\n</pasted_content id=\"1\">")); m == nil {

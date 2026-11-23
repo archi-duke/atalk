@@ -127,14 +127,15 @@ func Skill(p Paths) (string, error) {
 
 // hookEvents 는 Claude Code settings.json 에 넣는 훅. async 는 백그라운드 + asyncRewake (끝날 때 종료 코드 2 면 쉬는 Claude 를 깨움).
 var hookEvents = []struct {
-	event, arg string
-	async      bool
+	event, arg    string
+	async, rewake bool
 }{
-	{"SessionStart", "session-start", false},
-	{"SessionStart", "wait", true}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
-	{"Stop", "stop", false},
-	{"SessionEnd", "session-end", false},
-	{"UserPromptSubmit", "prompt", false},
+	{"SessionStart", "session-start", false, false},
+	{"SessionStart", "wait", true, true}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
+	{"Stop", "stop", false, false},
+	{"SessionEnd", "session-end", false, false},
+	{"UserPromptSubmit", "prompt", false, false},
+	{"PostToolUse", "tool", true, false}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
 }
 
 // isOurs 는 settings.json 의 훅 명령이 atalk 가 넣은 것인지 본다.
@@ -173,7 +174,10 @@ func Claude(p Paths) ([]string, error) {
 		for _, h := range hookEvents { // 새로 넣는다
 			entry := map[string]any{"type": "command", "command": fmt.Sprintf(`"%s" hook claude-code %s`, Exe(), h.arg)}
 			if h.async {
-				entry["async"], entry["asyncRewake"] = true, true
+				entry["async"] = true
+			}
+			if h.rewake {
+				entry["asyncRewake"] = true
 			}
 			list, _ := hooks[h.event].([]any)
 			hooks[h.event] = append(list, map[string]any{"hooks": []any{entry}})
