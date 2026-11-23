@@ -2,7 +2,8 @@ package hook
 
 // wait: Claude Code 의 asyncRewake 훅용. 세션이 시작될 때 백그라운드로 돌다가
 // 이 세션 앞으로 처리할 메시지(또는 초대)가 생기면 내용을 stderr 에 쓰고 종료 코드 2 로 끝나
-// 쉬고 있는 Claude 를 깨운다. 그 뒤로는 Claude 가 켜는 atalk listen 이 알림을 맡는다.
+// 쉬고 있는 Claude 를 깨운다. SessionStart 와 Stop(응답을 마칠 때마다) 에 걸리므로, Monitor 로 listen 을 켜 둘 필요가 없다
+// (Monitor 는 30분마다 만료·재시작하며 Claude 를 깨워 토큰을 쓴다. 이 대기는 메시지가 올 때만 깨운다).
 //
 //	settings.json:
 //	"SessionStart": [{"hooks": [{"type": "command", "command": "atalk hook claude-code wait", "async": true, "asyncRewake": true}]}]
@@ -11,6 +12,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,8 +46,16 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 	}
 	seen := map[string]bool{}
 	startRoom, known := "", false // 시작할 때 있던 방 (복구는 SessionStart 안내가 맡으므로, 그 뒤 새로 들어간 방만 알린다)
+	baseline := false             // 시작할 때 이미 있던 메시지·초대·신청은 Stop 훅이 처리하므로 그 뒤 새로 온 것만 깨운다
+	// 대기는 Claude 가 응답을 마칠 때마다(Stop) 새로 걸린다. 한 세션에 하나만 살아 있게, 새 대기가 시작되면 이전 대기는 끝난다.
+	genFile := filepath.Join(os.TempDir(), "atalk-wait-"+id+".gen")
+	gen := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())
+	_ = os.WriteFile(genFile, []byte(gen), 0o644)
 	for deadline := time.Now().Add(maxWait); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
-		if daemon.ListenRunning(id) { // Claude 가 이미 listen 을 켰으면 그쪽이 알림을 맡는다
+		if b, err := os.ReadFile(genFile); err == nil && string(b) != gen {
+			return 0 // 더 새 대기가 이어받음
+		}
+		if daemon.ListenRunning(id) { // Claude 가 listen 을 켜 두었으면 그쪽이 알림을 맡는다
 			return 0
 		}
 		c := client.New("") // 포트가 바뀌었을 수 있으니 매번 주소를 다시 읽는다
@@ -70,8 +82,11 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		if u, err := c.Unread(id, false); err == nil {
 			var forMe []core.InboxMessage
 			for _, m := range u.Messages {
-				if m.ForMe {
-					forMe = append(forMe, m)
+				if k := fmt.Sprintf("msg:%s:%d", m.Room, m.Seq); m.ForMe && !seen[k] {
+					seen[k] = true
+					if baseline {
+						forMe = append(forMe, m)
+					}
 				}
 			}
 			if len(forMe) > 0 && u.Room != nil {
@@ -86,6 +101,9 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 			for _, i := range p.Invites {
 				if k := "inv:" + i.Room + ":" + i.At; !seen[k] {
 					seen[k] = true
+					if !baseline {
+						continue
+					}
 					how := "사용자에게 알리고, 사용자가 원하면"
 					if strings.HasSuffix(i.By, "(사람)") {
 						how = "내 사용자가 화면에서 보낸 초대이므로 바로"
@@ -99,16 +117,20 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 			for _, q := range p.Requests {
 				if k := "req:" + q.Room + ":" + q.Agent + ":" + q.At; !seen[k] {
 					seen[k] = true
+					if !baseline {
+						continue
+					}
 					lines = append(lines, fmt.Sprintf("[ATalk 참여 신청] %s → %s — 사용자에게 알리고, 사용자가 원하면 `%s approve %s`", q.Agent, q.Room, exe, q.Agent))
 				}
 			}
 		}
+		baseline = true
 		if len(lines) == 0 {
 			continue
 		}
 		lines = append(lines, "",
-			fmt.Sprintf("먼저 Monitor 도구로 `%s listen` 을 켜세요 (timeout_ms 1800000). 앞으로 오는 메시지는 그 알림으로 받습니다.", exe),
-			"그다음 atalk 스킬의 \"알림을 받았을 때\" 규칙대로 처리하세요: unread --ack → log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done.",
+			"atalk 스킬의 \"알림을 받았을 때\" 규칙대로 처리하세요: unread --ack → log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done.",
+			"(메시지 알림은 자동입니다 — 응답을 마칠 때마다 다시 기다립니다. atalk listen 은 켜지 않아도 됩니다.)",
 			client.HumanRule)
 		fmt.Fprintln(stderr, strings.Join(lines, "\n"))
 		return 2

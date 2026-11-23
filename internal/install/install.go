@@ -179,6 +179,7 @@ var hookEvents = []struct {
 	{"SessionStart", "session-start", false, false},
 	{"SessionStart", "wait", true, true}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
 	{"Stop", "stop", false, false},
+	{"Stop", "wait", true, true}, // 응답을 마칠 때마다 다시 대기: 메시지가 오면 깨움 (Monitor listen 대신 — 기다리는 동안 토큰을 쓰지 않음)
 	{"SessionEnd", "session-end", false, false},
 	{"UserPromptSubmit", "prompt", false, false},
 	{"PostToolUse", "tool", true, false}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
