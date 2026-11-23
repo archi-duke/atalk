@@ -13,6 +13,9 @@ import (
 const runKey = `Software\Microsoft\Windows\CurrentVersion\Run`
 const runName = "ATalk"
 
+// HideCmd 는 cmd 를 창·콘솔 없이 실행하게 한다 (도우미 프로세스용).
+func HideCmd(cmd *exec.Cmd) { detach(cmd, false) }
+
 func detach(cmd *exec.Cmd, breakaway bool) {
 	flags := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS | windows.CREATE_NO_WINDOW)
 	if breakaway {
