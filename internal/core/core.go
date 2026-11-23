@@ -496,8 +496,12 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		existing, had := c.agents[id]
 
 		var card AgentCard
+		var prevSuccessor string // 돌아온 세션을 이어받았던 세션 (복귀하면 그 자리를 되찾는다)
 		if had {
 			card = *existing
+			if existing.RetiredBy != nil {
+				prevSuccessor = *existing.RetiredBy
+			}
 			card.UpdatedAt = now
 			card.RetiredBy = nil
 			card.OfflineSince = nil
@@ -560,6 +564,11 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 				c.markBack(id)
 			}
 			res.Recovery = c.buildRecovery(id, 0)
+		} else if rec := c.reclaimFromSuccessor(id, prevSuccessor); rec != nil {
+			// 이전 세션으로 복귀 → 이 세션을 이어받았던 세션이 쓰지 않고 있으면 그 방 자리를 되찾는다
+			res.Recovery = rec
+			c.agents[id].LastRoom = ""
+			c.saveCard(c.agents[id])
 		} else if cur := c.agents[id]; had && cur.LastRoom != "" {
 			// 이전 세션으로 복귀 → 그때 있던 방으로 (자리 비움 유예가 지나 자동 퇴장됐어도)
 			r := cur.LastRoom
@@ -818,6 +827,37 @@ func (c *Atalk) Activate(agent string) error {
 		c.activateLocked(agent)
 		return nil
 	})
+}
+
+// reclaimFromSuccessor 는 돌아온 세션(id)을 이어받았던 세션(들)을 따라가서, 방 자리를 가진 세션이 지금 쓰이지 않으면
+// (자리 비움이거나 프로세스가 끝남) 그 자리를 되찾는다. "사용자가 복귀한 세션이 그 에이전트" 라는 원칙.
+// 이어받은 세션이 아직 쓰이고 있으면 건드리지 않는다.
+func (c *Atalk) reclaimFromSuccessor(id, successor string) *Recovery {
+	if _, inRoom := c.memberships[id]; inRoom || successor == "" {
+		return nil
+	}
+	cur := successor
+	for i := 0; i < 8 && cur != "" && cur != id; i++ {
+		s, ok := c.agents[cur]
+		if !ok {
+			return nil
+		}
+		if m, ok := c.memberships[cur]; ok {
+			idle := m.State == StateAway || (s.Pid != nil && c.isLocal(s) && !c.isAlive(*s.Pid))
+			if !idle {
+				return nil
+			}
+			if rec, err := c.takeoverLocked(id, cur); err == nil {
+				return rec
+			}
+			return nil
+		}
+		if s.RetiredBy == nil {
+			return nil
+		}
+		cur = *s.RetiredBy
+	}
+	return nil
 }
 
 // dropProvisionalSuccessors 는 이전 세션(id)이 돌아왔을 때, 그 이름표를 이어받으려던 임시 카드들을 지운다.

@@ -264,6 +264,38 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
   // (-c/--session 으로 이어서 열거나 run/serve 등 다른 명령이면 하지 않는다)
   let foreignActivity = false
   const argv = process.argv.slice(1).map(String)
+  // -s/--session ID 나 -c/--continue 로 이전 세션을 이어서 열면, 시작하자마자 그 세션을 등록·확정한다
+  // → 그 세션이 있던 대화방으로 바로 복귀 (원칙: 이전 세션으로 복귀하면 그때 있던 방으로)
+  const argSession = (() => {
+    for (let i = 0; i < argv.length; i++) {
+      if ((argv[i] === "-s" || argv[i] === "--session") && argv[i + 1]) return argv[i + 1]
+      if (argv[i].startsWith("--session=")) return argv[i].slice("--session=".length)
+    }
+    return ""
+  })()
+  const argContinue = argv.some((a) => a === "-c" || a === "--continue" || a.startsWith("--continue"))
+  if (argSession || argContinue) {
+    setTimeout(async () => {
+      for (const wait of [0, 2000, 4000]) {
+        await new Promise((res) => setTimeout(res, wait))
+        try {
+          let sid = argSession
+          if (!sid) { // --continue: 이 폴더에서 가장 최근에 쓴 최상위 세션
+            const r: any = await client.session.list()
+            const list: any[] = (r?.data ?? []).filter((s: any) => !s.parentID)
+            list.sort((a: any, b: any) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0))
+            sid = list[0]?.id ?? ""
+          }
+          if (!sid) return
+          await track(sid)
+          const st = sessions.get(sid)
+          if (!st) continue
+          await api("POST", `/agents/${enc(st.id)}/activate`, {}).catch(() => {})
+          return
+        } catch {}
+      }
+    }, 1500)
+  }
   const skipEager = ["run", "serve", "web", "attach", "acp", "mcp", "export", "import", "-c", "--continue", "-s", "--session", "--prompt"]
   if (!argv.some((a) => skipEager.includes(a) || a.startsWith("--session=") || a.startsWith("--continue"))) {
     setTimeout(async () => {
