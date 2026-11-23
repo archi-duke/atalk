@@ -745,6 +745,73 @@ func TestNoAutoJoinRejoinOnRequest(t *testing.T) {
 	}
 }
 
+// PC 정보: 이 PC 카드는 cwd·pid 를 보이고 PC 이름은 설정을 따른다. 다른 PC 카드는 경로·PID 없이 보인다.
+func TestHostAndWorkspace(t *testing.T) {
+	e := newEnv(t)
+	c, err := New(Options{Root: e.root, MachineID: "abcd1234ef", IsAlive: func(p int) bool { return e.alive[p] }, Now: func() time.Time { return e.clock }})
+	check(t, err)
+	t.Cleanup(func() { _ = c.Close() })
+
+	repo := t.TempDir()
+	check(t, os.MkdirAll(filepath.Join(repo, ".git"), 0o755))
+	sub := filepath.Join(repo, "internal", "core")
+	check(t, os.MkdirAll(sub, 0o755))
+
+	loc := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "l", Pid: i(100), Cwd: &sub})).Agent
+	if !loc.Local || loc.Host == nil || loc.Host.Name != "PC-ABCD" || loc.Cwd == nil || loc.Pid == nil {
+		t.Fatalf("이 PC 카드: %+v %+v", loc.Local, loc.Host)
+	}
+	if loc.Workspace == nil || *loc.Workspace != filepath.Base(repo) {
+		t.Fatalf("작업 이름은 git 저장소 폴더 이름: %v", loc.Workspace)
+	}
+	if loc.WorkspaceID == "" || loc.WorkspaceID != WorkspaceID("abcd1234ef", LocalOS(), sub) {
+		t.Fatalf("작업 위치 ID: %q", loc.WorkspaceID)
+	}
+	ok(c.SetConfig(Config{MachineName: "집 PC"}))
+	if v := ok(c.GetAgent(loc.ID)); v.Host.Name != "집 PC" {
+		t.Fatalf("PC 이름은 설정을 따름: %q", v.Host.Name)
+	}
+	// 작업 이름 바꾸기·숨기기
+	if v := ok(c.UpdateCard(loc.ID, CardPatch{Workspace: s("")})); v.Workspace == nil || *v.Workspace != "" {
+		t.Fatal("작업 이름 숨김")
+	}
+
+	// 다른 PC: 경로는 받지 않고, PID 는 보이지 않는다
+	remote := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "r", Pid: i(4242), Cwd: s("/home/kim/secret-proj"),
+		Host: &Host{ID: "other-pc", Name: "회사 노트북", OS: "linux"}, Workspace: s("api"), WorkspaceID: "ws-remote-1"})).Agent
+	if remote.Status == "offline" {
+		t.Fatal("다른 PC 카드를 이 PC 의 PID 로 오프라인 판정하면 안 됨")
+	}
+	if remote.Local || remote.Cwd != nil || remote.Pid != nil || remote.Host.Name != "회사 노트북" || *remote.Workspace != "api" {
+		t.Fatalf("다른 PC 카드: local=%v cwd=%v pid=%v host=%+v", remote.Local, remote.Cwd, remote.Pid, remote.Host)
+	}
+	// 다른 PC 의 같은 작업 위치에서 새 세션 → 이름표 이어받기 (경로 없이 작업 위치 ID 로)
+	ok(c.UpdateCard(remote.ID, CardPatch{Name: s("리뷰어")}))
+	check(t, c.MarkAway(remote.ID, "x"))
+	c.mu.Lock()
+	c.agents[remote.ID].OfflineSince = ptr("2026-11-17T00:00:00Z")
+	c.mu.Unlock()
+	r2 := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "r2", Host: &Host{ID: "other-pc", Name: "회사 노트북", OS: "linux"}, WorkspaceID: "ws-remote-1"}))
+	if r2.InheritedFrom != remote.ID || r2.Agent.Name != "리뷰어" {
+		t.Fatalf("다른 PC 의 같은 작업 위치: %+v", r2)
+	}
+	// 이 PC 의 다른 폴더는 이어받지 않는다
+	other := t.TempDir()
+	if r := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "l2", Pid: i(200), Cwd: &other})); r.InheritedFrom != "" {
+		t.Fatalf("다른 폴더는 이어받으면 안 됨: %s", r.InheritedFrom)
+	}
+}
+
+func TestWorkspaceLabelHome(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip()
+	}
+	if got := WorkspaceLabel(home); got != "~" {
+		t.Fatalf("홈 폴더는 계정명 대신 ~: %q", got)
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()

@@ -15,6 +15,12 @@ type AgentCard struct {
 	Human        *string  `json:"human,omitempty"`         // 이 에이전트를 쓰는 사람의 별칭 (없으면 config.json 의 user)
 	RetiredBy    *string  `json:"retired_by,omitempty"`    // 다른 세션이 이 세션의 자리를 이어받았으면 그 세션 id (상태는 offline)
 	OfflineSince *string  `json:"offline_since,omitempty"` // 데몬이 처음 offline 으로 본 시각. 오래되면 카드 자동 삭제
+	// Host 는 에이전트가 실행 중인 PC. 없으면(예전 카드) 이 PC.
+	Host *Host `json:"host,omitempty"`
+	// Workspace 는 작업 이름 (기본: 작업 폴더 또는 git 저장소 폴더 이름). "" 이면 숨김. 전체 경로 대신 화면에 보인다.
+	Workspace *string `json:"workspace,omitempty"`
+	// WorkspaceID 는 해시(PC ID + 정규화한 작업 폴더 경로). 경로를 드러내지 않고 "같은 PC 의 같은 폴더" 인지 비교하는 데 쓴다.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -112,6 +118,8 @@ type Config struct {
 	AutoResume *bool `json:"auto_resume,omitempty"`
 	// AutoAcceptInvites 가 false 면 opencode 플러그인이 초대를 자동 수락하지 않음. 없으면 켜짐.
 	AutoAcceptInvites *bool `json:"auto_accept_invites,omitempty"`
+	// MachineName 은 이 PC 의 이름 (에이전트 목록에 보임). 없으면 "PC-" + PC ID 앞 4자리. 호스트 이름은 쓰지 않는다.
+	MachineName string `json:"machine_name,omitempty"`
 }
 
 var LogStates = []string{"received", "working", "done", "skipped", "failed"}
@@ -125,8 +133,18 @@ type LogEntry struct {
 	Note  string `json:"note"`
 }
 
+// Host 는 PC 정보. ID 는 PC 마다 처음 실행할 때 만든 무작위 값(하드웨어 정보나 호스트 이름이 아님),
+// Name 은 사람이 붙인 별칭(기본 "PC-XXXX"), OS 는 windows | mac | linux.
+type Host struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	OS   string `json:"os,omitempty"`
+}
+
+// AgentView 는 API 로 내보내는 카드. 다른 PC 의 카드는 cwd·pid 를 빼고 보낸다 (그 PC 밖에서는 의미도 없고 노출만 된다).
 type AgentView struct {
 	AgentCard
+	Local  bool   `json:"local"`  // 이 데몬과 같은 PC 에서 실행 중
 	Status string  `json:"status"` // waiting | in_room | away | offline
 	Room   *string `json:"room"`
 	Role   *string `json:"role"`
@@ -203,6 +221,12 @@ type RegisterInput struct {
 	Capabilities *[]string `json:"capabilities,omitempty"`
 	Cwd          *string   `json:"cwd,omitempty"`
 	Pid          *int      `json:"pid,omitempty"`
+	// Host 가 없으면 이 데몬의 PC 로 본다 (로컬 등록). 다른 PC 에서 등록할 때만 보낸다.
+	Host *Host `json:"host,omitempty"`
+	// Workspace 는 작업 이름. 없으면 데몬이 작업 폴더 이름으로 정한다.
+	Workspace *string `json:"workspace,omitempty"`
+	// WorkspaceID 는 다른 PC 에서 등록할 때 클라이언트가 계산해 보내는 작업 위치 ID (경로는 보내지 않음).
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 type RegisterResult struct {
@@ -220,6 +244,7 @@ type CardPatch struct {
 	Description  *string   `json:"description,omitempty"`
 	Capabilities *[]string `json:"capabilities,omitempty"`
 	Human        *string   `json:"human,omitempty"` // 빈 문자열이면 지움 (config.json 의 user 를 따름)
+	Workspace    *string   `json:"workspace,omitempty"` // 작업 이름. 빈 문자열이면 숨김
 }
 
 type PostInput struct {
