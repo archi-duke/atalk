@@ -199,8 +199,9 @@ func (c *Client) EchoPrompt(id, text string) error {
 
 // EchoReply 는 응답을 받는 중인 CLI 입력에 대한 에이전트의 응답 문장들을 기록한다 (새 문장만, 알림 없음).
 // final 이면 그 턴을 닫는다. 응답을 받는 중인 입력이 없으면 아무것도 안 함.
-func (c *Client) EchoReply(id string, texts []string, final bool) error {
-	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"texts": texts, "reply": true, "final": final}, nil, 0)
+// prompt 는 이번 턴을 시작한 사람 입력 (모르면 ""). 응답을 기다리는 CLI 입력과 다르면 데몬이 무시한다.
+func (c *Client) EchoReply(id string, texts []string, final bool, prompt string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"texts": texts, "reply": true, "final": final, "prompt": prompt}, nil, 0)
 }
 
 // Activity 는 에이전트가 일을 시작(busy=true)·끝냈음(false)을 알린다 (작업 중 표시).

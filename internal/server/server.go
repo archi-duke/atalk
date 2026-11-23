@@ -261,6 +261,8 @@ func (s *Server) routes() http.Handler {
 			Reply bool     `json:"reply"` // true 면 에이전트의 응답 (응답을 받는 중인 CLI 입력에 대한)
 			Texts []string `json:"texts"` // 응답: 이번 턴에 지금까지 쓴 문장들 (새 것만 기록됨)
 			Final *bool    `json:"final"` // 응답: 턴이 끝났음 (없으면 true)
+			// 응답: 이번 턴을 시작한 사람 입력. 응답을 기다리는 CLI 입력과 다르면(대기열의 앞선 턴) 무시
+			Prompt string `json:"prompt"`
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
@@ -270,7 +272,7 @@ func (s *Server) routes() http.Handler {
 			if len(texts) == 0 && b.Text != "" {
 				texts = []string{b.Text}
 			}
-			ms, err := c.EchoReply(r.PathValue("id"), texts, b.Final == nil || *b.Final)
+			ms, err := c.EchoReply(r.PathValue("id"), texts, b.Final == nil || *b.Final, b.Prompt)
 			return map[string]any{"recorded": len(ms) > 0, "messages": ms}, err
 		}
 		m, err := c.EchoPrompt(r.PathValue("id"), b.Text)
