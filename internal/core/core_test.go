@@ -802,6 +802,42 @@ func TestHostAndWorkspace(t *testing.T) {
 	}
 }
 
+// PC 정보가 생기기 전에 등록된 카드는 데몬이 다시 시작할 때 PC·작업 이름이 채워진다 (사용자가 숨긴 작업 이름은 그대로).
+func TestBackfillHosts(t *testing.T) {
+	e := newEnv(t)
+	open := func() *Atalk {
+		c, err := New(Options{Root: e.root, MachineID: "m1", IsAlive: func(p int) bool { return e.alive[p] }, Now: func() time.Time { return e.clock }})
+		check(t, err)
+		return c
+	}
+	c := open()
+	dir := filepath.Join(t.TempDir(), "proj")
+	check(t, os.MkdirAll(dir, 0o755))
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "old", Pid: i(100), Cwd: &dir}))
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "hid", Pid: i(200), Cwd: &dir}))
+	ok(c.UpdateCard("opencode_hid", CardPatch{Workspace: s("")}))
+	check(t, c.guard(func() error { // 예전 버전처럼 PC 정보 없이 저장된 상태로 만든다
+		for _, a := range c.agents {
+			a.Host, a.WorkspaceID = nil, ""
+			if a.ID == "claude-code_old" {
+				a.Workspace = nil
+			}
+			c.saveCard(a)
+		}
+		return nil
+	}))
+	check(t, c.Close())
+	c = open()
+	t.Cleanup(func() { _ = c.Close() })
+	v := ok(c.GetAgent("claude-code_old"))
+	if v.Host == nil || v.Host.ID != "m1" || v.Workspace == nil || *v.Workspace != "proj" || v.WorkspaceID == "" {
+		t.Fatalf("예전 카드에 PC·작업 이름이 채워져야 함: %+v %v %q", v.Host, v.Workspace, v.WorkspaceID)
+	}
+	if h := ok(c.GetAgent("opencode_hid")); h.Workspace == nil || *h.Workspace != "" {
+		t.Fatal("숨긴 작업 이름은 그대로 두어야 함")
+	}
+}
+
 func TestWorkspaceLabelHome(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
