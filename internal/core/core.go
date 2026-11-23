@@ -751,7 +751,7 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 	}
 	var best *AgentCard
 	for id, old := range c.agents {
-		if id == card.ID || old.Kind != card.Kind || !c.sameWorkspace(old, card) {
+		if id == card.ID || old.Kind != card.Kind || old.Provisional || !c.sameWorkspace(old, card) { // 쓰지 않은 임시 카드는 이어받을 대상이 아님
 			continue
 		}
 		if old.RetiredBy != nil && *old.RetiredBy != card.ID { // 이미 다른 세션이 이어받음 (그 세션이 후보)
@@ -861,12 +861,19 @@ func (c *Atalk) reclaimFromSuccessor(id, successor string) *Recovery {
 }
 
 // dropProvisionalSuccessors 는 이전 세션(id)이 돌아왔을 때, 그 이름표를 이어받으려던 임시 카드들을 지운다.
+// 같은 프로세스(opencode 한 개)가 켜자마자 만든 쓰지 않은 임시 세션도 지운다 (사용자가 그 프로세스에서 다른 세션으로 복귀함).
 func (c *Atalk) dropProvisionalSuccessors(id string) {
+	back := c.agents[id]
 	for oid, other := range c.agents {
-		if oid != id && other.Provisional && other.InheritFrom == id {
-			if _, inRoom := c.memberships[oid]; !inRoom {
-				c.removeCard(oid, "이전 세션 "+id+" 이 돌아와 쓰지 않은 새 세션 정리")
-			}
+		if oid == id || !other.Provisional {
+			continue
+		}
+		sameProc := back != nil && back.Pid != nil && other.Pid != nil && *back.Pid == *other.Pid && other.Kind == back.Kind
+		if other.InheritFrom != id && !sameProc {
+			continue
+		}
+		if _, inRoom := c.memberships[oid]; !inRoom {
+			c.removeCard(oid, "이전 세션 "+id+" 이 돌아와 쓰지 않은 새 세션 정리")
 		}
 	}
 }
@@ -2161,6 +2168,10 @@ func (c *Atalk) sweepOffline(now time.Time) {
 			continue
 		}
 		off := c.statusOf(id) == "offline"
+		if off && card.Provisional { // 한 번도 쓰지 않고 끝난 임시 세션은 바로 지운다
+			c.removeCard(id, "쓰지 않고 끝난 새 세션")
+			continue
+		}
 		switch {
 		case off && card.OfflineSince == nil:
 			card.OfflineSince = ptr(c.ts())
