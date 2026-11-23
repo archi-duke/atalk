@@ -90,6 +90,9 @@
   .settings h3 { margin:0 0 8px; font-size:12px; color:var(--muted); font-weight:600; }
   .settings .f { display:flex; align-items:center; gap:8px; margin:6px 0; font-size:13px; flex-wrap:wrap; }
   .settings .f > span:first-child { min-width:170px; }
+  /* 체크박스 줄: 설명이 길어도 체크박스는 왼쪽에 붙어 있고 글자만 줄바꿈 */
+  .settings label.f:has(> input[type=checkbox]:first-child) { flex-wrap:nowrap; align-items:flex-start; }
+  .settings label.f > input[type=checkbox]:first-child { flex:none; margin-top:2px; }
   .settings input[type=text], .settings input[type=number] { font:inherit; font-size:13px; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:5px 7px; }
   .settings input[type=number] { width:80px; }
   .settings .note { font-size:11.5px; color:var(--muted); margin:2px 0 0; }
@@ -965,6 +968,8 @@ async function openSettings() {
   $("#sResume").checked = cfg.auto_resume !== false;
   $("#sEcho").checked = cfg.echo_prompts !== false;
   $("#sEchoFinal").checked = !!cfg.echo_final_only;
+  $("#sEchoFinal").disabled = !$("#sEcho").checked;
+  $("#sEcho").onchange = () => { $("#sEchoFinal").disabled = !$("#sEcho").checked; }; // 기록을 끄면 하위 옵션도 의미 없음
   $("#sAccept").checked = cfg.auto_accept_invites !== false;
   numField(cfg.away_grace_min, "#sGrace", "#sGraceOff");
   numField(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
