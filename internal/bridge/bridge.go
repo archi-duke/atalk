@@ -105,7 +105,7 @@ func (b *Bridge) Run(ctx context.Context) error {
 	b.id = r.Agent.ID
 	b.log.Printf("등록: %s (세션 %s, 상태 %s)", b.id, sid, r.Agent.Status)
 	if b.opts.Join != "" && r.Agent.Room == nil {
-		if err := b.c.RequestJoin(b.id, b.opts.Join, b.opts.Description); err != nil {
+		if _, err := b.c.RequestJoin(b.id, b.opts.Join, b.opts.Description); err != nil {
 			b.log.Printf("참여 신청 실패: %v", err)
 		} else {
 			b.log.Printf("%s 방에 참여 신청함", b.opts.Join)

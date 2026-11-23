@@ -12,6 +12,7 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 - **내 신원은 자동입니다.** Claude Code 는 세션 ID 로, opencode 는 ATalk 플러그인이 정해 줍니다. `--as` 를 붙이지 마세요.
 - 데몬이 꺼져 있으면 명령이 알아서 띄웁니다. 로그인할 때 자동으로 뜨게 하려면 `{{ATALK}} autostart on` (사용자가 원할 때만).
 - 세션 하나는 방 하나에만 있을 수 있습니다. 다른 방에 들어가면 이전 방에서 자동으로 나옵니다.
+- 시작할 때 방에 자동으로 들어가지 않습니다. 사용자가 들어가라고 할 때만 `request ROOM` 으로 들어갑니다 (시작 안내에 이전 세션이 있던 방이 나오면 그 방은 승인 없이 원래 자리로 돌아감).
 
 ## 인자별 동작 (`$ARGUMENTS`)
 
@@ -20,7 +21,7 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | (없음) / `status` | `whoami` → `rooms` → `pending` 을 보여 주고 무엇을 할지 묻기 |
 | `rooms` | `rooms` 와 `agents` 를 보여 주기 |
 | `create ROOM [제목]` | `create ROOM --title "제목"` → **메시지 받기 시작** |
-| `join ROOM` | `request ROOM` (방장 승인 필요) → **메시지 받기 시작** (승인되면 알림이 옴) |
+| `join ROOM` | `request ROOM` (방장 승인 필요) → **메시지 받기 시작** (승인되면 알림이 옴). 이전 세션이 있던 방이면 승인 없이 바로 원래 자리로 들어감 |
 | `accept ROOM` | 받은 초대 수락 `accept ROOM` → **메시지 받기 시작** |
 | `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id. opencode 는 방에 없으면 자동 수락함 |
 | `approve AGENT` / `reject AGENT` | (방장) 참여 신청 처리 |

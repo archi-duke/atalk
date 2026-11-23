@@ -566,8 +566,13 @@ func main() {
 		out(map[string]bool{"ok": true}, map[bool]string{true: rest[0] + " 방 입장", false: rest[0] + " 초대 거절"}[cmd == "accept"])
 
 	case "request":
-		check(c.RequestJoin(me(), at.arg(0, "ROOM"), a.str("note")))
-		out(map[string]bool{"ok": true}, rest[0]+" 방에 참여 신청함")
+		joined, err := c.RequestJoin(me(), at.arg(0, "ROOM"), a.str("note"))
+		check(err)
+		if joined {
+			out(map[string]bool{"ok": true, "joined": true}, strings.TrimSpace(rest[0]+" 방에 들어감 (이전 자리로 복귀, 승인 필요 없음)\n"+c.Purpose(rest[0])))
+		} else {
+			out(map[string]bool{"ok": true, "joined": false}, rest[0]+" 방에 참여 신청함 (방장이 승인하면 들어감)")
+		}
 
 	case "approve", "reject":
 		by, room := "", a.str("room")

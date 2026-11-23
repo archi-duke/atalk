@@ -697,6 +697,54 @@ func TestOwnerlessRoomAndDescription(t *testing.T) {
 	}
 }
 
+// 새로 실행한 세션은 방에 자동으로 들어가지 않는다. 이름표(이름·설명)는 이어받고,
+// 입장 명령(request)을 받으면 승인 없이 이전 세션의 자리(역할·읽은 위치)로 들어간다.
+func TestNoAutoJoinRejoinOnRequest(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	_, b, _ := setup(t, c)
+	old := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "o", Name: s("마스터"), Description: s("설계 담당"), Pid: i(500), Cwd: s("D:/w")})).Agent.ID
+	e.alive[500] = true
+	ok(c.CreateRoom(old, "gwp", "", 0))
+	ok(c.Invite(old, "gwp", b))
+	ok(c.RespondInvite(b, "gwp", true))
+	// 세션 종료 → 새 프로세스로 다시 실행
+	check(t, c.MarkAway(old, "session_end"))
+	e.alive[500] = false
+	r := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "n", Pid: i(600), Cwd: s("D:/w")}))
+	e.alive[600] = true
+	nu := r.Agent.ID
+	if r.Agent.Room != nil || r.Recovery != nil {
+		t.Fatalf("새 세션은 방에 자동으로 들어가면 안 됨: %+v", r.Agent.Room)
+	}
+	if r.Agent.Name != "마스터" || r.Agent.Description != "설계 담당" || r.InheritedFrom != old || r.PreviousRoom != "gwp" {
+		t.Fatalf("이름표를 이어받아야 함: %+v", r)
+	}
+	if v := ok(c.GetRoom("gwp")); v.Owner == nil || *v.Owner != old {
+		t.Fatalf("예전 자리는 그대로(자리 비움) 남아야 함: %+v", v.Owner)
+	}
+	// 입장 명령 → 승인 없이 예전 자리(방장)로
+	ok(c.RequestJoin(nu, "gwp", ""))
+	if v := ok(c.GetRoom("gwp")); v.Owner == nil || *v.Owner != nu {
+		t.Fatalf("이전 자리(방장)를 이어받아야 함: %+v", v.Owner)
+	}
+	if c.RoomOf(nu) != "gwp" {
+		t.Fatal("바로 입장해야 함")
+	}
+	// 관계 없는 세션은 여전히 신청만 된다
+	x := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "x", Pid: i(300), Cwd: s("D:/other")})).Agent.ID
+	ok(c.RequestJoin(x, "gwp", "참여"))
+	if c.RoomOf(x) != "" {
+		t.Fatal("다른 세션은 승인 전에는 들어가면 안 됨")
+	}
+	// 자리 비움인 내 자리 → 입장 명령으로 바로 복귀
+	check(t, c.MarkAway(b, "session_end"))
+	ok(c.RequestJoin(b, "gwp", ""))
+	if c.RoomOf(b) != "gwp" {
+		t.Fatal("자리 비움이던 내 자리는 바로 복귀")
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
@@ -706,15 +754,15 @@ func TestResumeSameProcessIdentity(t *testing.T) {
 	if v := ok(c.GetAgent(old)); v.RetiredBy == nil || *v.RetiredBy != nu || v.Status != "offline" {
 		t.Fatalf("방 없는 예전 카드는 새 카드가 이어받아야 함: %+v", v)
 	}
-	// 방에 있는 예전 카드는 retire 하지 않고, 자동 이어받기가 방 자리째 넘긴다
+	// 방에 있는 예전 카드: 이름표는 이어받지만 방에는 들어가지 않는다 (예전 자리는 자리 비움)
 	o2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "o2", Pid: i(200), Cwd: s("D:/q")})).Agent.ID
 	ok(c.CreateRoom(o2, "r", "", 0))
-	n2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "n2", Pid: i(200), Cwd: s("D:/q")})).Agent.ID
-	if ok(c.GetAgent(o2)).RetiredBy != nil {
-		t.Fatal("방에 있는 카드는 Register 에서 retire 하면 안 됨")
+	r2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "n2", Pid: i(200), Cwd: s("D:/q")}))
+	if r2.InheritedFrom != o2 || r2.PreviousRoom != "r" || r2.Agent.Room != nil {
+		t.Fatalf("이름표만 이어받고 방에는 없어야 함: %+v", r2)
 	}
-	if _, from, err := c.ResumePrevious(n2); err != nil || from != o2 {
-		t.Fatalf("같은 프로세스 자동 이어받기: %v %s", err, from)
+	if ok(c.GetAgent(o2)).RetiredBy == nil {
+		t.Fatal("예전 카드는 retired_by 로 표시돼야 함")
 	}
 	// opencode 는 한 프로세스에 세션이 여럿 → retire 하지 않음
 	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "a", Pid: i(300)}))

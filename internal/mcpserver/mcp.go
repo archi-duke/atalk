@@ -255,8 +255,12 @@ func register(srv *mcp.Server, st *state) {
 			if err != nil {
 				return nil, err
 			}
-			if err := c.RequestJoin(me, in.Room, in.Note); err != nil {
+			joined, err := c.RequestJoin(me, in.Room, in.Note)
+			if err != nil {
 				return nil, err
+			}
+			if joined {
+				return text(in.Room + " 방에 들어감 (이전 자리로 복귀)"), nil
 			}
 			return text(in.Room + " 방에 참여 신청함"), nil
 		})

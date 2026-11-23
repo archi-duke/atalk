@@ -114,13 +114,14 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	if kind != "claude-code" {
 		lines = append(lines, fmt.Sprintf("- atalk 명령에는 --as %s 를 붙이세요 (MCP 를 쓰면 atalk_attach(agent_id=%q)).", a.ID, a.ID))
 	}
-	// 새 세션이면 같은 폴더의 이전 세션이 있던 방 자리를 자동으로 이어받는다
-	rec, title := r.Recovery, "[ATalk 복구] %s 방으로 복귀했습니다 (역할 %s)."
-	if rec == nil {
-		if rr, from, err := c.ResumePrevious(a.ID); err == nil && rr != nil {
-			rec, title = rr, "[ATalk 이어받기] 이전 세션("+from+")이 있던 %s 방 자리를 이어받았습니다 (역할 %s)."
-		}
+	// 새 세션은 이전 세션의 이름표만 이어받는다. 방에는 사용자가 들어가라고 할 때만 들어간다.
+	if r.InheritedFrom != "" {
+		lines = append(lines, fmt.Sprintf("- 같은 폴더의 이전 세션(%s) 이름표를 이어받았습니다.", r.InheritedFrom))
 	}
+	if r.PreviousRoom != "" {
+		lines = append(lines, fmt.Sprintf("- 이전 세션은 %s 방에 있었습니다. 지금은 방에 들어가 있지 않습니다. 사용자가 그 방에 들어가라고 하면 `%s request %s` 로 승인 없이 원래 자리로 돌아갑니다. 먼저 들어가지 마세요.", r.PreviousRoom, exe, r.PreviousRoom))
+	}
+	rec, title := r.Recovery, "[ATalk 복구] %s 방으로 복귀했습니다 (역할 %s)."
 	if rec != nil {
 		lines = append(lines, "", fmt.Sprintf(title, rec.Room, rec.Role))
 		if p := c.Purpose(rec.Room); p != "" {
