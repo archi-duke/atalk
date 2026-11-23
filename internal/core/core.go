@@ -1316,29 +1316,9 @@ func (c *Atalk) pendingLocked(agent string) Pending {
 // ───────────────────────── 입장 / 퇴장 (내부) ─────────────────────────
 
 // joinInternal: 세션 하나 = 방 하나. 다른 방에 있으면 먼저 그 방에서 나온다.
-func (c *Atalk) joinInternal(agent, r, role string) {
-	if cur, ok := c.memberships[agent]; ok {
-		if cur.Room == r {
-			if cur.State == StateAway {
-				c.markBack(agent)
-			}
-			return
-		}
-		c.leaveInternal(agent, "move", r+" 방으로 이동")
-	}
-	now := c.ts()
+// clearPendingFor 는 agent 가 r 방에 들어갔으니 남아 있는 초대·신청을 수락/승인으로 표시한다.
+func (c *Atalk) clearPendingFor(agent, r string) {
 	room := c.rooms[r]
-	if room.Owner == nil { // 방장 없는 방에 처음 들어온 에이전트가 방장
-		role = RoleOwner
-		room.Owner = ptr(agent)
-		c.saveRoom(room)
-	}
-	c.memberships[agent] = &Membership{Room: r, Role: role, State: StateInRoom, JoinedAt: now, LastSeen: now}
-	c.saveMemberships()
-
-	c.cursors[r][agent] = c.lastSeq[r] // 입장 이후 메시지부터 읽음
-	c.saveCursors(r)
-
 	touched := false
 	for i := range room.Invites {
 		if room.Invites[i].Agent == agent && room.Invites[i].Status == "pending" {
@@ -1353,6 +1333,40 @@ func (c *Atalk) joinInternal(agent, r, role string) {
 	if touched {
 		c.saveRoom(room)
 	}
+}
+
+func (c *Atalk) joinInternal(agent, r, role string) {
+	if cur, ok := c.memberships[agent]; ok {
+		if cur.Room == r {
+			if cur.State == StateAway {
+				c.markBack(agent)
+			}
+			return
+		}
+		c.leaveInternal(agent, "move", r+" 방으로 이동")
+	}
+	// 이전 세션(이름표를 이어받은 카드)의 자리가 이 방에 남아 있으면 새 자리를 만들지 않고 그 자리를 이어받는다
+	// (초대 수락·신청 승인으로 들어와도 같은 에이전트가 두 번 보이지 않게)
+	if pred := c.predecessorIn(agent, r); pred != "" {
+		if _, err := c.takeoverLocked(agent, pred); err == nil {
+			c.clearPendingFor(agent, r)
+			return
+		}
+	}
+	now := c.ts()
+	room := c.rooms[r]
+	if room.Owner == nil { // 방장 없는 방에 처음 들어온 에이전트가 방장
+		role = RoleOwner
+		room.Owner = ptr(agent)
+		c.saveRoom(room)
+	}
+	c.memberships[agent] = &Membership{Room: r, Role: role, State: StateInRoom, JoinedAt: now, LastSeen: now}
+	c.saveMemberships()
+
+	c.cursors[r][agent] = c.lastSeq[r] // 입장 이후 메시지부터 읽음
+	c.saveCursors(r)
+
+	c.clearPendingFor(agent, r)
 	c.logMembership(MembershipEvent{TS: now, Agent: agent, Room: r, Event: "join", Detail: role})
 	suffix := ""
 	if role == RoleOwner {
