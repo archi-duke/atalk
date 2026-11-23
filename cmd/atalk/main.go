@@ -585,8 +585,13 @@ func main() {
 		if room == "" {
 			by, room = me(), myRoom()
 		}
-		check(c.Invite(by, room, at.arg(0, "AGENT")))
-		out(map[string]bool{"ok": true}, fmt.Sprintf("%s 를 %s 방에 초대함", rest[0], room))
+		target := at.arg(0, "AGENT")
+		check(c.Invite(by, room, target))
+		if v, err := c.Agent(target); err == nil && v.Room != nil && *v.Room == room {
+			out(map[string]bool{"ok": true, "joined": true}, fmt.Sprintf("%s 를 %s 방에 초대함 → 같은 PC 에서 대기 중이라 바로 입장", rest[0], room))
+		} else {
+			out(map[string]bool{"ok": true, "joined": false}, fmt.Sprintf("%s 를 %s 방에 초대함 (상대가 수락하면 입장)", rest[0], room))
+		}
 
 	case "accept", "decline":
 		check(c.RespondInvite(me(), at.arg(0, "ROOM"), cmd == "accept"))

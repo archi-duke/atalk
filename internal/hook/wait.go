@@ -41,6 +41,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		exe = install.Exe()
 	}
 	seen := map[string]bool{}
+	startRoom, known := "", false // 시작할 때 있던 방 (복구는 SessionStart 안내가 맡으므로, 그 뒤 새로 들어간 방만 알린다)
 	for deadline := time.Now().Add(maxWait); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
 		if daemon.ListenRunning(id) { // Claude 가 이미 listen 을 켰으면 그쪽이 알림을 맡는다
 			return 0
@@ -50,6 +51,22 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 			continue
 		}
 		var lines []string
+		if a, err := c.Agent(id); err == nil {
+			room := ""
+			if a.Room != nil {
+				room = *a.Room
+			}
+			if !known {
+				startRoom, known = room, true
+			} else if room != "" && room != startRoom && !seen["room:"+room] {
+				// 같은 PC 에서 대기 중이라 초대와 함께 자동으로 들어감 → 깨워서 알린다
+				seen["room:"+room] = true
+				lines = append(lines, fmt.Sprintf("[ATalk] 초대를 받아 %s 방에 들어왔습니다 (같은 PC 에서 대기 중이라 자동 입장).", room))
+				if p := c.Purpose(room); p != "" {
+					lines = append(lines, p)
+				}
+			}
+		}
 		if u, err := c.Unread(id, false); err == nil {
 			var forMe []core.InboxMessage
 			for _, m := range u.Messages {
