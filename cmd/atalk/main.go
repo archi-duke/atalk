@@ -195,11 +195,19 @@ func main() {
 		return
 	}
 	c := client.New(a.str("url"))
+	var meID string
 	me := func() string {
-		id, _ := identity(a)
+		if meID != "" {
+			return meID
+		}
+		id, derived := identity(a)
 		if id == "" {
 			fail("no_identity", "--as AGENT_ID 또는 ATALK_AGENT 가 필요함 (Claude Code 세션 안에서는 자동)")
 		}
+		if derived != nil { // 세션을 다시 열어 훅이 새 ID 로 이어받았으면 그 ID 를 쓴다
+			id = followRetired(c, id)
+		}
+		meID = id
 		return id
 	}
 	out := func(v any, text string) {
@@ -511,7 +519,7 @@ func main() {
 
 	case "create":
 		// 에이전트 안에서 실행하면 그 에이전트가 방장, 터미널(사람)이면 방장 없는 방
-		by, _ := identity(a)
+		by := actorID(c, a)
 		r, err := c.CreateRoomWith(by, at.arg(0, "ROOM"), a.str("title"), a.str("desc"))
 		check(err)
 		owner := "없음 (처음 들어오는 에이전트가 방장)"
@@ -522,7 +530,7 @@ func main() {
 
 	case "desc":
 		room := at.arg(0, "ROOM")
-		by, _ := identity(a)
+		by := actorID(c, a)
 		v, err := c.SetRoomDescription(by, room, strings.Join(rest[1:], " "))
 		check(err)
 		out(v, fmt.Sprintf("%s 방 설명: %s", room, orText(v.Description, "(없음)")))
@@ -530,7 +538,7 @@ func main() {
 	case "title":
 		room := at.arg(0, "ROOM")
 		title := strings.Join(rest[1:], " ")
-		by, _ := identity(a) // 에이전트 안에서 실행했으면 그 에이전트, 터미널이면 사람
+		by := actorID(c, a) // 에이전트 안에서 실행했으면 그 에이전트, 터미널이면 사람
 		v, err := c.RenameRoom(by, room, title)
 		check(err)
 		out(v, fmt.Sprintf("%s 방 제목: %s", room, v.Title))

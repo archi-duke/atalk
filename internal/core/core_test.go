@@ -696,3 +696,30 @@ func TestOwnerlessRoomAndDescription(t *testing.T) {
 		t.Fatal("에이전트 방은 닫혀야 함")
 	}
 }
+
+func TestResumeSameProcessIdentity(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	// Claude 세션을 다시 열면 같은 프로세스(pid 100)가 새 세션 ID 로 등록된다
+	old := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "old", Pid: i(100), Cwd: s("D:/p")})).Agent.ID
+	nu := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "new", Pid: i(100), Cwd: s("D:/p")})).Agent.ID
+	if v := ok(c.GetAgent(old)); v.RetiredBy == nil || *v.RetiredBy != nu || v.Status != "offline" {
+		t.Fatalf("방 없는 예전 카드는 새 카드가 이어받아야 함: %+v", v)
+	}
+	// 방에 있는 예전 카드는 retire 하지 않고, 자동 이어받기가 방 자리째 넘긴다
+	o2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "o2", Pid: i(200), Cwd: s("D:/q")})).Agent.ID
+	ok(c.CreateRoom(o2, "r", "", 0))
+	n2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "n2", Pid: i(200), Cwd: s("D:/q")})).Agent.ID
+	if ok(c.GetAgent(o2)).RetiredBy != nil {
+		t.Fatal("방에 있는 카드는 Register 에서 retire 하면 안 됨")
+	}
+	if _, from, err := c.ResumePrevious(n2); err != nil || from != o2 {
+		t.Fatalf("같은 프로세스 자동 이어받기: %v %s", err, from)
+	}
+	// opencode 는 한 프로세스에 세션이 여럿 → retire 하지 않음
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "a", Pid: i(300)}))
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "b", Pid: i(300)}))
+	if ok(c.GetAgent("opencode_a")).RetiredBy != nil {
+		t.Fatal("opencode 는 retire 하면 안 됨")
+	}
+}

@@ -521,6 +521,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		}
 		c.agents[id] = &card
 		c.saveCard(&card)
+		c.retireSameProcess(&card)
 
 		if m, ok := c.memberships[id]; ok {
 			if m.State == StateAway {
@@ -537,6 +538,28 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		return nil
 	})
 	return
+}
+
+// retireSameProcess: Claude Code 는 프로세스 하나에 세션이 하나다. 세션을 다시 열면(resume) 훅에는 새 세션 ID 가 오지만
+// Bash 의 CLAUDE_CODE_SESSION_ID 는 예전 ID 로 남아, 같은 프로세스가 카드 두 장으로 갈린다.
+// 그래서 같은 PID 의 다른 claude-code 카드가 방에 없으면 "새 카드가 이어받음" 으로 표시한다 (CLI 는 retired_by 를 따라간다).
+// 방에 있는 카드는 자동 이어받기(ResumePrevious, 같은 PID 허용)가 방 자리째 넘긴다.
+// opencode 는 프로세스 하나에 세션이 여럿일 수 있어서 하지 않는다.
+func (c *Atalk) retireSameProcess(card *AgentCard) {
+	if card.Kind != "claude-code" || card.Pid == nil || !c.isAlive(*card.Pid) {
+		return
+	}
+	for id, other := range c.agents {
+		if id == card.ID || other.Kind != card.Kind || other.Pid == nil || *other.Pid != *card.Pid || other.RetiredBy != nil {
+			continue
+		}
+		if _, inRoom := c.memberships[id]; inRoom {
+			continue
+		}
+		other.RetiredBy = ptr(card.ID)
+		other.UpdatedAt = c.ts()
+		c.saveCard(other)
+	}
 }
 
 // defaultName 은 등록할 때 이름을 주지 않았을 때 붙는 이름.
