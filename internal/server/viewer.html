@@ -585,7 +585,7 @@ function renderSide() {
   const sorted = [...rooms].sort((p, q) => (previews[q.room_id]?.ts || "").localeCompare(previews[p.room_id]?.ts || ""));
   $("#list").innerHTML = sorted.map((x) => {
     const p = previews[x.room_id];
-    const plain = (t) => clean(t).replace(/**|__|~~|`/g, "").replace(/^s{0,3}(#{1,6}|>|[-*+]|d+[.)])s+/gm, ""); // 미리보기는 마크다운 기호를 걷어 낸다
+    const plain = (t) => clean(t).replace(/\*\*|__|~~|`/g, "").replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, ""); // 미리보기는 마크다운 기호를 걷어 낸다
     const prev = p ? (p.type === "system" ? clean(p.body) : (p.human ? p.human + "@" : "") + nameOf(p.from) + ": " + plain(p.body)) : "메시지 없음";
     return '<div class="row' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><div class="room-ico">' + esc([...(x.title || x.room_id)][0]) + "</div>" +
       '<div class="txt"><div class="top"><span class="title">' + esc(x.title || x.room_id) + ' <span class="when">' + x.members.length + "</span>" + (x.closed_at ? ' <span class="when">닫힘</span>' : "") +
