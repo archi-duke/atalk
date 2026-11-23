@@ -22,6 +22,11 @@ var skillTmpl string
 //go:embed opencode-plugin.ts
 var pluginTmpl string
 
+// TUI 플러그인: TUI 에서 이전 세션을 고르면 바로 그 방으로 복귀시킨다 (opencode 는 세션 선택을 서버 플러그인에 알려 주지 않음)
+//
+//go:embed opencode-tui-plugin.ts
+var tuiPluginTmpl string
+
 // Exe 는 atalk 실행 파일의 절대 경로 (슬래시 구분 — bash 와 JSON 에서 그대로 쓰기 위해).
 func Exe() string {
 	p, err := os.Executable()
@@ -112,6 +117,47 @@ func Check(p Paths) Status {
 func (p Paths) skillFile() string    { return filepath.Join(p.Claude, "skills", "atalk", "SKILL.md") }
 func (p Paths) settingsFile() string { return filepath.Join(p.Claude, "settings.json") }
 func (p Paths) pluginFile() string   { return filepath.Join(p.Opencode, "plugin", "atalk.ts") }
+// TUI 플러그인은 plugin/ 폴더 밖에 둔다 (plugin/ 의 파일은 서버 플러그인으로만 불러와 server() 가 없으면 오류). tui.json 의 plugin 목록으로 등록.
+func (p Paths) tuiPluginFile() string { return filepath.Join(p.Opencode, "atalk", "atalk-tui.ts") }
+func (p Paths) tuiConfigFile() string { return filepath.Join(p.Opencode, "tui.json") }
+func (p Paths) oldTuiPluginFile() string { return filepath.Join(p.Opencode, "plugin", "atalk-tui.ts") }
+
+// editTuiPlugins 는 opencode 의 tui.json "plugin" 목록에 ATalk TUI 플러그인을 넣거나(add) 뺀다. 다른 설정은 그대로 둔다.
+func editTuiPlugins(p Paths, add bool) error {
+	spec := filepath.ToSlash(p.tuiPluginFile())
+	cfg := map[string]any{}
+	if b, err := os.ReadFile(p.tuiConfigFile()); err == nil {
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return fmt.Errorf("tui.json 을 읽을 수 없음 (주석이 있는 JSONC 는 직접 고쳐야 함): %w", err)
+		}
+	} else if !add {
+		return nil
+	}
+	if _, ok := cfg["$schema"]; !ok {
+		cfg["$schema"] = "https://opencode.ai/tui.json"
+	}
+	list, _ := cfg["plugin"].([]any)
+	out := []any{}
+	for _, x := range list {
+		if s, ok := x.(string); ok && strings.HasSuffix(filepath.ToSlash(s), "/atalk-tui.ts") {
+			continue // 예전 ATalk 항목
+		}
+		out = append(out, x)
+	}
+	if add {
+		out = append(out, spec)
+	}
+	if len(out) == 0 {
+		delete(cfg, "plugin")
+	} else {
+		cfg["plugin"] = out
+	}
+	b, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFile(p.tuiConfigFile(), string(b)+"\n")
+}
 
 func writeFile(path, content string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -270,6 +316,16 @@ func Opencode(p Paths) ([]string, error) {
 		return done, err
 	}
 	done = append(done, "플러그인: "+p.pluginFile())
+	if err := writeFile(p.tuiPluginFile(), render(tuiPluginTmpl, Exe())); err != nil {
+		return done, err
+	}
+	done = append(done, "TUI 플러그인: "+p.tuiPluginFile())
+	_ = os.Remove(p.oldTuiPluginFile()) // 예전 위치 (서버 플러그인으로 잘못 불러와 오류가 나던 곳)
+	if err := editTuiPlugins(p, true); err != nil {
+		done = append(done, "tui.json 에 TUI 플러그인을 등록하지 못함 (직접 \"plugin\" 목록에 추가하세요): "+err.Error())
+	} else {
+		done = append(done, "tui.json 등록: "+p.tuiConfigFile())
+	}
 	if _, err := os.Stat(p.skillFile()); err != nil {
 		f, err := Skill(p)
 		if err != nil {
@@ -337,6 +393,9 @@ func Uninstall(p Paths, target string) ([]string, error) {
 		}
 	}
 	if target == "opencode" || target == "all" {
+		_ = os.Remove(p.tuiPluginFile())
+		_ = os.Remove(p.oldTuiPluginFile())
+		_ = editTuiPlugins(p, false)
 		if err := os.Remove(p.pluginFile()); err == nil {
 			done = append(done, "플러그인 삭제: "+p.pluginFile())
 		}
