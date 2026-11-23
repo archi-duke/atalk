@@ -993,6 +993,104 @@ func TestInviteTakesOverPreviousSeat(t *testing.T) {
 	}
 }
 
+// 원칙: 이전 세션으로 복귀하면 그때 있던 방으로 들어간다. 새로 켠 세션(임시)은 쓰기 전까지 이전 세션을 밀어내지 않는다.
+func TestResumeReturnsToRoom(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	owner := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m", Pid: i(100), Cwd: s("D:/m")})).Agent.ID
+	ok(c.CreateRoom(owner, "r", "", 0))
+	old := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Name: s("오1"), Pid: i(700), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+	e.alive[700] = true
+	ok(c.Invite(owner, "r", old))
+	ok(c.RespondInvite(old, "r", true)) // 방에 들어가면 확정
+	if ok(c.GetAgent(old)).Provisional {
+		t.Fatal("방에 들어가면 확정돼야 함")
+	}
+	check(t, c.MarkAway(old, "opencode_exit"))
+	e.alive[700] = false
+
+	// opencode 를 다시 켬 → 빈 새 세션이 임시로 등록 (이름표는 미리 보이지만 이전 세션을 밀어내지 않음)
+	e.alive[800] = true
+	eager := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o2", Pid: i(800), Cwd: s("D:/op1"), Provisional: true}))
+	if !eager.Agent.Provisional || eager.Agent.Name != "오1" || eager.PreviousRoom != "r" || eager.Agent.Room != nil {
+		t.Fatalf("임시 새 세션: %+v", eager)
+	}
+	if v := ok(c.GetAgent(old)); v.RetiredBy != nil || v.Status != StateAway {
+		t.Fatalf("임시 세션은 이전 세션을 넘겨받지 않음: %+v", v)
+	}
+	// 사용자가 이전 세션을 불러와 씀 → 이전 세션이 그 방 자리로 복귀, 쓰지 않은 빈 세션 카드는 정리
+	back := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Pid: i(800), Cwd: s("D:/op1"), Provisional: true}))
+	if back.Agent.Room == nil || *back.Agent.Room != "r" || back.Agent.Status != StateInRoom {
+		t.Fatalf("이전 세션은 그때 있던 방으로: %+v", back.Agent)
+	}
+	if _, err := c.GetAgent(eager.Agent.ID); err == nil {
+		t.Fatal("쓰지 않은 빈 새 세션 카드는 지워져야 함")
+	}
+	if got := members(t, c, "r"); len(got) != 2 {
+		t.Fatalf("오1 은 하나: %v", got)
+	}
+
+	// 자리 비움 유예가 지나 자동 퇴장된 뒤에 복귀해도 그 방으로
+	check(t, c.MarkAway(old, "opencode_exit"))
+	e.clock = e.clock.Add(2 * time.Minute) // AwayGrace 1분
+	c.Sweep()
+	if v := ok(c.GetAgent(old)); v.Room != nil {
+		t.Fatal("유예가 지나면 퇴장")
+	}
+	if r := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Pid: i(800), Cwd: s("D:/op1")})); r.Agent.Room == nil || *r.Agent.Room != "r" {
+		t.Fatalf("자동 퇴장 뒤 복귀해도 그 방으로: %+v", r.Agent.Room)
+	}
+	// 직접 나간 방으로는 돌아가지 않는다
+	check(t, c.Leave(old, ""))
+	if r := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Pid: i(800), Cwd: s("D:/op1")})); r.Agent.Room != nil {
+		t.Fatal("직접 나간 방으로는 돌아가지 않음")
+	}
+}
+
+// 새 세션을 실제로 쓰면(사람 입력) 그때 이전 세션을 넘겨받고, 입장 명령으로 이전 자리에 들어간다.
+func TestProvisionalActivate(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	owner := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m", Pid: i(100), Cwd: s("D:/m")})).Agent.ID
+	ok(c.CreateRoom(owner, "r", "", 0))
+	old := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o1", Name: s("오1"), Pid: i(700), Cwd: s("D:/op1")})).Agent.ID
+	ok(c.Invite(owner, "r", old))
+	ok(c.RespondInvite(old, "r", true))
+	check(t, c.MarkAway(old, "exit"))
+	nu := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o2", Pid: i(800), Cwd: s("D:/op1"), Provisional: true})).Agent.ID
+	e.alive[800] = true
+	check(t, c.Activate(nu))
+	if v := ok(c.GetAgent(old)); v.RetiredBy == nil || *v.RetiredBy != nu {
+		t.Fatalf("확정되면 이전 세션을 넘겨받음: %+v", v.RetiredBy)
+	}
+	if ok(c.GetAgent(nu)).Room != nil {
+		t.Fatal("확정돼도 방에 자동으로 들어가지 않음")
+	}
+	ok(c.RequestJoin(nu, "r", ""))
+	if got := members(t, c, "r"); len(got) != 2 || !slices.Contains(got, nu) {
+		t.Fatalf("입장 명령으로 이전 자리에: %v", got)
+	}
+}
+
+// Claude 를 켜자마자 /resume 으로 이전 세션을 열면 쓰지 않은 새 세션 카드는 남지 않는다.
+func TestClaudeStartupThenResume(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	prev := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "prev", Name: s("마스터"), Pid: i(100), Cwd: s("D:/a"), Provisional: true})).Agent.ID
+	ok(c.CreateRoom(prev, "t", "", 0))
+	check(t, c.MarkAway(prev, "session_end"))
+	e.alive[100] = false
+	e.alive[600] = true
+	fresh := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "fresh", Pid: i(600), Cwd: s("D:/a"), Provisional: true})).Agent.ID
+	back := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "prev", Pid: i(600), Cwd: s("D:/a"), Provisional: true}))
+	if back.Agent.Room == nil || *back.Agent.Room != "t" || back.Recovery == nil {
+		t.Fatalf("/resume 한 이전 세션은 그 방으로: %+v", back.Agent.Room)
+	}
+	if _, err := c.GetAgent(fresh); err == nil {
+		t.Fatal("켜자마자 생긴 새 세션 카드는 지워져야 함")
+	}
+}
+
 func TestResumeSameProcessIdentity(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()

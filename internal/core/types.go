@@ -19,6 +19,14 @@ type AgentCard struct {
 	Host *Host `json:"host,omitempty"`
 	// Workspace 는 작업 이름 (기본: 작업 폴더 또는 git 저장소 폴더 이름). "" 이면 숨김. 전체 경로 대신 화면에 보인다.
 	Workspace *string `json:"workspace,omitempty"`
+	// Provisional 은 아직 사람이 쓰지 않은 새 세션 (훅·플러그인이 시작할 때 등록). 이전 세션의 이름표를 미리 보여 주기만 하고
+	// 이전 카드를 넘겨받지 않는다. 사람이 처음 입력하거나 방에 들어가면 확정(activate)되어 그때 넘겨받는다.
+	// 이전 세션이 다시 돌아오면 확정되지 않은 임시 카드는 지워진다.
+	Provisional bool `json:"provisional,omitempty"`
+	// InheritFrom 은 이름표를 이어받은(받을) 이전 세션 id.
+	InheritFrom string `json:"inherit_from,omitempty"`
+	// LastRoom 은 자리 비움 유예가 지나 자동 퇴장된 방. 이 세션이 다시 돌아오면 그 방으로 들어간다 (직접 나간 방은 아님).
+	LastRoom string `json:"last_room,omitempty"`
 	// WorkspaceID 는 해시(PC ID + 정규화한 작업 폴더 경로). 경로를 드러내지 않고 "같은 PC 의 같은 폴더" 인지 비교하는 데 쓴다.
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
@@ -233,6 +241,8 @@ type RegisterInput struct {
 	Workspace *string `json:"workspace,omitempty"`
 	// WorkspaceID 는 다른 PC 에서 등록할 때 클라이언트가 계산해 보내는 작업 위치 ID (경로는 보내지 않음).
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Provisional 이면 새로 만든 카드를 임시로 둔다 (훅·플러그인이 세션 시작 때). 이미 있는 카드에는 영향 없음.
+	Provisional bool `json:"provisional,omitempty"`
 }
 
 type RegisterResult struct {

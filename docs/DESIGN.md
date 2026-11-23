@@ -109,6 +109,8 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 - **같은 프로세스의 세션 ID 바뀜(Claude 다시 열기)**: 훅에는 새 세션 ID 가 오지만 Bash 의 `CLAUDE_CODE_SESSION_ID` 는 예전 ID 로 남는다.
   claude-code 카드를 등록할 때 같은 PID 의 다른 claude-code 카드가 방에 없으면 `retired_by` = 새 카드로 표시하고(방에 있으면 아래 자동 이어받기가 처리),
   CLI 는 환경 변수에서 정한 ID 가 retired 면 `retired_by` 를 끝까지 따라간다. opencode 는 프로세스 하나에 세션이 여럿이라 제외.
+- **원칙: 이전 세션으로 복귀하면 그때 있던 방으로 들어간다.** 같은 세션 id 로 다시 등록되면 방 자리(자리 비움)로 돌아가고, 자리 비움 유예가 지나 자동 퇴장된 뒤면(`last_room`) 그 방에 다시 들어간다. 직접 나간 방은 아니다.
+- **임시 세션(`provisional`)**: 훅·플러그인이 시작할 때 등록하는 새 세션은 임시다. 이전 세션의 이름표를 미리 보여 주기만 하고(`inherit_from`) 이전 카드를 넘겨받지 않는다. 사람이 처음 입력하거나(`POST /agents/:id/activate`) 방에 들어가면 확정되어 그때 넘겨받는다. 이전 세션이 돌아오면 확정되지 않은 임시 카드는 지운다 (opencode 가 켜자마자 만드는 빈 세션, Claude 를 켜자마자 /resume).
 - **시작할 때는 이름표만, 방은 입장 명령으로**: 새 세션을 등록(`POST /agents`)하면 같은 kind·같은 cwd 의 이전 세션(끝났거나 away, 또는 같은 pid) 중 가장 최근 것의
   이름/설명/능력/사람 별칭을 이어받고(이름을 직접 준 경우 제외), 이전 카드에 `retired_by` 를 붙인다. 응답에 `inherited_from`, `previous_room`.
   **방에는 자동으로 들어가지 않는다.** 이전 카드의 방 자리는 away 로 남고, 새 세션이 그 방에 `request` 하면 승인 없이 그 자리(역할·cursor·처리 기록)를 이어받는다(응답 `joined: true`).

@@ -96,7 +96,9 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     pendingTrack.add(sid)
     try {
       await ensureDaemon()
-      const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid }
+      // 임시 등록: 사람이 이 세션에 입력하거나 방에 들어갈 때 확정되어 그때 이전 세션의 이름표·자리를 넘겨받는다.
+      // (시작하자마자 만든 빈 세션이 이전 세션을 밀어내지 않게. 이전 세션이 다시 쓰이면 쓰지 않은 빈 세션 카드는 정리된다)
+      const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid, provisional: true }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
@@ -342,6 +344,12 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       const tp: any = (output.parts as any[]).find((p) => p.type === "text" && !p.synthetic)
       const raw = String(tp?.text ?? "").trim()
       if (!tp) return
+      if (raw && !raw.startsWith("[ATalk]")) {
+        // 사람이 입력함 → 이 세션 등록(이전 세션이면 그때 있던 방으로 복귀) + 임시 세션 확정
+        await trackById(input.sessionID)
+        const st0 = sessions.get(input.sessionID)
+        if (st0) await api("POST", `/agents/${enc(st0.id)}/activate`, {}).catch(() => {})
+      }
       if (!raw.startsWith(HUMAN_PREFIX)) {
         // 사람이 입력한 말을 방에 대화 기록으로 남긴다 (알림 없음). 플러그인이 넣은 "[ATalk]" 메시지·/명령은 빼고.
         if (raw && !raw.startsWith("[ATalk]") && !raw.startsWith("/")) {

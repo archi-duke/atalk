@@ -545,8 +545,14 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		c.agents[id] = &card
 		c.saveCard(&card)
 		c.retireSameProcess(&card)
-		if !had && (in.Name == nil || *in.Name == "") {
-			res.InheritedFrom, res.PreviousRoom = c.inheritCard(&card)
+		if !had {
+			card.Provisional = in.Provisional
+			if in.Name == nil || *in.Name == "" {
+				res.InheritedFrom, res.PreviousRoom = c.inheritCard(&card)
+			}
+		} else {
+			// 이전 세션이 돌아옴: 이 세션을 이어받으려던 임시 카드(아직 사람이 쓰지 않은 새 세션)는 지운다
+			c.dropProvisionalSuccessors(id)
 		}
 
 		if m, ok := c.memberships[id]; ok {
@@ -554,6 +560,15 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 				c.markBack(id)
 			}
 			res.Recovery = c.buildRecovery(id, 0)
+		} else if cur := c.agents[id]; had && cur.LastRoom != "" {
+			// 이전 세션으로 복귀 → 그때 있던 방으로 (자리 비움 유예가 지나 자동 퇴장됐어도)
+			r := cur.LastRoom
+			cur.LastRoom = ""
+			c.saveCard(cur)
+			if _, err := c.requireRoom(r, true); err == nil {
+				c.joinInternal(id, r, RoleMember)
+				res.Recovery = c.buildRecovery(id, 0)
+			}
 		}
 		action := "register"
 		if had {
@@ -756,15 +771,64 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 	if card.Human == nil {
 		card.Human = best.Human
 	}
+	card.InheritFrom = best.ID
 	c.saveCard(card)
+	if m, ok := c.memberships[best.ID]; ok {
+		room = m.Room
+	} else {
+		room = best.LastRoom
+	}
+	if !card.Provisional { // 임시 카드는 확정될 때 넘겨받는다
+		c.takeOverCard(card, best)
+	}
+	return best.ID, room
+}
+
+// takeOverCard 는 card 가 이전 세션 best 의 이름표를 넘겨받았다고 확정한다 (best 는 retired, 방 자리는 자리 비움).
+func (c *Atalk) takeOverCard(card, best *AgentCard) {
 	best.RetiredBy = ptr(card.ID)
 	best.UpdatedAt = c.ts()
 	c.saveCard(best)
-	if m, ok := c.memberships[best.ID]; ok {
+	if _, ok := c.memberships[best.ID]; ok {
 		c.markAway(best.ID, "새 세션 "+card.ID+" 이 이름표를 이어받음")
-		room = m.Room
 	}
-	return best.ID, room
+}
+
+// activateLocked 는 임시 카드를 확정한다 (사람이 처음 입력했거나 방에 들어감). 이어받을 이전 세션이 아직 돌아오지 않았으면 그때 넘겨받는다.
+func (c *Atalk) activateLocked(agent string) {
+	card, ok := c.agents[agent]
+	if !ok || !card.Provisional {
+		return
+	}
+	card.Provisional = false
+	card.UpdatedAt = c.ts()
+	c.saveCard(card)
+	if best, ok := c.agents[card.InheritFrom]; ok && best.RetiredBy == nil {
+		c.takeOverCard(card, best)
+	}
+	c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "update"}})
+}
+
+// Activate 는 사람이 이 세션에 처음 입력했을 때 훅·플러그인이 부른다.
+func (c *Atalk) Activate(agent string) error {
+	return c.guard(func() error {
+		if _, err := c.requireAgent(agent); err != nil {
+			return err
+		}
+		c.activateLocked(agent)
+		return nil
+	})
+}
+
+// dropProvisionalSuccessors 는 이전 세션(id)이 돌아왔을 때, 그 이름표를 이어받으려던 임시 카드들을 지운다.
+func (c *Atalk) dropProvisionalSuccessors(id string) {
+	for oid, other := range c.agents {
+		if oid != id && other.Provisional && other.InheritFrom == id {
+			if _, inRoom := c.memberships[oid]; !inRoom {
+				c.removeCard(oid, "이전 세션 "+id+" 이 돌아와 쓰지 않은 새 세션 정리")
+			}
+		}
+	}
 }
 
 // predecessorIn 은 r 방에 자리가 있는 카드 중 retired_by 를 따라가면 agent 에 닿는 것(= agent 의 이전 세션)을 찾는다.
@@ -802,6 +866,10 @@ func (c *Atalk) retireSameProcess(card *AgentCard) {
 			continue
 		}
 		if _, inRoom := c.memberships[id]; inRoom {
+			continue
+		}
+		if other.Provisional { // 쓰지 않은 새 세션 (예: Claude 를 켜자마자 /resume) → 지운다
+			c.removeCard(id, "같은 프로세스가 다른 세션으로 바뀜 (쓰지 않은 새 세션)")
 			continue
 		}
 		other.RetiredBy = ptr(card.ID)
@@ -1197,6 +1265,7 @@ func (c *Atalk) RequestJoin(agent, r, note string) (v RoomView, err error) {
 		if _, err := c.requireAgent(agent); err != nil {
 			return err
 		}
+		c.activateLocked(agent) // 입장 명령 = 이 세션을 쓰기 시작함
 		if m, ok := c.memberships[agent]; ok && m.Room == r {
 			if m.State != StateAway {
 				return conflict("already_member", "이미 이 방 멤버")
@@ -1336,6 +1405,7 @@ func (c *Atalk) clearPendingFor(agent, r string) {
 }
 
 func (c *Atalk) joinInternal(agent, r, role string) {
+	c.activateLocked(agent) // 방에 들어가면 임시 세션 확정 (이전 세션 이름표·자리 넘겨받기)
 	if cur, ok := c.memberships[agent]; ok {
 		if cur.Room == r {
 			if cur.State == StateAway {
@@ -1383,6 +1453,14 @@ func (c *Atalk) leaveInternal(agent, event, reason string) {
 	}
 	delete(c.memberships, agent)
 	c.saveMemberships()
+	if card, ok := c.agents[agent]; ok { // 자리 비움 유예로 자동 퇴장 → 이 세션이 돌아오면 다시 들어갈 방. 직접 나가거나 옮기면 지움
+		if event == "expire" {
+			card.LastRoom = m.Room
+		} else {
+			card.LastRoom = ""
+		}
+		c.saveCard(card)
+	}
 	if cur, ok := c.cursors[m.Room]; ok {
 		delete(cur, agent)
 		c.saveCursors(m.Room)

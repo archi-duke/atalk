@@ -203,6 +203,11 @@ func (c *Client) EchoReply(id string, texts []string, final bool) error {
 	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"texts": texts, "reply": true, "final": final}, nil, 0)
 }
 
+// Activate 는 임시 세션을 확정한다 (사람이 처음 입력함).
+func (c *Client) Activate(id string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/activate", map[string]any{}, nil, 0)
+}
+
 func (c *Client) Away(id, reason string) error {
 	return c.call("POST", "/agents/"+esc(id)+"/away", map[string]string{"reason": reason}, nil, 0)
 }
