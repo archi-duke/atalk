@@ -90,7 +90,7 @@ $A = [System.Windows.Automation.AutomationElement]
 $w = $A::FromHandle([IntPtr][long]$env:ATALK_HWND)
 $cond = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::TabItem)
 $tabs = @($w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond))
-function Norm([string]$s) { return ($s -replace "^[^p{L}p{N}]+", "").Trim() }  # Claude 는 제목 앞 기호(✳ ◑ …)가 계속 바뀜
+function Norm([string]$s) { return ($s -replace "^[^\p{L}\p{N}]+", "").Trim() }  # Claude 는 제목 앞 기호(✳ ◑ …)가 계속 바뀜
 $want = Norm $env:ATALK_TAB_TITLE
 $t = $tabs | Where-Object { (Norm $_.Current.Name) -eq $want } | Select-Object -First 1
 if (-not $t) { $t = $tabs | Where-Object { $n = Norm $_.Current.Name; $n.StartsWith($want) -or $want.StartsWith($n) } | Select-Object -First 1 }
