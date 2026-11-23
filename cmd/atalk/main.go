@@ -248,7 +248,7 @@ func main() {
 		release, err := daemon.Lock(root)
 		check(err)
 		defer release()
-		srv, err := server.New(server.Options{Root: root, Addr: fmt.Sprintf("127.0.0.1:%d", port), AwayGrace: time.Duration(graceMin) * time.Minute})
+		srv, err := server.New(server.Options{Root: root, Addr: fmt.Sprintf("127.0.0.1:%d", port), AwayGrace: time.Duration(graceMin) * time.Minute, MachineID: paths.MachineID()})
 		check(err)
 		p, err := srv.Listen()
 		check(err)
@@ -310,6 +310,16 @@ func main() {
 		var lines []string
 		for _, x := range agents {
 			l := fmt.Sprintf("%-8s %s  %q", x.Status, x.ID, x.Name)
+			if x.Host != nil {
+				where := x.Host.Name
+				if x.Local {
+					where += "(이 PC)"
+				}
+				l += "  " + where
+			}
+			if x.Workspace != nil && *x.Workspace != "" {
+				l += "  📁" + *x.Workspace
+			}
 			if x.Room != nil {
 				l += "  @" + *x.Room
 				if x.Role != nil && *x.Role == "owner" {
@@ -399,7 +409,7 @@ func main() {
 		out(done, strings.Join(done, "\n"))
 
 	case "card":
-		v, err := c.UpdateCard(me(), core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap"), Human: a.ptr("human")})
+		v, err := c.UpdateCard(me(), core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap"), Human: a.ptr("human"), Workspace: a.ptr("workspace")})
 		check(err)
 		out(v, "")
 
@@ -410,6 +420,8 @@ func main() {
 			switch rest[0] {
 			case "user":
 				cfg.User = strings.Join(rest[1:], " ")
+			case "machine":
+				cfg.MachineName = strings.Join(rest[1:], " ") // 비우면 기본 이름 (PC-XXXX)
 			case "offline":
 				switch v := at.arg(1, "시간 | off | default"); v {
 				case "off", "never", "0":
@@ -437,7 +449,7 @@ func main() {
 					cfg.AwayGraceMin = &n
 				}
 			default:
-				fail("bad_arg", "atalk config [user 별칭 | grace 분|off|default | offline 시간|off|default]")
+				fail("bad_arg", "atalk config [user 별칭 | machine PC이름 | grace 분|off|default | offline 시간|off|default]")
 			}
 			cfg, err = c.SetConfig(cfg)
 			check(err)
@@ -450,7 +462,7 @@ func main() {
 		if h := cfg.OfflineTTLHours; h != nil {
 			ttl = map[bool]string{true: "지우지 않음", false: strconv.Itoa(*h) + "시간"}[*h == 0]
 		}
-		out(cfg, "사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace+"\n오프라인 네임카드 자동 삭제: "+ttl)
+		out(cfg, "이 PC 이름: "+orText(cfg.MachineName, core.DefaultMachineName(paths.MachineID())+" (기본)")+"\n사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace+"\n오프라인 네임카드 자동 삭제: "+ttl)
 
 	case "export":
 		room := at.arg(0, "ROOM")

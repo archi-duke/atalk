@@ -2,9 +2,12 @@ package core
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -37,6 +40,7 @@ func must(err error) {
 
 type Options struct {
 	Root      string
+	MachineID string // 이 PC 의 ID (paths.MachineID). 없으면 실행할 때마다 새로 만든다 (테스트용)
 	AwayGrace time.Duration // away 가 이 시간을 넘으면 강제 퇴장 (기본 30분)
 	IsAlive   func(pid int) bool
 	Now       func() time.Time
@@ -48,6 +52,7 @@ type Atalk struct {
 	Root      string
 	AwayGrace time.Duration
 	isAlive   func(int) bool
+	machineID string
 	now       func() time.Time
 
 	mu          sync.Mutex
@@ -74,12 +79,15 @@ func New(opts Options) (*Atalk, error) {
 		return nil, err
 	}
 	c := &Atalk{
-		Root: root, AwayGrace: opts.AwayGrace, isAlive: opts.IsAlive, now: opts.Now,
+		Root: root, AwayGrace: opts.AwayGrace, isAlive: opts.IsAlive, now: opts.Now, machineID: opts.MachineID,
 		agents: map[string]*AgentCard{}, memberships: map[string]*Membership{}, rooms: map[string]*Room{},
 		lastSeq: map[string]int{}, cursors: map[string]map[string]int{}, subs: map[chan Event]struct{}{},
 	}
 	if c.AwayGrace == 0 {
 		c.AwayGrace = 30 * time.Minute
+	}
+	if c.machineID == "" {
+		c.machineID = newID()
 	}
 	if c.isAlive == nil {
 		c.isAlive = DefaultIsAlive
@@ -444,6 +452,17 @@ func (c *Atalk) statusOf(id string) string {
 func (c *Atalk) view(card *AgentCard) AgentView {
 	v := AgentView{AgentCard: *card, Status: c.statusOf(card.ID)}
 	v.Capabilities = slices.Clone(card.Capabilities)
+	v.Local = c.isLocal(card)
+	h := Host{ID: c.machineID, OS: LocalOS()}
+	if card.Host != nil {
+		h = *card.Host
+	}
+	if v.Local {
+		h.Name = c.machineName()
+	} else {
+		v.Cwd, v.Pid = nil, nil
+	}
+	v.Host = &h
 	if m, ok := c.memberships[card.ID]; ok {
 		v.Room, v.Role = ptr(m.Room), ptr(m.Role)
 	}
@@ -519,6 +538,9 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		if card.Capabilities == nil {
 			card.Capabilities = []string{}
 		}
+		if err := c.applyHost(&card, in); err != nil {
+			return err
+		}
 		c.agents[id] = &card
 		c.saveCard(&card)
 		c.retireSameProcess(&card)
@@ -543,12 +565,137 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 	return
 }
 
+// LocalOS 는 이 PC 의 OS 를 windows | mac | linux | 그 밖(GOOS) 으로.
+func LocalOS() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "mac"
+	default:
+		return runtime.GOOS
+	}
+}
+
+// isLocal 은 카드가 이 데몬과 같은 PC 의 것인지 (PC ID 로 판단. 이름은 누구나 똑같이 지을 수 있으므로 쓰지 않는다).
+func (c *Atalk) isLocal(card *AgentCard) bool {
+	return card.Host == nil || card.Host.ID == c.machineID
+}
+
+func (c *Atalk) machineName() string {
+	if n := c.readConfig().MachineName; n != "" {
+		return n
+	}
+	return DefaultMachineName(c.machineID)
+}
+
+// DefaultMachineName 은 PC ID 로 만든 기본 이름 "PC-7F3A".
+func DefaultMachineName(id string) string {
+	id = strings.ToUpper(strings.ReplaceAll(id, "-", ""))
+	if len(id) > 4 {
+		id = id[:4]
+	}
+	return "PC-" + id
+}
+
+// WorkspaceID 는 해시(PC ID + 정규화한 경로) 앞 16자. 같은 PC 의 같은 폴더면 같고, 경로는 되살릴 수 없다.
+func WorkspaceID(machine, osName, path string) string {
+	p := filepath.Clean(path)
+	if abs, err := filepath.Abs(p); err == nil && osName == LocalOS() {
+		p = abs
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	if osName == "windows" || osName == "mac" { // 대소문자를 가리지 않는 파일 시스템
+		p = strings.ToLower(p)
+	}
+	sum := sha256.Sum256([]byte(machine + "\n" + strings.TrimRight(p, "/")))
+	return hex.EncodeToString(sum[:8])
+}
+
+// WorkspaceLabel 은 작업 폴더에서 화면에 보일 작업 이름을 정한다: git 저장소 안이면 저장소 폴더 이름, 아니면 폴더 이름.
+// 사용자 계정명이 드러나는 홈 폴더 자체는 "~" 로 한다.
+func WorkspaceLabel(cwd string) string {
+	dir := filepath.Clean(cwd)
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	home, _ := os.UserHomeDir()
+	label := func(d string) string {
+		if home != "" && samePath(d, home) {
+			return "~"
+		}
+		if b := filepath.Base(d); b != "" && b != "." && b != string(filepath.Separator) && !strings.HasSuffix(b, ":\\") {
+			return b
+		}
+		return strings.TrimRight(filepath.VolumeName(d), "\\/") // 드라이브 루트
+	}
+	for d, i := dir, 0; i < 40; i++ {
+		if home != "" && samePath(d, home) {
+			break // 홈 폴더 위로는 올라가지 않는다 (홈 전체가 저장소여도 계정명을 쓰지 않음)
+		}
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return label(d)
+		}
+		p := filepath.Dir(d)
+		if p == d {
+			break
+		}
+		d = p
+	}
+	return label(dir)
+}
+
+// applyHost 는 등록 때 PC 정보와 작업 이름·작업 위치 ID 를 채운다.
+func (c *Atalk) applyHost(card *AgentCard, in RegisterInput) error {
+	if in.Host != nil && in.Host.ID != "" && in.Host.ID != c.machineID { // 다른 PC
+		h := Host{ID: in.Host.ID, Name: strings.TrimSpace(in.Host.Name), OS: in.Host.OS}
+		if len([]rune(h.Name)) > 40 || len(h.ID) > 64 || len(h.OS) > 16 {
+			return bad("invalid_host", "host 값이 너무 김 (id ≤ 64, name ≤ 40, os ≤ 16)")
+		}
+		card.Host = &h
+		if in.WorkspaceID != "" {
+			card.WorkspaceID = in.WorkspaceID
+		}
+		// 다른 PC 의 경로·PID 는 받지 않는다. PID 는 이 PC 에서 살아 있는지 확인할 수 없어 오프라인 판정을 망친다 (생존 확인은 서버 작업의 heartbeat 로)
+		card.Cwd, card.Pid = nil, nil
+	} else {
+		card.Host = &Host{ID: c.machineID, OS: LocalOS()} // 이름은 볼 때 설정에서 읽는다
+		if card.Cwd != nil {
+			card.WorkspaceID = WorkspaceID(c.machineID, LocalOS(), *card.Cwd)
+		}
+	}
+	if in.Workspace != nil {
+		w, err := checkWorkspace(*in.Workspace)
+		if err != nil {
+			return err
+		}
+		card.Workspace = &w
+	} else if card.Workspace == nil && card.Cwd != nil && c.isLocal(card) {
+		card.Workspace = ptr(WorkspaceLabel(*card.Cwd))
+	}
+	return nil
+}
+
+func checkWorkspace(w string) (string, error) {
+	w = strings.TrimSpace(w)
+	if len([]rune(w)) > 60 || strings.ContainsAny(w, "\r\n") {
+		return "", bad("invalid_workspace", "작업 이름은 한 줄, 60자 이하")
+	}
+	return w, nil
+}
+
+// sameWorkspace 는 두 카드가 같은 PC 의 같은 작업 폴더인지 본다. 작업 위치 ID 가 있으면 그것으로, 없으면(예전 카드) 경로로.
+func (c *Atalk) sameWorkspace(a, b *AgentCard) bool {
+	if a.WorkspaceID != "" && b.WorkspaceID != "" {
+		return a.WorkspaceID == b.WorkspaceID
+	}
+	return a.Cwd != nil && b.Cwd != nil && c.isLocal(a) && c.isLocal(b) && samePath(*a.Cwd, *b.Cwd)
+}
+
 // inheritCard: 새로 시작한 세션이 같은 종류·같은 작업 폴더의 이전 세션(끝났거나 자리 비움, 또는 같은 프로세스) 이름표를
 // 이어받는다. 이름·설명·능력·사람 별칭을 옮기고 이전 카드는 retired_by 로 표시한다.
 // 방 자리는 옮기지 않는다 — 이전 카드가 방에 있었으면 자리 비움으로 두고, 새 세션이 그 방에 입장(request)하면
 // 승인 없이 그 자리(역할·읽은 위치)를 이어받는다. 자리 비움 유예가 지나면 보통처럼 퇴장 처리된다.
 func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
-	if card.Cwd == nil {
+	if card.Cwd == nil && card.WorkspaceID == "" {
 		return
 	}
 	if cfg := c.readConfig(); cfg.AutoResume != nil && !*cfg.AutoResume {
@@ -556,7 +703,7 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 	}
 	var best *AgentCard
 	for id, old := range c.agents {
-		if id == card.ID || old.Kind != card.Kind || old.Cwd == nil || !samePath(*old.Cwd, *card.Cwd) {
+		if id == card.ID || old.Kind != card.Kind || !c.sameWorkspace(old, card) {
 			continue
 		}
 		if old.RetiredBy != nil && *old.RetiredBy != card.ID { // 이미 다른 세션이 이어받음 (그 세션이 후보)
@@ -576,6 +723,9 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 		return
 	}
 	card.Name, card.Description = best.Name, best.Description
+	if best.Workspace != nil {
+		card.Workspace = ptr(*best.Workspace) // 사용자가 바꾼 작업 이름(숨김 포함)을 유지
+	}
 	if len(card.Capabilities) == 0 {
 		card.Capabilities = slices.Clone(best.Capabilities)
 	}
@@ -661,6 +811,13 @@ func (c *Atalk) UpdateCard(id string, p CardPatch) (v AgentView, err error) {
 		}
 		if p.Capabilities != nil {
 			card.Capabilities = slices.Clone(*p.Capabilities)
+		}
+		if p.Workspace != nil {
+			w, err := checkWorkspace(*p.Workspace)
+			if err != nil {
+				return err
+			}
+			card.Workspace = &w
 		}
 		if p.Human != nil {
 			if h := strings.TrimSpace(*p.Human); h == "" {
@@ -1365,7 +1522,7 @@ func (c *Atalk) ResumePrevious(newID string) (rec *Recovery, from string, err er
 		var cands []cand
 		for id, m := range c.memberships {
 			old, ok := c.agents[id]
-			if !ok || id == newID || old.Kind != nu.Kind || old.Cwd == nil || !samePath(*old.Cwd, *nu.Cwd) {
+			if !ok || id == newID || old.Kind != nu.Kind || !c.sameWorkspace(old, nu) {
 				continue
 			}
 			samePid := nu.Pid != nil && old.Pid != nil && *nu.Pid == *old.Pid
@@ -1400,7 +1557,7 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 		if nu.Kind != old.Kind {
 			return nil, forbidden("kind_mismatch", "같은 종류의 에이전트만 이어받을 수 있음")
 		}
-		if nu.Cwd != nil && old.Cwd != nil && !samePath(*nu.Cwd, *old.Cwd) {
+		if (nu.Cwd != nil || nu.WorkspaceID != "") && (old.Cwd != nil || old.WorkspaceID != "") && !c.sameWorkspace(nu, old) {
 			return nil, forbidden("cwd_mismatch", "같은 작업 폴더의 세션만 이어받을 수 있음")
 		}
 		m, ok := c.memberships[oldID]
@@ -1463,6 +1620,13 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 		c.emit(Event{Type: "membership", To: []string{newID}, Data: map[string]any{"agent": newID, "room": m.Room, "action": "takeover", "from": oldID}})
 		return c.buildRecovery(newID, 30), nil
 	}
+}
+
+// Machine 은 이 PC 의 ID·이름·OS.
+func (c *Atalk) Machine() Host {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return Host{ID: c.machineID, Name: c.machineName(), OS: LocalOS()}
 }
 
 // RoomOf 는 agent 가 들어가 있는 방 (없으면 "").
@@ -1759,10 +1923,18 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		if in.TrashRetentionDays != nil && (*in.TrashRetentionDays < 0 || *in.TrashRetentionDays > 3650) {
 			return bad("invalid_trash", "trash_retention_days 는 0(비우지 않음) ~ 3650 일")
 		}
+		in.MachineName = strings.TrimSpace(in.MachineName)
+		if len([]rune(in.MachineName)) > 40 || strings.ContainsAny(in.MachineName, "\r\n") {
+			return bad("invalid_machine_name", "PC 이름은 한 줄, 40자 이하")
+		}
+		renamed := in.MachineName != c.cfg.MachineName
 		cfg = in
 		c.st.PutConfig(cfg)
 		c.cfg = cfg
 		c.emit(Event{Type: "config", Data: cfg})
+		if renamed {
+			c.emit(Event{Type: "agent", Data: map[string]any{"action": "machine"}})
+		}
 		return nil
 	})
 	return

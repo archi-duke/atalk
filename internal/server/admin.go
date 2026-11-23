@@ -38,11 +38,13 @@ func (s *Server) adminRoutes(h func(string, handler)) {
 		}
 		size, files := dirSize(s.Core.Root)
 		tc, tb := s.Core.TrashInfo()
+		m := s.Core.Machine()
 		return map[string]any{
 			"root": s.Core.Root, "pid": os.Getpid(), "port": port,
 			"root_pointer": daemon.RootPointerFile(), "env_root": os.Getenv("ATALK_ROOT"), "env_port": os.Getenv("ATALK_PORT"),
 			"config_dir": paths.ConfigDir(), "autostart": daemon.Autostart(), "data_bytes": size, "data_files": files,
 			"trash_count": tc, "trash_bytes": tb, "os": runtime.GOOS,
+			"machine": map[string]any{"name": m.Name, "os": m.OS, "default_name": core.DefaultMachineName(m.ID)},
 		}, nil
 	})
 	h("POST /admin/trash/empty", func(w http.ResponseWriter, r *http.Request) (any, error) {

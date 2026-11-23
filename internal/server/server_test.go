@@ -12,6 +12,44 @@ import (
 	"atalk/internal/core"
 )
 
+// 내보낸 HTML 에는 이 방과 관계있는 에이전트만, 경로·PID·PC 정보 없이 들어간다.
+func TestExportHidesPaths(t *testing.T) {
+	srv, err := New(Options{Root: t.TempDir(), Addr: "127.0.0.1:0", MachineID: "m1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	c := srv.Core
+	secret := `C:\Users\someone\secret-proj`
+	pid := 4321
+	a, err := c.Register(core.RegisterInput{Kind: "claude-code", SessionID: "a", Cwd: &secret, Pid: &pid})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Register(core.RegisterInput{Kind: "codex", SessionID: "outsider", Cwd: &secret}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CreateRoom(a.Agent.ID, "r", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	page, err := srv.ExportHTML("r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(page)
+	for _, bad := range []string{"secret-proj", "someone", "4321", "outsider", `"host"`, "workspace_id"} {
+		if strings.Contains(s, bad) {
+			t.Fatalf("내보낸 파일에 %q 가 들어 있음", bad)
+		}
+	}
+	if !strings.Contains(s, a.Agent.ID) {
+		t.Fatal("방 멤버는 들어 있어야 함")
+	}
+}
+
 func TestHTTPFlow(t *testing.T) {
 	srv, err := New(Options{Root: t.TempDir(), Addr: "127.0.0.1:0"})
 	if err != nil {

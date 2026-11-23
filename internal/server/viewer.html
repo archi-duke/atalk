@@ -63,6 +63,15 @@
   .row.offline { opacity:.6; }
   .row.offline:hover { opacity:1; }
   .row .del { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; flex:none; }
+  .pc-head { display:flex; align-items:center; gap:6px; padding:10px 16px 4px; font-size:11.5px; color:var(--muted); font-weight:600; }
+  .pc-head .here { color:var(--accent); font-weight:600; }
+  .row .ws { color:var(--fg); }
+  .agent-detail { margin:-4px 16px 8px 58px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:12px; background:var(--panel); }
+  .agent-detail div { display:flex; gap:8px; padding:2px 0; min-width:0; }
+  .agent-detail b { flex:none; width:64px; color:var(--muted); font-weight:500; }
+  .agent-detail span { min-width:0; overflow-wrap:anywhere; }
+  .agent-detail code { font:11.5px ui-monospace,Consolas,monospace; }
+  .agent-detail button { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:6px; padding:0 6px; font-size:11px; cursor:pointer; margin-left:4px; }
   .prune { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:6px 16px 8px; font-size:11.5px; color:var(--muted); }
   .prune button { border:1px solid var(--line); background:var(--panel); color:var(--fail); border-radius:8px; padding:2px 8px; font-size:11px; cursor:pointer; }
 
@@ -292,6 +301,11 @@
     <div class="body">
       <div class="pane" data-p="general">
         <section>
+          <h3>이 PC</h3>
+          <label class="f"><span>PC 이름</span><input type="text" id="sMachine" maxlength="40"></label>
+          <p class="note">에이전트 목록에서 이 PC 를 부르는 이름입니다 (예: 집 PC, 회사 노트북). 호스트 이름이나 하드웨어 정보는 보내지 않습니다.</p>
+        </section>
+        <section>
           <h3>사람</h3>
           <label class="f"><span>사용자 별칭</span><input type="text" id="sUser" maxlength="32" placeholder="사용자"></label>
           <p class="note">사람이 직접 쓴 메시지에 "별칭@에이전트" 로 표시됩니다. 에이전트마다 다르게 하려면 <code>atalk card --human</code>.</p>
@@ -384,6 +398,7 @@ const KIND_COLOR = { "claude-code": "#d0704a", opencode: "#3b6fd8", codex: "#139
 const STATE_KO = { received: "받음", working: "처리 중", done: "완료", skipped: "건너뜀", failed: "실패" };
 const TYPE_KO = { task: "작업 요청", result: "결과", status: "상태" };
 
+let openAgent = null; // 에이전트 탭에서 펼친 카드
 let tab = "rooms", selected = null, agents = {}, rooms = [], previews = {}, roomLogs = {};
 let viewer = localGet("atalk.viewer") || "human";
 
@@ -439,14 +454,36 @@ function renderSide() {
     const list = Object.values(agents).sort((p, q) => (p.status === "offline") - (q.status === "offline"));
     const offline = list.filter((x) => x.status === "offline");
     const STATUS_KO = { in_room: "방에 있음", away: "자리 비움", waiting: "대기", offline: "오프라인" };
+    const OS_KO = { windows: "Windows", mac: "macOS", linux: "Linux" };
+    // PC 별로 묶는다: 이 PC 가 먼저, 그다음 PC 이름 순. PC 가 하나뿐이면 머리줄은 생략
+    const pcs = new Map();
+    for (const x of list) {
+      const k = x.host?.id || "?";
+      if (!pcs.has(k)) pcs.set(k, { host: x.host || {}, local: x.local, items: [] });
+      pcs.get(k).items.push(x);
+    }
+    const groups = [...pcs.values()].sort((p, q) => (q.local - p.local) || (p.host.name || "").localeCompare(q.host.name || ""));
+    const row = (x) => {
+      const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
+      return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
+        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + (STATUS_KO[x.status] || x.status) + "</span></div>" +
+        '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + "</div></div>" +
+        (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
+        (openAgent === x.id ? agentDetail(x) : "");
+    };
     $("#list").innerHTML = (offline.length
       ? '<div class="prune">오프라인 ' + offline.length + '개 · 하루 지나면 자동 삭제<button id="pruneAll">모두 삭제</button></div>' : "") +
-      (list.map((x) =>
-      '<div class="row' + (x.status === "offline" ? " offline" : "") + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-      '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + (STATUS_KO[x.status] || x.status) + "</span></div>" +
-      '<div class="prev">' + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + "</div></div>" +
-      (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>"
-    ).join("") || '<div class="empty">등록된 에이전트 없음</div>');
+      (groups.map((g) => (groups.length > 1 || !g.local
+        ? '<div class="pc-head">🖥 ' + esc(g.host.name || "알 수 없는 PC") + (g.local ? ' <span class="here">이 PC</span>' : "") + (OS_KO[g.host.os] ? " · " + OS_KO[g.host.os] : "") + "</div>" : "") +
+        g.items.map(row).join("")).join("") || '<div class="empty">등록된 에이전트 없음</div>');
+    $("#list").querySelectorAll(".row[data-a]").forEach((el) => (el.onclick = (e) => {
+      if (e.target.closest(".del")) return;
+      openAgent = openAgent === el.dataset.a ? null : el.dataset.a; renderSide();
+    }));
+    $("#list").querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async (e) => {
+      e.stopPropagation();
+      try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = "복사됨"; } catch { b.textContent = "복사 실패"; }
+    }));
     const del = async (ids) => {
       for (const id of ids) await fetch("/agents/" + encodeURIComponent(id), { method: "DELETE" });
       loadSide();
@@ -468,6 +505,20 @@ function renderSide() {
   }).join("") || '<div class="empty">대화방 없음</div>';
   document.querySelectorAll(".row[data-r]").forEach((el) => (el.onclick = () => openRoom(el.dataset.r)));
 }
+// 에이전트 상세: 전체 경로·PID 는 이 PC 의 에이전트만 (다른 PC 것은 데몬이 보내지도 않는다)
+
+function agentDetail(x) {
+  const kv = (k, v) => (v ? "<div><b>" + k + "</b><span>" + v + "</span></div>" : "");
+  const when = (t) => (t ? new Date(t).toLocaleString() : "");
+  return '<div class="agent-detail">' +
+    kv("PC", esc(x.host?.name || "") + (x.local ? " (이 PC)" : "")) +
+    kv("작업", x.workspace ? esc(x.workspace) : x.workspace === "" ? "(숨김)" : "") +
+    kv("폴더", x.local && x.cwd ? "<code>" + esc(x.cwd) + '</code><button data-copy="' + esc(x.cwd) + '">복사</button>' : x.local ? "" : "(다른 PC — 표시 안 함)") +
+    kv("종류", esc(x.kind)) + kv("ID", "<code>" + esc(x.id) + "</code>") +
+    kv("사람", x.human ? esc(x.human) : "") + kv("능력", (x.capabilities || []).map(esc).join(", ")) +
+    kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") + "</div>";
+}
+
 // 대화방 카드 안의 참여 에이전트 상태: "● 마스터  ● 오1 작업중 #5  ○ 오2"
 function cardPresence(room) {
   if (room.closed_at || !room.members.length) return "";
@@ -815,6 +866,7 @@ async function openSettings() {
   [info, cfg] = await Promise.all([j("/admin/info"), j("/config").then((r) => r.config || {})]);
   // 일반
   $("#sUser").value = cfg.user || "";
+  $("#sMachine").value = cfg.machine_name || ""; $("#sMachine").placeholder = info.machine?.default_name || "PC-XXXX";
   $("#sAutoSec").hidden = info.os !== "windows";
   $("#sAuto").checked = !!info.autostart;
   $("#sPort").value = info.port;
@@ -850,7 +902,7 @@ $("#sAuto").onchange = async () => {
 };
 $("#setForm").onsubmit = async (e) => {
   e.preventDefault();
-  const next = { ...cfg, user: $("#sUser").value.trim(),
+  const next = { ...cfg, user: $("#sUser").value.trim(), machine_name: $("#sMachine").value.trim() || null,
     away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
     default_max_messages: $("#sLimit").value ? Number($("#sLimit").value) : null,
     auto_resume: $("#sResume").checked ? null : false, auto_accept_invites: $("#sAccept").checked ? null : false };

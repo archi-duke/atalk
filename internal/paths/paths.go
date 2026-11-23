@@ -8,6 +8,8 @@
 package paths
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -30,6 +32,25 @@ func ConfigDir() string {
 }
 
 func RootFile() string { return filepath.Join(ConfigDir(), "root.txt") }
+
+// MachineFile 은 이 PC 의 ID 를 저장하는 파일. 데이터 폴더가 아니라 설정 폴더에 둔다 (데이터를 다른 PC 로 옮겨도 PC ID 는 따라가지 않게).
+func MachineFile() string { return filepath.Join(ConfigDir(), "machine-id") }
+
+// MachineID 는 이 PC 의 ID. 처음 부를 때 무작위로 만들어 저장한다 (하드웨어 정보·호스트 이름을 쓰지 않음).
+func MachineID() string {
+	if id := readTrim(MachineFile()); id != "" {
+		return id
+	}
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	id := hex.EncodeToString(b)
+	if err := write(MachineFile(), id); err != nil {
+		return id
+	}
+	return id
+}
 func PortFile() string { return filepath.Join(ConfigDir(), "port.txt") }
 
 func readTrim(f string) string {

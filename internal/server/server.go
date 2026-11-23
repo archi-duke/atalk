@@ -32,6 +32,7 @@ type Options struct {
 	Addr       string // 기본 127.0.0.1:7420
 	AwayGrace  time.Duration
 	SweepEvery time.Duration
+	MachineID  string // 이 PC 의 ID (paths.MachineID). 없으면 core 가 임시로 만든다
 }
 
 type Server struct {
@@ -47,7 +48,7 @@ type Server struct {
 }
 
 func New(opts Options) (*Server, error) {
-	c, err := core.New(core.Options{Root: opts.Root, AwayGrace: opts.AwayGrace})
+	c, err := core.New(core.Options{Root: opts.Root, AwayGrace: opts.AwayGrace, MachineID: opts.MachineID})
 	if err != nil {
 		return nil, err
 	}
@@ -115,13 +116,41 @@ func (s *Server) ExportHTML(roomID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	agents, err := c.ListAgents("", "")
+	all, err := c.ListAgents("", "")
 	if err != nil {
 		return nil, err
 	}
-	names, err := c.Names()
+	// 내보낸 파일은 남에게 건네기 쉬우므로 이 방과 관계있는 에이전트만, 경로·PID·PC·작업 이름 없이 넣는다
+	related := map[string]bool{}
+	for _, m := range room.Members {
+		related[m.Agent] = true
+	}
+	for _, m := range msgs {
+		related[m.From] = true
+		for _, to := range m.To {
+			related[to] = true
+		}
+	}
+	for _, l := range logs {
+		related[l.Agent] = true
+	}
+	agents := []core.AgentView{}
+	for _, a := range all {
+		if !related[a.ID] {
+			continue
+		}
+		a.Cwd, a.Pid, a.Host, a.Workspace, a.WorkspaceID, a.Local = nil, nil, nil, nil, "", false
+		agents = append(agents, a)
+	}
+	allNames, err := c.Names()
 	if err != nil {
 		return nil, err
+	}
+	names := map[string]string{}
+	for id, n := range allNames {
+		if related[id] {
+			names[id] = n
+		}
 	}
 	data, err := json.Marshal(map[string]any{ // json.Marshal 은 < > & 를 \u003c 등으로 바꾸므로 <script> 안에 안전
 		"room": room, "messages": msgs, "logs": logs, "agents": agents, "names": names,
@@ -174,7 +203,7 @@ func (s *Server) routes() http.Handler {
 
 	// ── 디스커버리 ──
 	h("GET /health", func(w http.ResponseWriter, r *http.Request) (any, error) {
-		return map[string]any{"root": c.Root, "pid": os.Getpid()}, nil
+		return map[string]any{"root": c.Root, "pid": os.Getpid(), "machine": c.Machine()}, nil
 	})
 	h("GET /agents", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		a, err := c.ListAgents(r.URL.Query().Get("status"), r.URL.Query().Get("kind"))

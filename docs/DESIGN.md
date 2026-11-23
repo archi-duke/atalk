@@ -47,7 +47,15 @@
 
 스키마는 [internal/core/types.go](../internal/core/types.go) 가 기준이다.
 
-**네임카드**: `id, kind, session_id, name, description, capabilities[], cwd, pid, registered_at, updated_at`
+**네임카드**: `id, kind, session_id, name, description, capabilities[], cwd, pid, host{id,name,os}, workspace, workspace_id, registered_at, updated_at`
+
+**PC 와 작업 위치** — 같은 PC 인지, 무슨 일을 하는 에이전트인지 알리되 경로와 PC 이름은 그 PC 밖으로 내보내지 않는다.
+- PC ID: 처음 실행할 때 만든 무작위 값(`<설정 폴더>/machine-id`). 하드웨어 정보·호스트 이름·IP 는 쓰지 않는다.
+  PC 이름은 설정 `machine_name`(없으면 `PC-` + ID 앞 4자리). "이 PC" 는 이름이 아니라 ID 로 판단한다 (`local`).
+- 작업 이름 `workspace`: 기본은 git 저장소 폴더 이름, 아니면 작업 폴더 이름(홈 폴더 자체는 `~`). `atalk card --workspace X` 로 바꾸고 `""` 면 숨김.
+- 작업 위치 ID `workspace_id` = sha256(PC ID + 정규화한 경로) 앞 16자. 이름표 이어받기는 경로 대신 이것으로 같은 폴더인지 본다.
+- 등록에 `host` 가 없으면 이 데몬의 PC (로컬). 다른 PC 의 등록은 `cwd` 를 버리고 `workspace`·`workspace_id` 만 쓴다.
+- API 는 다른 PC 카드의 `cwd`·`pid` 를 빼고 보낸다. 방 내보내기(HTML)는 그 방과 관계있는 에이전트만, `cwd`·`pid`·`host`·`workspace` 없이 넣는다.
 
 **멤버십** (`memberships` 표, 키 = agent id):
 `room, role(owner|member), state(in_room|away), joined_at, last_seen, away_since, away_reason`
@@ -116,7 +124,7 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 |---|---|---|
 | GET | `/health` | |
 | GET | `/agents?status=&kind=` | 디스커버리 |
-| POST | `/agents` | 등록/갱신 `{kind, session_id?, name?, description?, capabilities?, cwd?, pid?}` → `{agent, created, recovery}` |
+| POST | `/agents` | 등록/갱신 `{kind, session_id?, name?, description?, capabilities?, cwd?, pid?, host?, workspace?, workspace_id?}` → `{agent, created, recovery, inherited_from?, previous_room?}` |
 | GET / PATCH / DELETE | `/agents/:id` | 조회 / 카드 수정 / 등록 해제 |
 | POST | `/agents/:id/away` | `{reason}` |
 | POST | `/agents/:id/leave` | `{reason}` |
