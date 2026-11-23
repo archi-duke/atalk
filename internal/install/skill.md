@@ -23,7 +23,7 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | `create ROOM [제목]` | `create ROOM --title "제목"` → **메시지 받기 시작** |
 | `join ROOM` | `request ROOM` (방장 승인 필요) → **메시지 받기 시작** (승인되면 알림이 옴). 이전 세션이 있던 방이면 승인 없이 바로 원래 자리로 들어감 |
 | `accept ROOM` | 받은 초대 수락 `accept ROOM` → **메시지 받기 시작** |
-| `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id. opencode 는 방에 없으면 자동 수락함 |
+| `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id. 같은 PC 에서 대기 중(방에 없음)이면 바로 입장, 다른 방에 있으면 상대가 수락해야 옮김 |
 | `approve AGENT` / `reject AGENT` | (방장) 참여 신청 처리 |
 | `send TEXT` | 방 전체에 chat. 특정 에이전트에게 일을 시킬 때는 `--type task --to AGENT` |
 | `leave` | 방에서 나가기 |
@@ -94,7 +94,8 @@ EOF
    `log SEQ received` → 작업 → `send - --type result --reply SEQ --to 보낸이` → `log SEQ done`
 3. **result / status** 는 내용만 반영하고 **답장하지 마세요** (`log SEQ done`). 에이전트끼리 끝없이 주고받는 것을 막는 규칙입니다.
 4. 답할 필요가 없으면 `log SEQ skipped`.
-5. 초대·참여 신청은 사용자에게 알리고, 사용자가 정한 대로 `accept` / `approve` 합니다. 단, **보낸 이가 "(사람)" 인 초대**는 내 사용자가 웹 화면에서 보낸 것이므로 바로 `accept` 합니다.
+5. 같은 PC 에서 대기 중일 때 받은 초대는 **자동으로 입장**됩니다 ("초대를 받아 X 방에 들어왔습니다" 알림 → `listen` 을 켜고 방 목적에 맞게 일하세요).
+   다른 방에 있을 때 온 초대·참여 신청은 사용자에게 알리고, 사용자가 정한 대로 `accept` / `approve` 합니다. 단, **보낸 이가 "(사람)" 인 초대**는 내 사용자가 웹 화면에서 보낸 것이므로 바로 `accept` 합니다.
 7. 방에 **목적(설명)** 이 있으면 그 목적에 맞게 일합니다. `{{ATALK}} room ROOM` 으로 볼 수 있습니다.
 6. 사용자와 다른 작업을 하던 중이면, 메시지 처리를 짧게 끝내고 원래 작업으로 돌아갑니다.
 

@@ -1285,11 +1285,36 @@ func (c *Atalk) Invite(owner, r, target string) (v RoomView, err error) {
 		}
 		room.Invites = append(room.Invites, Invite{Agent: target, By: by, At: c.ts(), Status: "pending"})
 		c.saveRoom(room)
+		if c.autoAccepts(owner, target) {
+			// 같은 PC 안에서 대기 중인 에이전트 → 초대를 바로 수락해 입장시킨다 (이전 세션 자리가 있으면 그 자리로)
+			c.joinInternal(target, r, RoleMember)
+			v = c.roomView(room)
+			return nil
+		}
 		c.emit(Event{Type: "invite", To: []string{target}, Data: map[string]any{"room": r, "title": room.Title, "by": by}})
 		v = c.roomView(room)
 		return nil
 	})
 	return
+}
+
+// autoAccepts 는 초대를 받는 즉시 입장시킬지 본다: 초대한 쪽(방장 에이전트 또는 이 PC 화면의 사람)과 받는 에이전트가
+// 같은 PC 이고, 받는 에이전트가 대기 중(방에 없고 살아 있음)일 때. 설정 auto_accept_invites=false 면 하지 않는다.
+// 다른 PC(서버 연결)는 아직 고려하지 않는다 — 초대만 남긴다.
+func (c *Atalk) autoAccepts(owner, target string) bool {
+	if cfg := c.readConfig(); cfg.AutoAcceptInvites != nil && !*cfg.AutoAcceptInvites {
+		return false
+	}
+	t, ok := c.agents[target]
+	if !ok || !c.isLocal(t) || c.statusOf(target) != "waiting" {
+		return false
+	}
+	if owner != "" { // 사람("")은 이 PC 의 화면·터미널에서만 초대할 수 있다 (localOnly)
+		if o, ok := c.agents[owner]; !ok || !c.isLocal(o) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Atalk) RespondInvite(agent, r string, accept bool) (v RoomView, err error) {
@@ -1299,6 +1324,10 @@ func (c *Atalk) RespondInvite(agent, r string, accept bool) (v RoomView, err err
 			return err
 		}
 		idx := slices.IndexFunc(room.Invites, func(i Invite) bool { return i.Agent == agent && i.Status == "pending" })
+		if m, in := c.memberships[agent]; idx < 0 && accept && in && m.Room == r {
+			v = c.roomView(room) // 이미 들어와 있음 (같은 PC 대기 중이라 초대와 함께 자동 입장) → 수락은 성공으로
+			return nil
+		}
 		if idx < 0 {
 			return notFound("no_invite", "%s 방에서 받은 초대가 없음", r)
 		}

@@ -67,6 +67,10 @@ func TestHTTPFlow(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	f := false // 초대 → 수락 흐름을 직접 시험 (같은 PC 대기 중 자동 입장 끔)
+	if _, err := srv.Core.SetConfig(core.Config{AutoAcceptInvites: &f}); err != nil {
+		t.Fatal(err)
+	}
 	name := "Lead"
 	ra, err := c.Register(core.RegisterInput{Kind: "claude-code", SessionID: "s1", Name: &name})
 	must(err)

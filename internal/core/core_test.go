@@ -52,6 +52,12 @@ func check(t *testing.T, err error) {
 	}
 }
 
+// noAutoAccept 는 같은 PC 대기 중 자동 입장을 꺼서 초대 → 수락 흐름을 직접 시험하게 한다.
+func noAutoAccept(c *Atalk) {
+	f := false
+	ok(c.SetConfig(Config{AutoAcceptInvites: &f}))
+}
+
 func s(v string) *string { return &v }
 func i(v int) *int       { return &v }
 
@@ -94,6 +100,7 @@ func TestRegisterCardFile(t *testing.T) {
 
 func TestInviteMessageUnread(t *testing.T) {
 	c := newEnv(t).core()
+	noAutoAccept(c) // 초대 → 직접 수락 흐름을 본다
 	a, b, d := setup(t, c)
 	ok(c.CreateRoom(a, "api", "API 작업", 0))
 	if *ok(c.GetAgent(a)).Role != "owner" {
@@ -152,6 +159,7 @@ func TestRequestApprove(t *testing.T) {
 func TestOneRoomPerSession(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
+	noAutoAccept(c) // 초대 → 직접 수락 흐름을 본다
 	a, b, d := setup(t, c)
 	ok(c.CreateRoom(a, "r1", "", 0))
 	ok(c.Invite(a, "r1", b))
@@ -640,7 +648,8 @@ func TestOwnerlessRoomAndDescription(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
 	a, b, _ := setup(t, c)
-	ok(c.SetConfig(Config{User: "대장"}))
+	off := false // 사람 초대 기록(보낸 이 표시)과 수락 흐름을 본다 (같은 PC 자동 입장 끔)
+	ok(c.SetConfig(Config{User: "대장", AutoAcceptInvites: &off}))
 
 	// 사람이 방장 없이, 목적과 함께 만든다
 	r := ok(c.CreateRoomWith("", "h", "사람 방", "결제 API 를 v2 로", 0))
@@ -1191,6 +1200,47 @@ func TestProvisionalCleanup(t *testing.T) {
 	c.Sweep()
 	if _, err := c.GetAgent(p3); err == nil {
 		t.Fatal("같은 프로세스가 방에 있으면 빈 세션은 점검 때 지워져야 함")
+	}
+}
+
+// 같은 PC 에서 대기 중인 에이전트는 초대하면 바로 입장. 다른 방에 있거나 다른 PC 거나 설정을 끄면 초대만 남는다.
+func TestLocalAutoAcceptInvite(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, b, d := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b))
+	if ok(c.GetAgent(b)).Room == nil {
+		t.Fatal("같은 PC·대기 중이면 바로 입장해야 함")
+	}
+	if p := ok(c.Pending(b)); len(p.Invites) != 0 {
+		t.Fatalf("수락된 초대는 대기 목록에 없어야 함: %+v", p.Invites)
+	}
+	// 다른 방에 있는 에이전트 → 초대만
+	ok(c.CreateRoom(d, "other", "", 0))
+	ok(c.Invite(a, "r", d))
+	if v := ok(c.GetAgent(d)); v.Room == nil || *v.Room != "other" {
+		t.Fatal("다른 방에 있으면 자동으로 옮기지 않음")
+	}
+	// 사람이 화면에서 초대해도 같은 규칙
+	x := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "x", Pid: i(100)})).Agent.ID
+	ok(c.Invite("", "r", x))
+	if ok(c.GetAgent(x)).Room == nil {
+		t.Fatal("사람 초대도 대기 중이면 바로 입장")
+	}
+	// 다른 PC 에이전트 → 초대만
+	rmt := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "rmt", Host: &Host{ID: "other-pc", Name: "노트북"}})).Agent.ID
+	ok(c.Invite(a, "r", rmt))
+	if ok(c.GetAgent(rmt)).Room != nil {
+		t.Fatal("다른 PC 는 자동 입장하지 않음")
+	}
+	// 설정으로 끄면 초대만
+	f := false
+	ok(c.SetConfig(Config{AutoAcceptInvites: &f}))
+	y := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "y", Pid: i(200)})).Agent.ID
+	ok(c.Invite(a, "r", y))
+	if ok(c.GetAgent(y)).Room != nil {
+		t.Fatal("auto_accept_invites=false 면 초대만")
 	}
 }
 
