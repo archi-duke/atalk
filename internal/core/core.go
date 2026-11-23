@@ -1973,6 +1973,21 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool) (out []Messa
 				return nil
 			}
 		}
+		if c.readConfig().EchoFinalOnly { // 결과만: 중간 문장은 버리고 턴이 끝날 때 마지막 답만
+			if !final {
+				return nil
+			}
+			var last string
+			for _, t := range texts {
+				if strings.TrimSpace(t) != "" {
+					last = t
+				}
+			}
+			texts = nil
+			if last != "" {
+				texts = []string{last}
+			}
+		}
 		have := map[string]bool{}
 		for _, x := range c.st.Messages(m.Room, seq, 0) {
 			if x.From == agent && x.Echo && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {

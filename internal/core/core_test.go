@@ -866,6 +866,23 @@ func TestEchoReplyAfterRestart(t *testing.T) {
 	}
 }
 
+// 결과만 기록: 중간 문장은 빼고 턴이 끝날 때 마지막 답만.
+func TestEchoFinalOnly(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.SetConfig(Config{EchoFinalOnly: true}))
+	q := ok(c.EchoPrompt(a, "팬 모드 보이게 해 줘"))
+	if r := ok(c.EchoReply(a, []string{"먼저 설정 화면을 보겠습니다."}, false)); len(r) != 0 {
+		t.Fatal("결과만: 중간 문장은 기록하지 않음")
+	}
+	r := ok(c.EchoReply(a, []string{"먼저 설정 화면을 보겠습니다.", "드롭다운을 추가합니다.", "다 됐습니다. 상단에 모드가 보입니다."}, true))
+	if len(r) != 1 || r[0].Body != "다 됐습니다. 상단에 모드가 보입니다." || *r[0].ReplyTo != q.Seq {
+		t.Fatalf("결과만: 마지막 답 하나만: %+v", r)
+	}
+}
+
 func TestIsSystemPrompt(t *testing.T) {
 	for _, s := range []string{
 		"<task-notification>\n<task-id>x</task-id>\n</task-notification>",
