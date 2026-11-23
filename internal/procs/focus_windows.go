@@ -4,6 +4,10 @@ package procs
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -27,6 +31,8 @@ var (
 	pAttachConsole         = kernel32.NewProc("AttachConsole")
 	pFreeConsole           = kernel32.NewProc("FreeConsole")
 	pGetConsoleWindow      = kernel32.NewProc("GetConsoleWindow")
+	pGetConsoleTitleW      = kernel32.NewProc("GetConsoleTitleW")
+	pGetClassNameW         = user32.NewProc("GetClassNameW")
 )
 
 const (
@@ -43,12 +49,7 @@ func visible(h uintptr) bool { r, _, _ := pIsWindowVisible.Call(h); return r != 
 // 데몬이 아니라 따로 띄운 도우미 프로세스(atalk focus-window)에서만 부른다.
 // Windows Terminal(ConPTY) 이면 숨은 가짜 창이 나오는데, 그 루트 소유자가 터미널 창이다.
 func consoleWindow(pid int) uintptr {
-	pFreeConsole.Call()
-	if r, _, _ := pAttachConsole.Call(uintptr(uint32(pid))); r == 0 {
-		return 0
-	}
-	h, _, _ := pGetConsoleWindow.Call()
-	pFreeConsole.Call()
+	h, _ := consoleInfo(pid)
 	if h == 0 {
 		return 0
 	}
@@ -59,6 +60,52 @@ func consoleWindow(pid int) uintptr {
 		return h
 	}
 	return 0
+}
+
+// consoleInfo 는 pid 의 콘솔 창과 콘솔 제목(= Windows Terminal 탭 제목)을 돌려준다.
+func consoleInfo(pid int) (uintptr, string) {
+	pFreeConsole.Call()
+	if r, _, _ := pAttachConsole.Call(uintptr(uint32(pid))); r == 0 {
+		return 0, ""
+	}
+	defer pFreeConsole.Call()
+	h, _, _ := pGetConsoleWindow.Call()
+	buf := make([]uint16, 1024)
+	n, _, _ := pGetConsoleTitleW.Call(uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	return h, windows.UTF16ToString(buf[:n])
+}
+
+func className(h uintptr) string {
+	buf := make([]uint16, 256)
+	pGetClassNameW.Call(h, uintptr(unsafe.Pointer(&buf[0])), 256)
+	return windows.UTF16ToString(buf)
+}
+
+// selectTerminalTab 은 Windows Terminal 창(h)에서 제목이 title 인 탭을 UI 자동화로 선택한다.
+// (한 창에 탭으로 여러 에이전트가 있을 때 그 에이전트의 탭으로). 제목 앞 기호는 빼고 비교, 같은 제목이 없으면 앞부분이 같은 탭.
+const selectTabScript = `
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+$A = [System.Windows.Automation.AutomationElement]
+$w = $A::FromHandle([IntPtr][long]$env:ATALK_HWND)
+$cond = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::TabItem)
+$tabs = @($w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond))
+function Norm([string]$s) { return ($s -replace "^[^p{L}p{N}]+", "").Trim() }  # Claude 는 제목 앞 기호(✳ ◑ …)가 계속 바뀜
+$want = Norm $env:ATALK_TAB_TITLE
+$t = $tabs | Where-Object { (Norm $_.Current.Name) -eq $want } | Select-Object -First 1
+if (-not $t) { $t = $tabs | Where-Object { $n = Norm $_.Current.Name; $n.StartsWith($want) -or $want.StartsWith($n) } | Select-Object -First 1 }
+if (-not $t) { Write-Output "no tab"; exit 2 }
+$t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+`
+
+func selectTerminalTab(h uintptr, title string) error {
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", selectTabScript)
+	cmd.Env = append(os.Environ(), "ATALK_HWND="+strconv.FormatUint(uint64(h), 10), "ATALK_TAB_TITLE="+title)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("탭 선택 실패: %v %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // topWindows 는 보이는 최상위 창(소유자 없음)을 프로세스별로 모은다.
@@ -95,6 +142,9 @@ func FindWindow(pid int) (title, how string, err error) {
 	if h == 0 {
 		return "", "", fmt.Errorf("pid %d 의 창을 찾지 못함", pid)
 	}
+	if _, tab := consoleInfo(pid); tab != "" && className(h) == "CASCADIA_HOSTING_WINDOW_CLASS" {
+		how += ", Windows Terminal 탭 [" + tab + "]"
+	}
 	return windowTitle(h), how, nil
 }
 
@@ -123,6 +173,12 @@ func FocusWindow(pid int) error {
 	h, _ := findWindow(pid)
 	if h == 0 {
 		return fmt.Errorf("pid %d 의 창을 찾지 못함", pid)
+	}
+	// Windows Terminal 이면 그 에이전트의 탭을 먼저 고른다 (탭 제목 = 에이전트 콘솔 제목)
+	if className(h) == "CASCADIA_HOSTING_WINDOW_CLASS" {
+		if _, title := consoleInfo(pid); title != "" {
+			_ = selectTerminalTab(h, title) // 실패해도 창은 올린다
+		}
 	}
 	if r, _, _ := pIsIconic.Call(h); r != 0 {
 		pShowWindow.Call(h, swRestore)
