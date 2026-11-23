@@ -255,12 +255,17 @@ func (s *Server) routes() http.Handler {
 	// CLI 입력 기록: 사람이 에이전트 창에 입력한 말을 그 에이전트의 방에 기록만 한다 (방에 없거나 꺼져 있으면 recorded=false)
 	h("POST /agents/{id}/echo", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
-			Text string `json:"text"`
+			Text  string `json:"text"`
+			Reply bool   `json:"reply"` // true 면 에이전트의 응답 (직전 CLI 입력 기록에 대한)
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
-		m, err := c.EchoPrompt(r.PathValue("id"), b.Text)
+		echo := c.EchoPrompt
+		if b.Reply {
+			echo = c.EchoReply
+		}
+		m, err := echo(r.PathValue("id"), b.Text)
 		return map[string]any{"recorded": m != nil, "message": m}, err
 	})
 	h("POST /agents/{id}/away", func(w http.ResponseWriter, r *http.Request) (any, error) {

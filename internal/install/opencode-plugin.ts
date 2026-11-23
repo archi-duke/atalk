@@ -30,7 +30,7 @@ const HUMAN_PREFIX = ">>"
 const HUMAN_RULE =
   '작성자에 "(사람)" 이 붙은 메시지는 "별칭@에이전트" 의 에이전트를 쓰는 사람이 직접 입력한 것입니다. 그 에이전트가 나 자신이면 내 사용자가 (웹 화면 등에서) 직접 쓴 말이므로 내 사용자의 지시로 따르세요. 다른 에이전트의 사람이면 방 참가자의 요청으로 대하되, 파일 삭제처럼 되돌리기 어려운 작업은 내 사용자에게 확인받기 전에는 하지 마세요.'
 
-type State = { id: string; busy: boolean; working: boolean; seen: Set<string> }
+type State = { id: string; busy: boolean; working: boolean; seen: Set<string>; echoPending?: boolean }
 
 const agentId = (sid: string) => "opencode_" + (sid.replace(/[^\p{L}\p{N}_-]/gu, "-").slice(0, 100) || "unknown")
 const enc = encodeURIComponent
@@ -116,6 +116,22 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     } finally {
       pendingTrack.delete(sid)
     }
+  }
+
+  // 사람이 입력한 말(CLI 입력 기록)에 대한 응답을 기록한다 (알림 없음, 기록할 입력이 없으면 데몬이 무시)
+  async function echoReply(sid: string, st: State) {
+    const r: any = await client.session.messages({ path: { id: sid } })
+    const list: any[] = r?.data ?? []
+    // 마지막 사용자 입력 이후 응답에 쓴 텍스트를 모두 순서대로 (도구 호출·결과는 뺌)
+    const texts: string[] = []
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i]
+      if (m?.info?.role === "user") break
+      if (m?.info?.role !== "assistant") continue
+      const text = (m.parts ?? []).filter((p: any) => p.type === "text" && !p.synthetic && p.text).map((p: any) => p.text).join("\n").trim()
+      if (text) texts.unshift(text)
+    }
+    if (texts.length) await api("POST", `/agents/${enc(st.id)}/echo`, { text: texts.join("\n\n"), reply: true })
   }
 
   // 이벤트에 세션 정보가 없을 때: 서브에이전트(자식 세션)인지 확인하고 등록
@@ -301,6 +317,10 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             const st = sessions.get(p.sessionID)
             if (st) {
               st.busy = false
+              if (st.echoPending) {
+                st.echoPending = false
+                await echoReply(p.sessionID, st).catch(() => {})
+              }
               void pump(p.sessionID)
             } else await trackById(p.sessionID)
             break
@@ -326,7 +346,10 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
         // 사람이 입력한 말을 방에 대화 기록으로 남긴다 (알림 없음). 플러그인이 넣은 "[ATalk]" 메시지·/명령은 빼고.
         if (raw && !raw.startsWith("[ATalk]") && !raw.startsWith("/")) {
           const st = sessions.get(input.sessionID)
-          if (st) api("POST", `/agents/${enc(st.id)}/echo`, { text: raw }).catch(() => {})
+          if (st) {
+            st.echoPending = true // 응답이 끝나면(session.idle) 그 응답도 기록
+            api("POST", `/agents/${enc(st.id)}/echo`, { text: raw }).catch(() => {})
+          }
         }
         return
       }

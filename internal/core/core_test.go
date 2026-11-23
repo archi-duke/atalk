@@ -877,6 +877,23 @@ func TestEchoPrompt(t *testing.T) {
 	if n := len([]rune(long.Body)); n > EchoMax+20 || !strings.HasSuffix(long.Body, "(길어서 생략)") {
 		t.Fatalf("긴 입력은 잘라야 함: %d", n)
 	}
+	// 응답 기록: 기록하지 않은 CLI 입력이 있을 때만, reply_to = 그 입력. 두 번째 응답(입력 없음)은 남기지 않는다
+	q := ok(c.EchoPrompt(a, "상태 알려 줘"))
+	r := ok(c.EchoReply(a, "  다 괜찮습니다  "))
+	if r == nil || !r.Echo || r.Human != "" || r.ReplyTo == nil || *r.ReplyTo != q.Seq || r.Body != "다 괜찮습니다" {
+		t.Fatalf("응답 기록: %+v", r)
+	}
+	if again := ok(c.EchoReply(a, "방 메시지 처리한 응답")); again != nil {
+		t.Fatal("기록할 CLI 입력이 없으면 응답을 남기지 않음")
+	}
+	if again := ok(c.EchoReply(b, "남의 응답")); again != nil {
+		t.Fatal("CLI 입력이 없던 에이전트의 응답은 남기지 않음")
+	}
+	for _, who := range []string{a, b} {
+		if u := ok(c.Unread(who, true)); len(u.Messages) != 0 {
+			t.Fatalf("응답 기록도 전달되면 안 됨: %+v", u.Messages)
+		}
+	}
 	f := false
 	ok(c.SetConfig(Config{EchoPrompts: &f}))
 	if m := ok(c.EchoPrompt(a, "꺼짐")); m != nil {

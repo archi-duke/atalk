@@ -328,7 +328,7 @@
         </section>
         <section>
           <h3>세션</h3>
-          <label class="f"><input type="checkbox" id="sEcho"> 에이전트 창(CLI)에 입력한 말을 대화방에 기록하기 (기록만, 다른 에이전트에게 알리지 않음)</label>
+          <label class="f"><input type="checkbox" id="sEcho"> 에이전트 창(CLI)에 입력한 말과 그 응답을 대화방에 기록하기 (기록만, 다른 에이전트에게 알리지 않음)</label>
           <label class="f"><input type="checkbox" id="sResume"> 새 세션이 같은 폴더의 이전 세션 이름표를 이어받기 (방에는 입장 명령을 받을 때 원래 자리로)</label>
           <label class="f"><input type="checkbox" id="sAccept"> opencode 가 초대를 자동 수락 (방에 없을 때)</label>
         </section>
@@ -428,7 +428,8 @@ function avatar(m) {
   return '<div class="ava" style="background:' + color + '" title="' + esc(a?.kind || "") + '">' + esc([...nameOf(m.from)][0] || "?") + "</div>";
 }
 function senderLabel(m) {
-  return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "") : esc(nameOf(m.from));
+  return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "")
+    : esc(nameOf(m.from)) + (m.echo ? '<span class="tag" title="CLI 입력에 대한 에이전트의 응답. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 응답</span>' : "");
 }
 const isMine = (m) => (viewer === "human" ? !!m.human : m.from === viewer);
 
