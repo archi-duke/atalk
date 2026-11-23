@@ -58,6 +58,7 @@
   .row .prev { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .room-ico { width:44px; height:44px; border-radius:16px; background:var(--chat); display:grid; place-items:center; font-weight:700; color:var(--sys); flex:none; }
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
+  .st-busy { background:#e08a1e; animation:pulse 1.2s ease-in-out infinite; }
   .st-in_room { background:#2fb36b; } .st-away { background:#e0a526; } .st-waiting { background:#7aa2ff; } .st-offline { background:#9aa0a8; }
   .empty { color:var(--muted); padding:24px 16px; text-align:center; }
   .row.offline { opacity:.6; }
@@ -612,7 +613,7 @@ function renderSide() {
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
       return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + x.status + '"></span>' + (STATUS_KO[x.status] || x.status) + "</span></div>" +
+        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
         '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
         (openAgent === x.id ? agentDetail(x) : "");
@@ -914,6 +915,7 @@ function presenceRows(room, logs) {
     const open = Object.entries(last[m.agent] || {}).filter(([, st]) => st === "received" || st === "working").map(([seq]) => Number(seq));
     if (m.state === "away") return { m, cls: "off", text: "비활성", title: "자리 비움: 에이전트가 꺼져 있음" };
     if (open.length) return { m, cls: "busy", text: "작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : ""), title: "처리 중인 메시지: #" + open.join(", #") };
+    if (m.busy) return { m, cls: "busy", text: "작업중", title: "일하는 중 (CLI 에서 받은 일 포함)" };
     return { m, cls: "idle", text: "대기", title: "방에 있고 처리 중인 메시지 없음" };
   });
 }

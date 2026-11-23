@@ -59,15 +59,19 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	switch event {
 	case "session-start":
 		out = sessionStart(c, kind, in)
-	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장을 실시간으로 기록
+	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장을 실시간으로 기록 + 작업 중 신호 갱신
+		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), true)
 		if texts := turnTexts(in.TranscriptPath); len(texts) > 0 {
 			_ = c.EchoReply(core.MakeAgentID(kind, in.SessionID), texts, false)
 		}
 	case "stop":
 		out = stop(c, kind, in)
+		// 응답이 끝났으면 대기. 처리할 방 메시지가 있어 Claude 를 계속 일하게 하면(block) 작업 중 유지
+		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), out != nil)
 	case "prompt":
 		out = prompt(c, kind, in)
 	case "session-end":
+		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), false)
 		_ = c.Away(core.MakeAgentID(kind, in.SessionID), "session_end:"+orDefault(in.Reason, "exit"))
 	}
 	if out != nil {
@@ -236,6 +240,9 @@ func stop(c *client.Client, kind string, in Input) any {
 // 모델을 거치지 않고 원문 그대로 방에 올리고, 모델로는 보내지 않는다(block).
 func prompt(c *client.Client, kind string, in Input) any {
 	text := strings.TrimSpace(in.Prompt)
+	if !strings.HasPrefix(text, client.HumanPrefix) { // 입력을 받아 일을 시작함 (>> 는 모델로 가지 않음)
+		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), true)
+	}
 	if text != "" && !core.IsSystemPrompt(text) { // 사람이 입력함 → 임시 세션 확정
 		_ = c.Activate(core.MakeAgentID(kind, in.SessionID))
 	}
