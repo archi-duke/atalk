@@ -252,6 +252,17 @@ func (s *Server) routes() http.Handler {
 	h("DELETE /agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return struct{}{}, c.Unregister(r.PathValue("id"))
 	})
+	// CLI 입력 기록: 사람이 에이전트 창에 입력한 말을 그 에이전트의 방에 기록만 한다 (방에 없거나 꺼져 있으면 recorded=false)
+	h("POST /agents/{id}/echo", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Text string `json:"text"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		m, err := c.EchoPrompt(r.PathValue("id"), b.Text)
+		return map[string]any{"recorded": m != nil, "message": m}, err
+	})
 	h("POST /agents/{id}/away", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
 			Reason string `json:"reason"`

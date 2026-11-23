@@ -221,6 +221,10 @@ func stop(c *client.Client, kind string, in Input) any {
 func prompt(c *client.Client, kind string, in Input) any {
 	text := strings.TrimSpace(in.Prompt)
 	if !strings.HasPrefix(text, client.HumanPrefix) {
+		// 방에 있으면 사람이 입력한 말을 대화 기록으로 남긴다 (/명령 제외, 알림 없음)
+		if text != "" && !strings.HasPrefix(text, "/") {
+			_ = c.EchoPrompt(core.MakeAgentID(kind, in.SessionID), text)
+		}
 		return listenReminder(c, kind, in)
 	}
 	text = strings.TrimSpace(strings.TrimPrefix(text, client.HumanPrefix))

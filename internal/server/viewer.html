@@ -328,6 +328,7 @@
         </section>
         <section>
           <h3>세션</h3>
+          <label class="f"><input type="checkbox" id="sEcho"> 에이전트 창(CLI)에 입력한 말을 대화방에 기록하기 (기록만, 다른 에이전트에게 알리지 않음)</label>
           <label class="f"><input type="checkbox" id="sResume"> 새 세션이 같은 폴더의 이전 세션 이름표를 이어받기 (방에는 입장 명령을 받을 때 원래 자리로)</label>
           <label class="f"><input type="checkbox" id="sAccept"> opencode 가 초대를 자동 수락 (방에 없을 때)</label>
         </section>
@@ -427,7 +428,7 @@ function avatar(m) {
   return '<div class="ava" style="background:' + color + '" title="' + esc(a?.kind || "") + '">' + esc([...nameOf(m.from)][0] || "?") + "</div>";
 }
 function senderLabel(m) {
-  return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' : esc(nameOf(m.from));
+  return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "") : esc(nameOf(m.from));
 }
 const isMine = (m) => (viewer === "human" ? !!m.human : m.from === viewer);
 
@@ -874,6 +875,7 @@ async function openSettings() {
   // 대화방
   $("#sLimit").value = cfg.default_max_messages || "";
   $("#sResume").checked = cfg.auto_resume !== false;
+  $("#sEcho").checked = cfg.echo_prompts !== false;
   $("#sAccept").checked = cfg.auto_accept_invites !== false;
   numField(cfg.away_grace_min, "#sGrace", "#sGraceOff");
   numField(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
@@ -905,7 +907,7 @@ $("#setForm").onsubmit = async (e) => {
   const next = { ...cfg, user: $("#sUser").value.trim(), machine_name: $("#sMachine").value.trim() || null,
     away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
     default_max_messages: $("#sLimit").value ? Number($("#sLimit").value) : null,
-    auto_resume: $("#sResume").checked ? null : false, auto_accept_invites: $("#sAccept").checked ? null : false };
+    auto_resume: $("#sResume").checked ? null : false, echo_prompts: $("#sEcho").checked ? null : false, auto_accept_invites: $("#sAccept").checked ? null : false };
   for (const k of Object.keys(next)) if (next[k] === null) delete next[k];
   try {
     await fetch("/config", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) })

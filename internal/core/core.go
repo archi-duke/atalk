@@ -1760,6 +1760,48 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 	return
 }
 
+// EchoMax 는 CLI 입력 기록 한 건의 최대 글자 수 (붙여 넣은 긴 내용은 잘라서 남긴다).
+const EchoMax = 4000
+
+// EchoPrompt 는 사람이 에이전트 창(CLI)에 직접 입력한 말을 그 에이전트가 있는 방에 기록만 한다.
+// 누구에게도 전달·알림하지 않는다 (그 에이전트는 이미 입력으로 받았고, 다른 에이전트가 지시로 오해하면 안 된다).
+// 방에 없거나, 설정이 꺼져 있거나, 방 메시지 한도에 닿았으면 아무것도 하지 않는다 (입력을 막지 않음).
+func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
+	err = c.guard(func() error {
+		if cfg := c.readConfig(); cfg.EchoPrompts != nil && !*cfg.EchoPrompts {
+			return nil
+		}
+		if _, err := c.requireAgent(agent); err != nil {
+			return err
+		}
+		m, ok := c.memberships[agent]
+		if !ok {
+			return nil
+		}
+		room, err := c.requireRoom(m.Room, true)
+		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+			return nil
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			return nil
+		}
+		if r := []rune(text); len(r) > EchoMax {
+			text = string(r[:EchoMax]) + "\n…(길어서 생략)"
+		}
+		m.LastSeen = c.ts()
+		if m.State == StateAway {
+			c.markBack(agent)
+		} else {
+			c.saveMemberships()
+		}
+		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
+		msg = &out
+		return nil
+	})
+	return
+}
+
 // SplitMentions 는 본문 앞쪽의 "@이름" 토큰들을 떼어 낸다. "@오프1 @오프2 안녕" → [오프1 오프2], "안녕".
 func SplitMentions(text string) (mentions []string, body string) {
 	rest := strings.TrimSpace(text)
@@ -1972,6 +2014,9 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 	cursor := cur[agent]
 	msgs := []InboxMessage{}
 	for _, x := range c.st.Messages(m.Room, cursor, 0) {
+		if x.Echo { // CLI 입력 기록은 대화 기록용 — 누구에게도 전달하지 않는다
+			continue
+		}
 		// 보통 내가 보낸 메시지는 받지 않지만, 내 사람이 나를 지정해 쓴 말(대장@나 → 나)은 받는다
 		toSelf := x.From == agent && x.Human != "" && slices.Contains(x.To, agent)
 		if x.Seq > cursor && (x.From != agent || toSelf) {
