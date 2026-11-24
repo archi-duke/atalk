@@ -117,8 +117,6 @@ type Message struct {
 	Human string `json:"human,omitempty"`
 	// Echo 는 사람이 에이전트 창(CLI)에 직접 입력한 말을 대화 기록으로만 남긴 것. 어떤 에이전트에게도 전달·알림하지 않는다.
 	Echo bool `json:"echo,omitempty"`
-	// Progress 는 CLI 입력을 처리하며 쓴 도구 목록(진행 줄). 입력마다 한 메시지에 줄을 덧붙여 갱신한다.
-	Progress bool `json:"progress,omitempty"`
 }
 
 // Config 는 <root>/config.json. 이 PC 의 공통 설정.

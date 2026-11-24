@@ -31,7 +31,6 @@ type Store interface {
 	PutRemoteTokens(t map[string]RemoteToken)
 
 	AppendMessage(m Message)
-	UpdateMessage(m Message) // 같은 (room, seq) 의 본문 바꾸기 (진행 줄)
 	Messages(room string, after, limit int) []Message // limit <= 0 이면 전부
 	MessagesBySeq(room string, seqs []int) map[int]Message
 
@@ -272,10 +271,6 @@ func (s *sqliteStore) PutRemoteTokens(t map[string]RemoteToken) { s.setMeta("rem
 
 func (s *sqliteStore) AppendMessage(m Message) {
 	s.exec("INSERT INTO messages(trash_id, room, seq, data) VALUES(0, ?, ?, ?)", m.Room, m.Seq, js(m))
-}
-
-func (s *sqliteStore) UpdateMessage(m Message) {
-	s.exec("UPDATE messages SET data = ? WHERE trash_id = 0 AND room = ? AND seq = ?", js(m), m.Room, m.Seq)
 }
 
 func scanMessages(rows *sql.Rows) []Message {

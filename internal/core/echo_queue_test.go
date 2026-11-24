@@ -1,17 +1,15 @@
 package core
 
 import (
-	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
-// replies 는 CLI 입력 seq 에 붙은 응답 본문들 (진행 줄 제외).
+// replies 는 CLI 입력 seq 에 붙은 응답 본문들.
 func replies(c *Atalk, room string, seq int) []string {
 	var out []string
 	for _, m := range ok(c.ReadMessages(room, seq, 1000)) {
-		if m.Echo && !m.Progress && m.Human == "" && m.ReplyTo != nil && *m.ReplyTo == seq {
+		if m.Echo && m.Human == "" && m.ReplyTo != nil && *m.ReplyTo == seq {
 			out = append(out, m.Body)
 		}
 	}
@@ -73,44 +71,6 @@ func TestEchoQueueNoPromptAndLegacy(t *testing.T) {
 	ok(c.EchoReply(a, []string{"응답"}, true, ""))
 	if got := replies(c, "r", p1); len(got) != 1 || c.memberships[a].EchoOpen != 0 || len(c.memberships[a].EchoQueue) != 0 {
 		t.Fatalf("예전 형식: %v %+v", got, c.memberships[a])
-	}
-}
-
-// 진행 줄: 입력마다 메시지 하나에 덧붙이고, 오래된 줄은 접는다. Stop 뒤에 늦게 온 진행 줄도 방금 닫힌 입력에 붙는다.
-func TestEchoProgress(t *testing.T) {
-	e, c, a := echoSetup(t)
-	p1 := ok(c.EchoPrompt(a, "빌드해 줘")).Seq
-	first := ok(c.EchoProgress(a, "Bash — 빌드", "빌드해 줘"))
-	second := ok(c.EchoProgress(a, "Bash — 테스트", "빌드해 줘"))
-	if first == nil || second == nil || first.Seq != second.Seq || second.Body != "· Bash — 빌드\n· Bash — 테스트" || *second.ReplyTo != p1 {
-		t.Fatalf("진행 줄: %+v", second)
-	}
-	ok(c.EchoReply(a, []string{"완료했습니다"}, true, "빌드해 줘"))
-	if got := replies(c, "r", p1); len(got) != 1 || got[0] != "완료했습니다" {
-		t.Fatalf("진행 줄은 응답 중복 제거에 섞이지 않음: %v", got)
-	}
-	e.clock = e.clock.Add(time.Minute)
-	late := ok(c.EchoProgress(a, "Edit — main.go", "빌드해 줘"))
-	if late == nil || late.Seq != first.Seq {
-		t.Fatal("Stop 뒤에 늦게 온 진행 줄도 붙어야 함")
-	}
-	for i := 0; i < 50; i++ {
-		ok(c.EchoProgress(a, fmt.Sprintf("Read — f%d.go", i), "빌드해 줘"))
-	}
-	m := ok(c.ReadMessages("r", first.Seq-1, 1))[0]
-	lines := strings.Split(m.Body, "\n")
-	if len(lines) != progressMaxLine+1 || lines[0] != "(앞 13개 생략)" || lines[len(lines)-1] != "· Read — f49.go" {
-		t.Fatalf("접기: %d줄, 첫 줄 %q, 끝 줄 %q", len(lines), lines[0], lines[len(lines)-1])
-	}
-	e.clock = e.clock.Add(time.Hour)
-	if ok(c.EchoProgress(a, "Bash — 늦음", "빌드해 줘")) != nil {
-		t.Fatal("오래 지난 닫힌 입력에는 붙이지 않음")
-	}
-	// 결과만 기록 설정이면 진행 줄도 남기지 않음
-	ok(c.SetConfig(Config{EchoFinalOnly: true}))
-	ok(c.EchoPrompt(a, "또"))
-	if ok(c.EchoProgress(a, "Bash — x", "또")) != nil {
-		t.Fatal("결과만 기록이면 진행 줄 없음")
 	}
 }
 

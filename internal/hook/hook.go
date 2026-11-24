@@ -35,9 +35,6 @@ type Input struct {
 	TranscriptPath string `json:"transcript_path"`
 	// LastAssistantMessage 는 Stop 훅에 오는 마지막 응답 (Claude Code 버전에 따라 없을 수 있어 transcript 로 대신 읽는다)
 	LastAssistantMessage string `json:"last_assistant_message"`
-	// PostToolUse: 쓴 도구와 입력 (진행 줄을 만든다. 도구 출력은 쓰지 않는다)
-	ToolName  string          `json:"tool_name"`
-	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // Run 은 stdin 에서 훅 입력을 읽고 stdout 에 훅 출력을 쓴다.
@@ -67,16 +64,13 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		if healthy {
 			out = sessionStart(c, kind, in)
 		}
-	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장 + 진행 줄을 실시간으로 기록 + 작업 중 신호 갱신
+	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장(흰색 ●)을 실시간으로 기록 + 작업 중 신호 갱신. 도구 줄(녹색 ●)·출력은 남기지 않음
 		if healthy {
 			_ = c.Activity(id, true)
 		}
 		texts, p := turnTexts(in.TranscriptPath)
 		if len(texts) > 0 {
 			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p})
-		}
-		if line := progressLine(in.ToolName, in.ToolInput); line != "" {
-			enqueue(c, id, client.EchoEvent{Progress: line, Prompt: p})
 		}
 	case "stop":
 		echoTurnEnd(c, id, in)

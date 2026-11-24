@@ -2139,7 +2139,7 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 		}
 		have := map[string]bool{}
 		for _, x := range c.st.Messages(m.Room, seq, 0) {
-			if x.From == agent && x.Echo && !x.Progress && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {
+			if x.From == agent && x.Echo && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {
 				have[x.Body] = true
 			}
 		}

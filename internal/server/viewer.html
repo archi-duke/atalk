@@ -574,8 +574,7 @@ document.addEventListener("mousemove", (e) => {
 });
 function senderLabel(m) {
   return m.human ? esc(m.human) + "@" + esc(nameOf(m.from)) + '<span class="tag">사람</span>' + (m.echo ? '<span class="tag" title="에이전트 창(CLI)에 직접 입력한 말. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 입력</span>' : "")
-    : esc(nameOf(m.from)) + (m.progress ? '<span class="tag" title="CLI 입력을 처리하며 쓴 도구 (진행 줄). 도구 출력은 남기지 않음">진행</span>'
-      : m.echo ? '<span class="tag" title="CLI 입력에 대한 에이전트의 응답. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 응답</span>' : "");
+    : esc(nameOf(m.from)) + (m.echo ? '<span class="tag" title="CLI 입력에 대한 에이전트의 응답. 기록만 하고 다른 에이전트에게는 알리지 않음">CLI 응답</span>' : "");
 }
 const isMine = (m) => (viewer === "human" ? !!m.human : m.from === viewer);
 
@@ -1279,7 +1278,7 @@ if (DATA) {
   let t = null;
   const refresh = () => { clearTimeout(t); t = setTimeout(() => { loadSide(); if (selected) loadChat(false); }, 150); };
   const es = new EventSource("/events");
-  ["message", "message_update", "invite", "request", "membership", "log", "agent", "room", "config"].forEach((e) => es.addEventListener(e, refresh));
+  ["message", "invite", "request", "membership", "log", "agent", "room", "config"].forEach((e) => es.addEventListener(e, refresh));
   es.addEventListener("config", () => loadAlias());
   es.addEventListener("message", (e) => { try { onNewMessage(JSON.parse(e.data)); } catch {} });
   loadAlias();

@@ -15,6 +15,14 @@ import (
 	"atalk/internal/server"
 )
 
+// tempOutbox 는 테스트가 실제 임시 폴더에 outbox 를 남기지 않게 한다 (Windows 의 os.TempDir 는 TMP/TEMP, 그 밖은 TMPDIR).
+func tempOutbox(t *testing.T) {
+	d := t.TempDir()
+	for _, k := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(k, d)
+	}
+}
+
 func freePort(t *testing.T) int {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -53,7 +61,7 @@ func echoBodies(t *testing.T, c *client.Client, room string) []string {
 
 // 데몬이 꺼져 있는 동안의 기록은 outbox 에 남았다가, 데몬이 돌아오면 순서대로 한 번씩만 보내진다.
 func TestOutboxSurvivesDaemonDown(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	tempOutbox(t)
 	root, port := t.TempDir(), freePort(t)
 	c := client.New(fmt.Sprintf("http://127.0.0.1:%d", port))
 	srv := startDaemon(t, root, port)
@@ -97,9 +105,9 @@ func TestOutboxSurvivesDaemonDown(t *testing.T) {
 	}
 }
 
-// Claude 훅 전체 흐름: 입력 → 도구(진행 줄 + 중간 문장) → Stop(transcript 에 빠진 마지막 답도 남김).
+// Claude 훅 전체 흐름: 입력 → 도구(중간 문장, 도구 줄은 남기지 않음) → Stop(transcript 에 빠진 마지막 답도 남김).
 func TestHookEchoFlow(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
+	tempOutbox(t)
 	t.Setenv("ATALK_CONFIG_DIR", t.TempDir())
 	root, port := t.TempDir(), freePort(t)
 	t.Setenv("ATALK_URL", fmt.Sprintf("http://127.0.0.1:%d", port))
@@ -133,27 +141,7 @@ func TestHookEchoFlow(t *testing.T) {
 	run("stop", map[string]any{"last_assistant_message": "빌드가 끝났습니다."})
 
 	got := strings.Join(echoBodies(t, c, "r"), "|")
-	if got != "빌드해 줘|빌드하겠습니다.|· Bash — 빌드|빌드가 끝났습니다." {
+	if got != "빌드해 줘|빌드하겠습니다.|빌드가 끝났습니다." {
 		t.Fatalf("기록: %q", got)
-	}
-}
-
-func TestProgressLine(t *testing.T) {
-	cases := []struct {
-		tool, in, want string
-	}{
-		{"Bash", `{"command":"go test ./...","description":"테스트 실행"}`, "Bash — 테스트 실행"},
-		{"Bash", `{"command":"ls -la\necho hi"}`, "Bash — ls -la"},
-		{"Read", `{"file_path":"/Users/someone/secret/main.go"}`, "Read — main.go"},
-		{"Edit", `{"file_path":"C:\\Users\\x\\proj\\a.ts"}`, "Edit — a.ts"},
-		{"WebFetch", `{"url":"https://example.com/a/b?q=1"}`, "WebFetch — example.com"},
-		{"mcp__github__create_issue", `{"title":"버그"}`, "github:create_issue — 버그"},
-		{"Unknown", `{}`, "Unknown"},
-		{"", `{}`, ""},
-	}
-	for _, tc := range cases {
-		if got := progressLine(tc.tool, json.RawMessage(tc.in)); got != tc.want {
-			t.Errorf("%s %s → %q, 기대 %q", tc.tool, tc.in, got, tc.want)
-		}
 	}
 }
