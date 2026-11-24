@@ -51,6 +51,7 @@ type Server struct {
 	remoteDir    string
 	remote       remoteState  // 원격 포트 (remote.go)
 	relayClients relayClients // 중계 (relay.go)
+	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
 }
 
 func New(opts Options) (*Server, error) {
@@ -58,7 +59,7 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Core: c, stop: make(chan struct{}), Restart: make(chan struct{}, 1), remoteDir: opts.RemoteDir}
+	s := &Server{Core: c, stop: make(chan struct{}), Restart: make(chan struct{}, 1), remoteDir: opts.RemoteDir, codex: CodexWaker{Queue: codexQueue}}
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:7420"
 	}

@@ -2039,7 +2039,7 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 }
 
 // BusyAck 는 작업 중인 에이전트가 메시지를 받았을 때 데몬이 그 에이전트 이름으로 바로 올리는 상태 답장.
-const BusyAck = "📥 받았습니다 — 지금 하던 작업을 마치는 대로 순서대로 처리하겠습니다."
+const BusyAck = "📥 알겠습니다. 지금 하던 작업을 마치는 대로 순서대로 처리하겠습니다."
 
 // busyAckLocked: 작업 중(긴 턴)인 에이전트는 알림을 그 턴이 끝난 뒤에야 받으므로, 나를 지정해 보낸 chat·task 에는
 // 데몬이 바로 "받았습니다" 상태 답장을 올려 보낸 쪽(특히 사람)이 기다리는지 알게 한다.
@@ -2086,7 +2086,7 @@ var systemTag = regexp.MustCompile(`^<([a-zA-Z][a-zA-Z0-9_-]*)(\s[^>]*)?>[\s\S]*
 // (Claude Code 의 Monitor·백그라운드 작업 알림, 시스템 알림, 셸·명령 출력 등). 사람이 붙여 넣은 <pasted_content> 는 사람의 입력이다.
 func IsSystemPrompt(text string) bool {
 	t := strings.TrimSpace(text)
-	for _, p := range []string{"<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<local-command-", "<command-name>", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>"} {
+	for _, p := range []string{"[ATalk", "<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<local-command-", "<command-name>", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>"} {
 		if strings.HasPrefix(t, p) {
 			return true
 		}

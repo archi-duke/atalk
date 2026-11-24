@@ -42,11 +42,12 @@ func Exe() string {
 type Paths struct {
 	Claude   string // ~/.claude
 	Opencode string // ~/.config/opencode
+	Codex    string // ~/.codex (CODEX_HOME)
 }
 
 func DefaultPaths() Paths {
 	home, _ := os.UserHomeDir()
-	p := Paths{Claude: filepath.Join(home, ".claude"), Opencode: filepath.Join(home, ".config", "opencode")}
+	p := Paths{Claude: filepath.Join(home, ".claude"), Opencode: filepath.Join(home, ".config", "opencode"), Codex: CodexDir()}
 	if v := os.Getenv("CLAUDE_CONFIG_DIR"); v != "" {
 		p.Claude = v
 	}
@@ -356,7 +357,7 @@ func Path() ([]string, error) {
 	return []string{"PATH: " + dir + " 추가 (새로 여는 터미널부터 적용)"}, nil
 }
 
-// Uninstall 은 target("claude" | "opencode" | "path" | "all") 의 ATalk 연동을 지운다.
+// Uninstall 은 target("claude" | "opencode" | "codex" | "path" | "all") 의 ATalk 연동을 지운다.
 func Uninstall(p Paths, target string) ([]string, error) {
 	var done []string
 	if target == "claude" || target == "all" {
@@ -393,6 +394,9 @@ func Uninstall(p Paths, target string) ([]string, error) {
 			}
 			done = append(done, "훅/허용 규칙 삭제: "+p.settingsFile())
 		}
+	}
+	if target == "codex" || target == "all" {
+		done = append(done, uninstallCodex(p)...)
 	}
 	if target == "path" || target == "all" {
 		if removed, err := RemoveFromUserPath(PathDir()); err == nil && removed {

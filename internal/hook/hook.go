@@ -187,8 +187,11 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 		if p := c.Purpose(rec.Room); p != "" {
 			lines = append(lines, p)
 		}
-		if kind == "claude-code" {
+		switch kind {
+		case "claude-code":
 			lines = append(lines, "메시지 알림은 자동입니다 (응답을 마칠 때마다 기다리다가 메시지가 오면 깨움). atalk listen 은 켜지 않아도 됩니다.")
+		case "codex":
+			lines = append(lines, "메시지 알림은 자동입니다 (쉬고 있을 때 메시지가 오면 ATalk 데몬이 이 세션에 넣어 줌). atalk listen 은 켜지 않아도 됩니다.")
 		}
 		if len(rec.Unfinished) > 0 {
 			lines = append(lines, "처리하다 만 작업:")
@@ -257,24 +260,11 @@ func stop(c *client.Client, kind string, in Input) any {
 	if u.Room != nil {
 		room = *u.Room
 	}
-	parts := []string{fmt.Sprintf("[ATalk] %s 방에서 새 메시지가 왔습니다. 처리하세요.", room)}
-	if p := c.Purpose(room); p != "" {
-		parts = append(parts, p)
+	texts := make([]string, len(fresh))
+	for i, f := range fresh {
+		texts[i] = f.text
 	}
-	if len(u.Messages) > 0 {
-		parts = append(parts, client.FormatMessages(u.Messages, c.Names()))
-	}
-	if len(fresh) > 0 {
-		texts := make([]string, len(fresh))
-		for i, f := range fresh {
-			texts[i] = f.text
-		}
-		parts = append(parts, strings.Join(texts, "\n"))
-	}
-	parts = append(parts, client.HumanRule)
-	parts = append(parts, client.ShowRule)
-	parts = append(parts, "처리 순서는 atalk 스킬의 \"알림을 받았을 때\" 를 따르세요: log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done. result/status 에는 답장하지 마세요. 답할 필요가 없으면 log SEQ skipped.")
-	out := map[string]any{"decision": "block", "reason": strings.Join(parts, "\n\n")}
+	out := map[string]any{"decision": "block", "reason": c.Notice(room, u.Messages, texts, true)}
 	// 사람 화면에도 바로 보이게 (reason 은 모델에게만 간다)
 	var shown []string
 	if d := client.Digest(u.Messages, c.Names()); d != "" {
