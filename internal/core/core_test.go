@@ -498,8 +498,24 @@ func TestHumanToSelf(t *testing.T) {
 	if len(u.Messages) != 1 || !u.Messages[0].ForMe {
 		t.Fatalf("A 가 자기 사람의 메시지를 못 받음: %+v", u.Messages)
 	}
-	// 에이전트가 자기에게 보낸 일반 메시지는 여전히 받지 않는다
+	// 웹에서 방 전체에 "모두 인사해 봐" (통로 = A) → A 도 받고 처리 책임이 있다. B 도 받는다
 	ok(c.Ack(a, m.Seq))
+	ok(c.Ack(b, m.Seq))
+	all := ok(c.Say(a, "w", "모두 인사해 봐"))
+	if u := ok(c.Unread(a, false)); len(u.Messages) != 1 || u.Messages[0].Seq != all.Seq || !u.Messages[0].ForMe {
+		t.Fatalf("A 가 방 전체에 보낸 자기 사람의 메시지를 못 받음: %+v", u.Messages)
+	}
+	if u := ok(c.Unread(b, false)); len(u.Messages) != 1 || !u.Messages[0].ForMe {
+		t.Fatalf("B: %+v", u.Messages)
+	}
+	// 다른 에이전트를 지정한 말("@B 해 줘")은 A 가 받지 않는다
+	ok(c.Ack(a, all.Seq))
+	ok(c.Say(a, "w", "@B 해 줘"))
+	if u := ok(c.Unread(a, false)); len(u.Messages) != 0 {
+		t.Fatalf("B 에게 보낸 말을 A 가 받음: %+v", u.Messages)
+	}
+	// 에이전트가 자기에게 보낸 일반 메시지는 여전히 받지 않는다
+	ok(c.Ack(a, ok(c.GetRoom("w")).LastSeq))
 	ok(c.Post(a, "w", PostInput{Body: "혼잣말", To: []string{a}}))
 	if u := ok(c.Unread(a, false)); len(u.Messages) != 0 {
 		t.Fatalf("에이전트 자기 메시지를 받음: %+v", u.Messages)
