@@ -4,6 +4,7 @@
 // - bash 도구 환경에 ATALK_AGENT 를 넣어서 atalk 스킬/CLI 가 신원을 알게 함
 // - 나에게 온 메시지가 있고 세션이 쉬고 있으면 세션에 직접 넣고, 답변을 result 로 자동 게시
 //   (task/chat 에만 자동 답변 → 에이전트끼리 끝없이 주고받지 않음)
+// - 세션 요청은 데몬의 중계(/relay/<agent>/…)를 거친다: 세션이 다른 PC 데몬에 연결돼 있으면(atalk connect) 그쪽으로
 import type { Plugin } from "@opencode-ai/plugin"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
@@ -54,8 +55,27 @@ async function api(method: string, path: string, body?: unknown, retried = false
     throw e
   }
   const j: any = await res.json().catch(() => ({}))
-  if (!res.ok || j.ok === false) throw new Error(j?.error?.message ?? `HTTP ${res.status}`)
+  if (!res.ok || j.ok === false) {
+    const err: any = new Error(j?.error?.message ?? `HTTP ${res.status}`)
+    err.code = j?.error?.code
+    throw err
+  }
   return j
+}
+
+// apiAs 는 에이전트 대신 데몬을 부른다. 데몬의 중계(/relay/<agent>/…)를 거치므로, 그 에이전트가 다른 PC 데몬에
+// 연결돼 있으면(bash 에서 atalk connect) 이 PC 데몬이 원격 데몬으로 전달하고, 아니면 이 PC 데몬이 처리한다.
+let relayMissing = false // 중계가 없는 예전 데몬이면 직접 부른다
+async function apiAs(agent: string, method: string, path: string, body?: unknown): Promise<any> {
+  if (!relayMissing) {
+    try {
+      return await api(method, `/relay/${enc(agent)}${path}`, body)
+    } catch (e: any) {
+      if (e?.code !== "no_route" || !String(e?.message ?? "").includes("/relay/")) throw e
+      relayMissing = true
+    }
+  }
+  return api(method, path, body)
 }
 
 let starting: Promise<void> | null = null
@@ -102,7 +122,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
-      const reg = await api("POST", "/agents", body)
+      const reg = await apiAs(agentId(sid), "POST", "/agents", body)
       sessions.set(sid, { id: agentId(sid), busy: false, working: false, seen: new Set() })
       // 새 세션은 같은 폴더의 이전 세션 이름표만 이어받는다 (데몬이 등록할 때 처리). 방에는 입장 명령을 받을 때만 들어간다.
       const inherited = !!reg.inherited_from
@@ -111,7 +131,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       // 처음 등록했고 이어받은 이름표도 없으면 기본 이름 (폴더명-세션ID끝자리). 나중에 바꾼 이름은 덮어쓰지 않는다.
       if (reg.created && !inherited && !process.env.ATALK_NAME) {
         const name = `${directory.split(/[\\/]/).filter(Boolean).pop() ?? "opencode"}-${sid.slice(-5)}`
-        await api("PATCH", `/agents/${enc(agentId(sid))}`, { name }).catch(() => {})
+        await apiAs(agentId(sid), "PATCH", `/agents/${enc(agentId(sid))}`, { name }).catch(() => {})
       }
     } catch {
       // 데몬이 없으면 다음 이벤트 때 다시 시도
@@ -133,7 +153,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       const text = (m.parts ?? []).filter((p: any) => p.type === "text" && !p.synthetic && p.text).map((p: any) => p.text).join("\n").trim()
       if (text) texts.unshift(text)
     }
-    if (texts.length) await api("POST", `/agents/${enc(st.id)}/echo`, { texts, reply: true, final: true })
+    if (texts.length) await apiAs(st.id, "POST", `/agents/${enc(st.id)}/echo`, { texts, reply: true, final: true })
   }
 
   // 이벤트에 세션 정보가 없을 때: 서브에이전트(자식 세션)인지 확인하고 등록
@@ -146,7 +166,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
   }
 
   async function notifyPending(st: State) {
-    const p = await api("GET", `/agents/${enc(st.id)}/pending`)
+    const p = await apiAs(st.id, "GET", `/agents/${enc(st.id)}/pending`)
     const lines: string[] = []
     // 방에 없을 때 받은 초대는 자동 수락 (ATALK_AUTO_ACCEPT=0 이면 끔).
     // 이미 방에 있으면 수락하는 순간 그 방에서 나가게 되므로 알림만 한다.
@@ -159,7 +179,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     let inRoom = false
     if (auto && (p.invites ?? []).length) {
       try {
-        inRoom = !!(await api("GET", `/agents/${enc(st.id)}`)).agent?.room
+        inRoom = !!(await apiAs(st.id, "GET", `/agents/${enc(st.id)}`)).agent?.room
       } catch {}
     }
     for (const i of p.invites ?? []) {
@@ -168,7 +188,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       st.seen.add(k)
       if (auto && !inRoom) {
         try {
-          await api("POST", `/rooms/${enc(i.room)}/invites/respond`, { agent: st.id, accept: true })
+          await apiAs(st.id, "POST", `/rooms/${enc(i.room)}/invites/respond`, { agent: st.id, accept: true })
           inRoom = true
           lines.push(`ATalk: ${i.room} 방 초대를 자동 수락했습니다`)
           continue
@@ -195,22 +215,22 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     let room = ""
     try {
       await notifyPending(st)
-      const u = await api("GET", `/agents/${enc(st.id)}/unread`)
+      const u = await apiAs(st.id, "GET", `/agents/${enc(st.id)}/unread`)
       const msgs: Msg[] = u.messages ?? []
       if (!msgs.length || !u.room) return
       room = u.room
       const last = msgs[msgs.length - 1].seq
       work = msgs.filter((m) => m.for_me)
       if (!work.length) {
-        await api("POST", `/agents/${enc(st.id)}/ack`, { seq: last })
+        await apiAs(st.id, "POST", `/agents/${enc(st.id)}/ack`, { seq: last })
         return
       }
       const status: any = await client.session.status()
       const s = status?.data?.[sid]
       if (s && s.type !== "idle") return // 사람이나 다른 작업이 쓰는 중 → 끝나면 session.idle 로 다시 옴
 
-      await api("POST", `/agents/${enc(st.id)}/ack`, { seq: last })
-      const log = (m: Msg, state: string, note = "") => api("POST", `/rooms/${enc(room)}/logs`, { agent: st.id, seq: m.seq, state, note }).catch(() => {})
+      await apiAs(st.id, "POST", `/agents/${enc(st.id)}/ack`, { seq: last })
+      const log = (m: Msg, state: string, note = "") => apiAs(st.id, "POST", `/rooms/${enc(room)}/logs`, { agent: st.id, seq: m.seq, state, note }).catch(() => {})
       for (const m of work) await log(m, "received", "플러그인이 수신")
 
       const asks = work.filter((m) => m.type === "task" || m.type === "chat")
@@ -218,11 +238,11 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       const askers = [...new Set(asks.map((m) => m.from))]
       const names: Record<string, string> = {}
       try {
-        for (const a of (await api("GET", "/agents")).agents ?? []) names[a.id] = a.name
+        for (const a of (await apiAs(st.id, "GET", "/agents")).agents ?? []) names[a.id] = a.name
       } catch {}
       let purpose = ""
       try {
-        const d = (await api("GET", `/rooms/${enc(room)}`)).room?.description
+        const d = (await apiAs(st.id, "GET", `/rooms/${enc(room)}`)).room?.description
         if (d) purpose = `[${room} 방 목적] ${d}\n`
       } catch {}
       let prompt = `[ATalk] ${room} 방에서 새 메시지가 왔습니다. 나(${st.id})에게 온 메시지를 처리하세요.\n${purpose}\n${format(msgs, names)}\n\n${HUMAN_RULE}\n\n`
@@ -247,13 +267,13 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       }
       let to = askers
       try {
-        const members = new Set(((await api("GET", `/rooms/${enc(room)}`)).room?.members ?? []).map((m: any) => m.agent))
+        const members = new Set(((await apiAs(st.id, "GET", `/rooms/${enc(room)}`)).room?.members ?? []).map((m: any) => m.agent))
         to = askers.filter((a) => members.has(a))
       } catch {}
-      const posted = await api("POST", `/rooms/${enc(room)}/messages`, { agent: st.id, type: "result", to, reply_to: replyTo, body: reply })
+      const posted = await apiAs(st.id, "POST", `/rooms/${enc(room)}/messages`, { agent: st.id, type: "result", to, reply_to: replyTo, body: reply })
       for (const m of work) await log(m, "done", `결과 #${posted.message?.seq ?? "?"}`)
     } catch (e: any) {
-      if (room) for (const m of work) await api("POST", `/rooms/${enc(room)}/logs`, { agent: st.id, seq: m.seq, state: "failed", note: String(e?.message ?? e).slice(0, 300) }).catch(() => {})
+      if (room) for (const m of work) await apiAs(st.id, "POST", `/rooms/${enc(room)}/logs`, { agent: st.id, seq: m.seq, state: "failed", note: String(e?.message ?? e).slice(0, 300) }).catch(() => {})
     } finally {
       st.working = false
     }
@@ -290,7 +310,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
           await track(sid)
           const st = sessions.get(sid)
           if (!st) continue
-          await api("POST", `/agents/${enc(st.id)}/activate`, {}).catch(() => {})
+          await apiAs(st.id, "POST", `/agents/${enc(st.id)}/activate`, {}).catch(() => {})
           return
         } catch {}
       }
@@ -316,12 +336,12 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
 
   // 사람이 직접 입력한 말을 방에 올린다. 앞쪽 "@이름" 은 받는 대상 (이름 또는 id).
   async function sendHuman(agent: string, text: string): Promise<string> {
-    const me = (await api("GET", `/agents/${enc(agent)}`)).agent
+    const me = (await apiAs(agent, "GET", `/agents/${enc(agent)}`)).agent
     if (!me?.room) throw new Error("대화방에 들어가 있지 않습니다 (/atalk join ROOM)")
     const room = me.room
     const names: Record<string, string> = {}
-    for (const a of (await api("GET", "/agents")).agents ?? []) names[a.id] = a.name
-    const msg = (await api("POST", `/rooms/${enc(room)}/say`, { agent, text })).message
+    for (const a of (await apiAs(agent, "GET", "/agents")).agents ?? []) names[a.id] = a.name
+    const msg = (await apiAs(agent, "POST", `/rooms/${enc(room)}/say`, { agent, text })).message
     return `[ATalk] ${room} #${msg.seq} → ${msg.to?.length ? msg.to.map((id: string) => names[id] ?? id).join(", ") : "방 전체"}\n${msg.human}@${names[agent] ?? agent}: ${msg.body}`
   }
 
@@ -356,7 +376,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             const st = sessions.get(p.sessionID)
             if (st) {
               const busy = p.status?.type !== "idle"
-              if (busy !== st.busy) api("POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
+              if (busy !== st.busy) apiAs(st.id, "POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
               st.busy = busy
             } else await trackById(p.sessionID)
             break
@@ -364,7 +384,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
           case "session.idle": {
             const st = sessions.get(p.sessionID)
             if (st) {
-              if (st.busy) api("POST", `/agents/${enc(st.id)}/activity`, { busy: false }).catch(() => {})
+              if (st.busy) apiAs(st.id, "POST", `/agents/${enc(st.id)}/activity`, { busy: false }).catch(() => {})
               st.busy = false
               if (st.echoPending) {
                 st.echoPending = false
@@ -378,7 +398,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             const st = sessions.get(p.info?.id)
             if (st) {
               sessions.delete(p.info.id)
-              await api("POST", `/agents/${enc(st.id)}/away`, { reason: "session_deleted" }).catch(() => {})
+              await apiAs(st.id, "POST", `/agents/${enc(st.id)}/away`, { reason: "session_deleted" }).catch(() => {})
             }
             break
           }
@@ -395,7 +415,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
         // 사람이 입력함 → 이 세션 등록(이전 세션이면 그때 있던 방으로 복귀) + 임시 세션 확정
         await trackById(input.sessionID)
         const st0 = sessions.get(input.sessionID)
-        if (st0) await api("POST", `/agents/${enc(st0.id)}/activate`, {}).catch(() => {})
+        if (st0) await apiAs(st0.id, "POST", `/agents/${enc(st0.id)}/activate`, {}).catch(() => {})
       }
       if (!raw.startsWith(HUMAN_PREFIX)) {
         // 사람이 입력한 말을 방에 대화 기록으로 남긴다 (알림 없음). 플러그인이 넣은 "[ATalk]" 메시지·/명령은 빼고.
@@ -403,7 +423,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
           const st = sessions.get(input.sessionID)
           if (st) {
             st.echoPending = true // 응답이 끝나면(session.idle) 그 응답도 기록
-            api("POST", `/agents/${enc(st.id)}/echo`, { text: raw }).catch(() => {})
+            apiAs(st.id, "POST", `/agents/${enc(st.id)}/echo`, { text: raw }).catch(() => {})
           }
         }
         return
@@ -428,7 +448,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     },
     dispose: async () => {
       clearInterval(timer)
-      for (const st of sessions.values()) await api("POST", `/agents/${enc(st.id)}/away`, { reason: "opencode_exit" }).catch(() => {})
+      for (const st of sessions.values()) await apiAs(st.id, "POST", `/agents/${enc(st.id)}/away`, { reason: "opencode_exit" }).catch(() => {})
     },
   }
 }

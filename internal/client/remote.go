@@ -119,8 +119,8 @@ func short(s string) string {
 	return s
 }
 
-// remoteCard 는 등록 정보를 원격용으로 바꾼다: 경로·PID 는 보내지 않고 이 PC 정보와 작업 위치 ID 를 보낸다.
-func (rc *RemoteConn) remoteCard(in core.RegisterInput) core.RegisterInput {
+// RemoteCard 는 등록 정보를 원격용으로 바꾼다: 경로·PID 는 보내지 않고 이 PC 정보와 작업 위치 ID 를 보낸다.
+func (rc *RemoteConn) RemoteCard(in core.RegisterInput) core.RegisterInput {
 	h := rc.Host
 	in.Host = &h
 	if in.Cwd != nil && *in.Cwd != "" {
@@ -172,7 +172,7 @@ func Pair(p PairInput) (*RemoteConn, core.AgentView, error) {
 	}
 	card := p.Card
 	card.Cwd = &p.Cwd
-	card = rc.remoteCard(card)
+	card = rc.RemoteCard(card)
 	c := newPinned(u, fp)
 	var out struct {
 		Agent   core.AgentView `json:"agent"`
