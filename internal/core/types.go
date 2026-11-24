@@ -49,7 +49,11 @@ type Membership struct {
 	LastSeen   string  `json:"last_seen"`
 	AwaySince  *string `json:"away_since"`
 	AwayReason *string `json:"away_reason"`
-	// EchoOpen 은 응답을 기록 중인 CLI 입력 기록의 seq (그 턴이 끝나면 0). 멤버십과 함께 저장되어 데몬을 다시 시작해도 유지된다.
+	// EchoQueue 는 응답을 기록 중인 CLI 입력 기록의 seq 들 (오래된 것부터). 그 턴이 끝나면 빠진다.
+	// 앞선 턴이 진행 중일 때 다음 입력이 대기열에 들어와도 앞선 입력의 응답이 계속 기록되도록 큐로 둔다.
+	// 멤버십과 함께 저장되어 데몬을 다시 시작해도 유지된다.
+	EchoQueue []int `json:"echo_queue,omitempty"`
+	// EchoOpen 은 예전 형식(한 칸). 읽을 때 EchoQueue 로 옮긴다.
 	EchoOpen int `json:"echo_open,omitempty"`
 }
 

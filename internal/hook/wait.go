@@ -69,6 +69,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		if c.Health() != nil {
 			continue
 		}
+		flush(c, id, 0) // 데몬이 없을 때 쌓인 CLI 기록을 보낸다 (outbox.go)
 		var lines []string
 		if a, err := c.Agent(id); err == nil {
 			room := ""

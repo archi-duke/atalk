@@ -221,6 +221,21 @@ func (c *Client) EchoReply(id string, texts []string, final bool, prompt string)
 	return c.call("POST", "/agents/"+esc(id)+"/echo", map[string]any{"texts": texts, "reply": true, "final": final, "prompt": prompt}, nil, 0)
 }
 
+// Echo 는 CLI 입력·응답 기록 하나를 보낸다 (훅의 outbox 가 쓴다). eid 가 같은 기록은 데몬이 한 번만 남긴다.
+func (c *Client) Echo(id string, e EchoEvent) error {
+	return c.call("POST", "/agents/"+esc(id)+"/echo", e, nil, 0)
+}
+
+// EchoEvent 는 /agents/:id/echo 본문.
+type EchoEvent struct {
+	EID    string   `json:"eid,omitempty"`
+	Text   string   `json:"text,omitempty"`   // CLI 입력
+	Reply  bool     `json:"reply,omitempty"`  // 응답
+	Texts  []string `json:"texts,omitempty"`  // 응답: 이번 턴에 지금까지 쓴 문장들
+	Final  *bool    `json:"final,omitempty"`  // 응답: 턴이 끝남 (없으면 true)
+	Prompt string   `json:"prompt,omitempty"` // 응답: 이번 턴을 시작한 사람 입력
+}
+
 // Activity 는 에이전트가 일을 시작(busy=true)·끝냈음(false)을 알린다 (작업 중 표시).
 func (c *Client) Activity(id string, busy bool) error {
 	return c.call("POST", "/agents/"+esc(id)+"/activity", map[string]any{"busy": busy}, nil, 0)
