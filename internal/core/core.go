@@ -2025,9 +2025,35 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 			out.Human = c.humanOf(agent)
 		}
 		msg = c.appendMessage(r, out)
+		c.busyAckLocked(r, msg)
 		return nil
 	})
 	return
+}
+
+// BusyAck 는 작업 중인 에이전트가 메시지를 받았을 때 데몬이 그 에이전트 이름으로 바로 올리는 상태 답장.
+const BusyAck = "📥 받았습니다 — 지금 하던 작업을 마치는 대로 순서대로 처리하겠습니다."
+
+// busyAckLocked: 작업 중(긴 턴)인 에이전트는 알림을 그 턴이 끝난 뒤에야 받으므로, 나를 지정해 보낸 chat·task 에는
+// 데몬이 바로 "받았습니다" 상태 답장을 올려 보낸 쪽(특히 사람)이 기다리는지 알게 한다.
+// 방 전체에 보낸 에이전트 메시지에는 하지 않는다 (작업 중인 멤버마다 답장이 쏟아지지 않게). 상태 메시지에는 아무도 답하지 않는다.
+func (c *Atalk) busyAckLocked(r string, msg Message) {
+	if msg.Type != "chat" && msg.Type != "task" {
+		return
+	}
+	targets := slices.Clone(msg.To)
+	if len(targets) == 0 && msg.Human != "" {
+		targets = []string{msg.From} // 내 사람이 방 전체에 쓴 말은 나에게도 온다 (unreadLocked)
+	}
+	for _, t := range targets {
+		if t == msg.From && msg.Human == "" {
+			continue // 에이전트가 자기에게 보낸 말
+		}
+		if m, ok := c.memberships[t]; !ok || m.Room != r || !c.isBusy(t) {
+			continue
+		}
+		c.appendMessage(r, Message{From: t, Type: "status", ReplyTo: ptr(msg.Seq), Body: BusyAck})
+	}
 }
 
 // systemTag 는 입력 전체가 태그 블록 하나인지 본다: <task-notification>…</task-notification>, <bash-input>…</bash-input> 등.
