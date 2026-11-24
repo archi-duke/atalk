@@ -55,6 +55,7 @@ type Atalk struct {
 	isAlive   func(int) bool
 	machineID string
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
+	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
 	now       func() time.Time
 
 	mu          sync.Mutex
@@ -1673,6 +1674,9 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		} else {
 			delete(c.busy, agent)
 		}
+		if busy != was { // 작업 중 구간이 시작·끝남 → 자동 수신 확인을 다시 보낼 수 있게
+			delete(c.busyAcked, agent)
+		}
 		if was != busy {
 			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "activity", "busy": busy}})
 		}
@@ -1686,6 +1690,7 @@ func (c *Atalk) MarkAway(agent, reason string) error {
 			return err
 		}
 		delete(c.busy, agent)
+		delete(c.busyAcked, agent)
 		if reason == "" {
 			reason = "away"
 		}
@@ -2039,8 +2044,14 @@ const BusyAck = "📥 받았습니다 — 지금 하던 작업을 마치는 대�
 // busyAckLocked: 작업 중(긴 턴)인 에이전트는 알림을 그 턴이 끝난 뒤에야 받으므로, 나를 지정해 보낸 chat·task 에는
 // 데몬이 바로 "받았습니다" 상태 답장을 올려 보낸 쪽(특히 사람)이 기다리는지 알게 한다.
 // 방 전체에 보낸 에이전트 메시지에는 하지 않는다 (작업 중인 멤버마다 답장이 쏟아지지 않게). 상태 메시지에는 아무도 답하지 않는다.
+// 답장은 보낸 쪽에게만 간다 (방 전체로 가면 쉬던 다른 에이전트들이 깨어나 토큰을 쓴다).
+// 같은 보낸 이에게는 한 번의 작업 중 구간에 한 번만 (연달아 보내도 답장이 쌓이지 않게). 방 메시지 한도를 넘기지 않는다.
 func (c *Atalk) busyAckLocked(r string, msg Message) {
 	if msg.Type != "chat" && msg.Type != "task" {
+		return
+	}
+	room, ok := c.rooms[r]
+	if !ok {
 		return
 	}
 	targets := slices.Clone(msg.To)
@@ -2054,7 +2065,17 @@ func (c *Atalk) busyAckLocked(r string, msg Message) {
 		if m, ok := c.memberships[t]; !ok || m.Room != r || !c.isBusy(t) {
 			continue
 		}
-		c.appendMessage(r, Message{From: t, Type: "status", ReplyTo: ptr(msg.Seq), Body: BusyAck})
+		if c.busyAcked[t][msg.From] || c.lastSeq[r] >= room.Policy.MaxMessages {
+			continue
+		}
+		if c.busyAcked == nil {
+			c.busyAcked = map[string]map[string]bool{}
+		}
+		if c.busyAcked[t] == nil {
+			c.busyAcked[t] = map[string]bool{}
+		}
+		c.busyAcked[t][msg.From] = true
+		c.appendMessage(r, Message{From: t, Type: "status", To: []string{msg.From}, ReplyTo: ptr(msg.Seq), Body: BusyAck})
 	}
 }
 

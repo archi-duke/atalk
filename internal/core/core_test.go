@@ -1358,6 +1358,59 @@ func TestBusyAck(t *testing.T) {
 	}
 }
 
+// 자동 수신 확인은 보낸 쪽에게만 가고(방 전체로 가서 다른 에이전트를 깨우지 않음), 같은 보낸 이에게는 작업 중 구간마다 한 번만.
+func TestBusyAckTargetAndOnce(t *testing.T) {
+	c := newEnv(t).core()
+	noAutoAccept(c)
+	a, b, d := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	for _, x := range []string{b, d} {
+		ok(c.RequestJoin(x, "r", ""))
+		ok(c.RespondRequest(a, "r", x, true))
+	}
+	ok(c.Unread(d, true))
+	check(t, c.SetActivity(b, true))
+	m1 := ok(c.Post(a, "r", PostInput{Body: "하나", To: []string{b}}))
+	ok(c.Post(a, "r", PostInput{Body: "둘", To: []string{b}}))
+	var acks []Message
+	for _, m := range ok(c.ReadMessages("r", m1.Seq-1, 1000)) {
+		if m.Type == "status" && m.Body == BusyAck {
+			acks = append(acks, m)
+		}
+	}
+	if len(acks) != 1 || len(acks[0].To) != 1 || acks[0].To[0] != a || acks[0].From != b {
+		t.Fatalf("보낸 쪽에게 한 번만: %+v", acks)
+	}
+	if u := ok(c.Unread(d, false)); slices.ContainsFunc(u.Messages, func(m InboxMessage) bool { return m.ForMe && m.Type == "status" }) {
+		t.Fatal("다른 멤버(d)에게는 자동 수신 확인이 가지 않아야 함")
+	}
+	// 작업이 끝나고 다시 시작하면 또 보낼 수 있음
+	check(t, c.SetActivity(b, false))
+	check(t, c.SetActivity(b, true))
+	m3 := ok(c.Post(a, "r", PostInput{Body: "셋", To: []string{b}}))
+	n := 0
+	for _, m := range ok(c.ReadMessages("r", m3.Seq, 1000)) {
+		if m.Type == "status" && m.Body == BusyAck {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatal("새 작업 중 구간에는 다시 한 번")
+	}
+	// 내 사람이 웹에서 쓴 말에 대한 자동 수신 확인(From=To=나, 사람 표시 없음)은 나도 깨우지 않는다
+	ok(c.Unread(b, true))
+	h := ok(c.Say(b, "r", "지금 뭐 해?"))
+	u := ok(c.Unread(b, false))
+	for _, m := range u.Messages {
+		if m.Type == "status" && m.ReplyTo != nil && *m.ReplyTo == h.Seq {
+			t.Fatal("내 사람 말에 대한 자동 수신 확인이 나를 깨우면 안 됨")
+		}
+	}
+	if !slices.ContainsFunc(u.Messages, func(m InboxMessage) bool { return m.Seq == h.Seq && m.ForMe }) {
+		t.Fatal("내 사람의 말 자체는 나에게 와야 함")
+	}
+}
+
 // 작업 중 표시: 훅·플러그인이 알린 대로, 방에 없어도(CLI 에서 일함) 보이고, 끝나거나 15분 신호가 없거나 자리 비움이면 꺼진다.
 func TestActivityBusy(t *testing.T) {
 	e := newEnv(t)
