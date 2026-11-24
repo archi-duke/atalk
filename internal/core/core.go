@@ -2406,8 +2406,9 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 		if x.Echo { // CLI 입력 기록은 대화 기록용 — 누구에게도 전달하지 않는다
 			continue
 		}
-		// 보통 내가 보낸 메시지는 받지 않지만, 내 사람이 나를 지정해 쓴 말(대장@나 → 나)은 받는다
-		toSelf := x.From == agent && x.Human != "" && slices.Contains(x.To, agent)
+		// 보통 내가 보낸 메시지는 받지 않지만, 내 사람이 쓴 말(대장@나)은 받는다 — 나를 지정했거나 방 전체에 보낸 것.
+		// (방 전체에 보낸 말을 빼면 "모두 인사해 봐" 같은 지시가 그 사람의 에이전트에게만 전달되지 않는다)
+		toSelf := x.From == agent && x.Human != "" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 		if x.Seq > cursor && (x.From != agent || toSelf) {
 			forMe := x.Type != "system" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 			msgs = append(msgs, InboxMessage{Message: x, ForMe: forMe})
