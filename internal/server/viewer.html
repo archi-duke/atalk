@@ -527,7 +527,7 @@ function avatar(m) {
 }
 // 에이전트(아바타·이름·멤버·목록)를 Ctrl+클릭(맥은 ⌘+클릭) → 그 에이전트의 CLI 창을 맨 앞으로 (이 PC 에서 실행 중일 때)
 // 깨우기: 이 PC 의 Claude Code·opencode·Codex 세션. 꺼져 있으면 새 터미널로 이전 세션을 이어서 열고, 떠 있으면 창을 앞으로
-const canWake = (x) => x.local && !x.lobby && (x.kind === "claude-code" || x.kind === "opencode" || x.kind === "codex") && (x.status === "offline" || x.status === "waiting" || x.status === "away");
+const canWake = (x) => x.local && !x.lobby && !x.shared && (x.kind === "claude-code" || x.kind === "opencode" || x.kind === "codex") && (x.status === "offline" || x.status === "waiting" || x.status === "away");
 async function wakeAgent(id, btn) {
   if (btn) btn.disabled = true;
   try {
@@ -624,7 +624,7 @@ function renderSide() {
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
       return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
+        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : x.shared ? '<span title="Codex 공유 백그라운드 서버에서 실행 중: 창을 찾을 수 없음 (codex --no-daemon 으로 열면 됨)">창 없음 · ' + (x.busy ? "작업 중" : STATUS_KO[x.status] || x.status) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
         '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (canWake(x) ? '<button class="wake" data-wake="' + esc(x.id) + '" title="' + (x.status === "offline" || x.status === "away" ? "이 세션을 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서) 창을 앞으로" : "이 에이전트의 CLI 창을 앞으로") + '">깨우기</button>' : "") +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +

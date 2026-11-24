@@ -22,3 +22,18 @@ func list() (map[int]Proc, error) {
 	}
 	return out, nil
 }
+
+// exePath 는 프로세스 실행 파일 경로. 모르면 "".
+func exePath(pid int) string {
+	h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return ""
+	}
+	defer windows.CloseHandle(h)
+	buf := make([]uint16, windows.MAX_LONG_PATH)
+	n := uint32(len(buf))
+	if windows.QueryFullProcessImageName(h, 0, &buf[0], &n) != nil {
+		return ""
+	}
+	return windows.UTF16ToString(buf[:n])
+}

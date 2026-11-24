@@ -540,8 +540,8 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 				card.Cwd = in.Cwd
 			}
 			// 살아 있는 PID 는 유지한다 (훅이 찾은 정확한 PID 를 MCP 등이 덮어쓰지 않게)
-			if in.Pid != nil && *in.Pid > 0 && (card.Pid == nil || !c.isAlive(*card.Pid)) {
-				card.Pid = in.Pid
+			if in.Pid != nil && *in.Pid > 0 && (card.Pid == nil || !c.isAlive(*card.Pid) || (card.Shared && !in.Shared)) { // 창 PID 가 공유 서버 PID 보다 우선
+				card.Pid, card.Shared = in.Pid, in.Shared
 			}
 		} else {
 			card = AgentCard{
@@ -559,7 +559,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 				card.Capabilities = slices.Clone(*in.Capabilities)
 			}
 			if in.Pid != nil && *in.Pid > 0 {
-				card.Pid = in.Pid
+				card.Pid, card.Shared = in.Pid, in.Shared
 			}
 		}
 		if card.Capabilities == nil {
