@@ -171,6 +171,9 @@ func Skill(p Paths) (string, error) {
 	return p.skillFile(), writeFile(p.skillFile(), render(skillTmpl, "atalk"))
 }
 
+// waitHookTimeout 은 대기 훅(asyncRewake)의 제한 시간(초). atalk hook claude-code wait 의 최대 대기(12시간)와 같게.
+const waitHookTimeout = 12 * 60 * 60
+
 // hookEvents 는 Claude Code settings.json 에 넣는 훅. async 는 백그라운드 + asyncRewake (끝날 때 종료 코드 2 면 쉬는 Claude 를 깨움).
 var hookEvents = []struct {
 	event, arg    string
@@ -225,6 +228,9 @@ func Claude(p Paths) ([]string, error) {
 			}
 			if h.rewake {
 				entry["asyncRewake"] = true
+				// 대기 훅은 몇 시간이고 기다려야 한다. 제한 시간을 주지 않으면 Claude Code 기본값(10분)에 끝나서
+				// 쉬고 있는 세션이 그 뒤로 오는 메시지에 깨어나지 못하고, 원격 연결은 하트비트가 끊겨 자리 비움이 됐다
+				entry["timeout"] = waitHookTimeout
 			}
 			list, _ := hooks[h.event].([]any)
 			hooks[h.event] = append(list, map[string]any{"hooks": []any{entry}})

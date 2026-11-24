@@ -68,6 +68,26 @@ func SaveConn(rc *RemoteConn) error {
 	return os.WriteFile(connFile(rc.Agent), b, 0o600)
 }
 
+// Conns 는 이 PC 에서 다른 PC 데몬에 연결된 에이전트들.
+func Conns() []*RemoteConn {
+	var out []*RemoteConn
+	files, _ := filepath.Glob(filepath.Join(paths.RemoteConnDir(), "*.json"))
+	for _, f := range files {
+		if strings.HasSuffix(f, ".lobby.json") {
+			continue
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		var rc RemoteConn
+		if json.Unmarshal(b, &rc) == nil && rc.URL != "" && rc.Token != "" && rc.Fingerprint != "" {
+			out = append(out, &rc)
+		}
+	}
+	return out
+}
+
 // RemoveConn 은 연결 정보를 지운다.
 func RemoveConn(agent string) error {
 	err := os.Remove(connFile(agent))
