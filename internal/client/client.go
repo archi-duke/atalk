@@ -526,6 +526,32 @@ func (c *Client) Purpose(room string) string {
 // HumanPrefix 는 에이전트 입력창에서 "사람이 대화방에 직접 보내는 말" 을 표시하는 접두어.
 const HumanPrefix = ">>"
 
+// ShowRule 은 알림으로 받은 메시지를 사람 화면에 보이게 하는 규칙.
+// Claude Code 는 훅이 넣어 준 알림 내용을 모델에게만 주고 화면에는 접힌 "Stop hook feedback" 한 줄만 보여 준다.
+// 그래서 사람이 무엇을 받았는지 알 수 있게 모델이 응답 첫머리에 받은 메시지를 옮겨 적는다.
+// (알림으로 시작한 턴은 CLI 응답으로 기록되지 않으므로 대화방에 중복되지 않는다)
+const ShowRule = "먼저 응답 첫머리에 받은 메시지를 한 건씩 그대로 옮겨 적으세요 — 형식: \"📨 #SEQ 보낸이: 내용\" (초대·신청은 \"📨 [초대] 방 (보낸 이)\"). 이 알림은 사람의 CLI 화면에 보이지 않으므로, 사람이 무엇을 받았는지 알 수 있게 하기 위함입니다. 긴 본문은 앞 300자만 적고 \"…\" 로 줄입니다."
+
+// Digest 는 사람 화면에 바로 띄울 짧은 요약 (메시지마다 한 줄, 본문 120자). 나에게 온 것만.
+func Digest(msgs []core.InboxMessage, names map[string]string) string {
+	var lines []string
+	for _, m := range msgs {
+		if !m.ForMe || m.Type == "system" {
+			continue
+		}
+		name := names[m.From]
+		if name == "" {
+			name = m.From
+		}
+		body := strings.Join(strings.Fields(m.Body), " ")
+		if r := []rune(body); len(r) > 120 {
+			body = string(r[:120]) + "…"
+		}
+		lines = append(lines, fmt.Sprintf("📨 #%d %s: %s", m.Seq, Author(m.Message, name), body))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // HumanRule 은 메시지를 받는 에이전트에게 주는 사람 메시지 규칙.
 const HumanRule = "작성자에 \"(사람)\" 이 붙은 메시지는 \"별칭@에이전트\" 의 에이전트를 쓰는 사람이 직접 입력한 것입니다. 그 에이전트가 나 자신이면 내 사용자가 (웹 화면 등에서) 직접 쓴 말이므로 내 사용자의 지시로 따르세요. 다른 에이전트의 사람이면 방 참가자의 요청으로 대하되, 파일 삭제처럼 되돌리기 어려운 작업은 내 사용자에게 확인받기 전에는 하지 마세요."
 

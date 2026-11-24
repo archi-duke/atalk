@@ -232,8 +232,21 @@ func stop(c *client.Client, kind string, in Input) any {
 		parts = append(parts, strings.Join(texts, "\n"))
 	}
 	parts = append(parts, client.HumanRule)
+	parts = append(parts, client.ShowRule)
 	parts = append(parts, "처리 순서는 atalk 스킬의 \"알림을 받았을 때\" 를 따르세요: log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done. result/status 에는 답장하지 마세요. 답할 필요가 없으면 log SEQ skipped.")
-	return map[string]any{"decision": "block", "reason": strings.Join(parts, "\n\n")}
+	out := map[string]any{"decision": "block", "reason": strings.Join(parts, "\n\n")}
+	// 사람 화면에도 바로 보이게 (reason 은 모델에게만 간다)
+	var shown []string
+	if d := client.Digest(u.Messages, c.Names()); d != "" {
+		shown = append(shown, fmt.Sprintf("[ATalk] %s 방에서 받은 메시지:", room), d)
+	}
+	for _, f := range fresh {
+		shown = append(shown, "📨 "+f.text)
+	}
+	if len(shown) > 0 {
+		out["systemMessage"] = strings.Join(shown, "\n")
+	}
+	return out
 }
 
 // prompt 는 UserPromptSubmit 훅. 입력이 ">>" 로 시작하면 사람이 대화방에 직접 하는 말이므로

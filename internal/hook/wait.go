@@ -139,6 +139,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		lines = append(lines, "",
 			"atalk 스킬의 \"알림을 받았을 때\" 규칙대로 처리하세요: unread --ack → log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done.",
 			"(메시지 알림은 자동입니다 — 응답을 마칠 때마다 다시 기다립니다. atalk listen 은 켜지 않아도 됩니다.)",
+			client.ShowRule,
 			client.HumanRule)
 		fmt.Fprintln(stderr, strings.Join(lines, "\n"))
 		return 2
