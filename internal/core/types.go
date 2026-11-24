@@ -173,6 +173,8 @@ type AgentView struct {
 	Room   *string `json:"room"`
 	Role   *string `json:"role"`
 	Intro  bool    `json:"intro,omitempty"` // 새로 들어와 아직 인사·자기소개 전 (Membership.Intro)
+	// Lobby 는 원격 대기실에 있으면 확인 숫자·주소 (이 PC 화면용, 원격으로는 보내지 않음). lobby.go
+	Lobby *LobbyInfo `json:"lobby,omitempty"`
 }
 
 type RoomMember struct {

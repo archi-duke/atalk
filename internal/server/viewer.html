@@ -624,8 +624,8 @@ function renderSide() {
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
       return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
-        '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
+        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
+        '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (canWake(x) ? '<button class="wake" data-wake="' + esc(x.id) + '" title="' + (x.status === "offline" ? "이 세션을 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서) 창을 앞으로" : "이 에이전트의 CLI 창을 앞으로") + '">깨우기</button>' : "") +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
         (openAgent === x.id ? agentDetail(x) : "");
@@ -874,7 +874,7 @@ async function renderInvite() {
   const ST = { in_room: "다른 방에 있음", away: "자리 비움", waiting: "대기" };
   $("#invList").innerHTML = cands.map((a) =>
     '<div class="irow"><span class="ist ' + (a.status === "waiting" ? "ok" : "warn") + '">' + esc([...a.name][0] || "?") + "</span><div><b>" + esc(a.name) + "</b>" +
-    '<div class="note">' + esc(a.kind) + " · " + (ST[a.status] || a.status) + (a.room ? " (" + esc(a.room) + ")" : "") + "</div></div>" +
+    '<div class="note">' + esc(a.kind) + " · " + (a.lobby ? "대기실(원격 " + esc(a.host?.name || "") + ") · 확인 숫자 <b>" + esc(a.lobby.confirm) + "</b>" + (a.lobby.ip ? " · " + esc(a.lobby.ip) : "") : (ST[a.status] || a.status) + (a.room ? " (" + esc(a.room) + ")" : "")) + "</div></div>" +
     (invited.has(a.id) ? '<span class="note">초대함</span>' : '<button type="button" class="btn2" data-inv="' + esc(a.id) + '">초대</button>') + "</div>").join("") ||
     '<div class="note">초대할 수 있는 켜진 에이전트가 없습니다. 에이전트를 먼저 실행하세요.</div>';
   $("#invPending").textContent = pendingInv.length ? pendingInv.map((i) => nameOf(i.agent) + " (보낸 이 " + (agents[i.by]?.name || i.by) + ")").join(", ") : "없음";
@@ -885,7 +885,12 @@ async function renderInvite() {
     '<div class="note">없음</div>';
   const room = encodeURIComponent(r.room_id);
   const act = (fn) => async (e) => { e.target.disabled = true; try { await fn(e.target); $("#invMsg").textContent = ""; } catch (err) { $("#invMsg").textContent = err.message; } renderInvite(); loadChat(false); };
-  $("#invList").querySelectorAll("[data-inv]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/invites", { target: t.dataset.inv }))));
+  $("#invList").querySelectorAll("[data-inv]").forEach((b) => (b.onclick = (e) => {
+    const lb = agents[b.dataset.inv]?.lobby;
+    // 대기실(원격) 에이전트: 초대하면 토큰이 발급되므로, 상대 화면의 확인 숫자와 같은지 먼저 확인한다
+    if (lb && !confirm("확인 숫자 " + lb.confirm + " 가 상대 PC 화면(atalk connect 결과)의 숫자와 같나요?\n같을 때만 초대하세요. 다르면 다른 사람이거나 중간에 끼어든 연결입니다.")) return;
+    return act((t) => send("POST", "/rooms/" + room + "/invites", { target: t.dataset.inv }))(e);
+  }));
   $("#reqList").querySelectorAll("[data-ok]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/requests/respond", { target: t.dataset.ok, approve: true }))));
   $("#reqList").querySelectorAll("[data-no]").forEach((b) => (b.onclick = act((t) => send("POST", "/rooms/" + room + "/requests/respond", { target: t.dataset.no, approve: false }))));
 }

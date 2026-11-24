@@ -1321,6 +1321,43 @@ func TestLocalAutoAcceptInvite(t *testing.T) {
 	}
 }
 
+// 작업 중인 에이전트에게 지정해 보낸 chat·task 에는 데몬이 바로 "받았습니다" 상태 답장. 쉬고 있거나 방 전체 에이전트 메시지면 없음.
+func TestBusyAck(t *testing.T) {
+	c := newEnv(t).core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b)) // 같은 PC 대기 중 → 바로 입장
+	acks := func(seq int) (n int) {
+		for _, m := range ok(c.ReadMessages("r", 0, 1000)) {
+			if m.Type == "status" && m.ReplyTo != nil && *m.ReplyTo == seq && m.Body == BusyAck {
+				n++
+			}
+		}
+		return
+	}
+	// 쉬고 있으면 없음
+	m := ok(c.Post(a, "r", PostInput{Body: "해 줘", To: []string{b}}))
+	if acks(m.Seq) != 0 {
+		t.Fatal("쉬고 있으면 자동 답장 없음")
+	}
+	check(t, c.SetActivity(b, true))
+	m = ok(c.Post(a, "r", PostInput{Type: "task", Body: "이것도", To: []string{b}}))
+	if acks(m.Seq) != 1 {
+		t.Fatal("작업 중이면 자동 답장")
+	}
+	// 방 전체에 보낸 에이전트 메시지, result 에는 없음
+	if m = ok(c.Post(a, "r", PostInput{Body: "모두에게"})); acks(m.Seq) != 0 {
+		t.Fatal("방 전체 에이전트 메시지에는 없음")
+	}
+	if m = ok(c.Post(a, "r", PostInput{Type: "result", Body: "결과", To: []string{b}})); acks(m.Seq) != 0 {
+		t.Fatal("result 에는 없음")
+	}
+	// 내 사람이 웹에서 나에게(또는 방 전체에) 쓴 말
+	if m = ok(c.Say(b, "r", "지금 뭐 해?")); acks(m.Seq) != 1 {
+		t.Fatal("내 사람의 말에는 자동 답장")
+	}
+}
+
 // 작업 중 표시: 훅·플러그인이 알린 대로, 방에 없어도(CLI 에서 일함) 보이고, 끝나거나 15분 신호가 없거나 자리 비움이면 꺼진다.
 func TestActivityBusy(t *testing.T) {
 	e := newEnv(t)
