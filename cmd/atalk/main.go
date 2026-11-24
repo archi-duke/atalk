@@ -484,7 +484,7 @@ func main() {
 		}
 		check(err)
 		if cmd == "install" {
-			done = append(done, "", "새로 시작하는 세션부터 적용됩니다. 로그인 시 데몬 자동 시작: atalk autostart on")
+			done = append(done, "", "새로 시작하는 세션부터 적용됩니다. 이미 열려 있는 Claude Code·opencode 세션은 닫고 다시 열어야 바뀐 훅·플러그인이 확실히 적용됩니다 (Claude 는 claude --resume 으로 이어서 열면 그때 있던 방으로 돌아감).", "로그인 시 데몬 자동 시작: atalk autostart on")
 		}
 		out(done, strings.Join(done, "\n"))
 
