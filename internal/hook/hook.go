@@ -10,6 +10,7 @@ package hook
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,6 +58,16 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	healthy := c.Health() == nil
 	if healthy {
 		flush(c, id, 0) // 전에 못 보낸 기록부터
+	}
+	// 시작 훅을 놓친 세션 (Codex: 훅을 신뢰하기 전에 연 세션은 SessionStart 가 이미 지나감) → 입력·응답 끝에서 등록
+	if healthy && (event == "prompt" || event == "stop") {
+		var ce *client.Error
+		if _, err := c.Agent(id); errors.As(err, &ce) && ce.Code == "agent_not_found" {
+			_ = sessionStart(c, kind, in)
+			if event == "prompt" && !core.IsSystemPrompt(in.Prompt) {
+				_ = c.Activate(id) // 사람이 입력했으므로 임시 등록을 바로 확정
+			}
+		}
 	}
 	var out any
 	switch event {

@@ -145,3 +145,20 @@ func TestHookEchoFlow(t *testing.T) {
 		t.Fatalf("기록: %q", got)
 	}
 }
+
+// 시작 훅을 놓친 Codex 세션 (훅을 신뢰하기 전에 연 세션): 입력 훅에서 등록·확정된다.
+func TestLateRegister(t *testing.T) {
+	tempOutbox(t)
+	t.Setenv("ATALK_CONFIG_DIR", t.TempDir())
+	root, port := t.TempDir(), freePort(t)
+	t.Setenv("ATALK_URL", fmt.Sprintf("http://127.0.0.1:%d", port))
+	srv := startDaemon(t, root, port)
+	defer srv.Close()
+	c := client.New("")
+	b, _ := json.Marshal(map[string]any{"session_id": "thr-late", "cwd": t.TempDir(), "prompt": "안녕"})
+	Run("codex", "prompt", bytes.NewReader(b), &bytes.Buffer{})
+	a, err := c.Agent("codex_thr-late")
+	if err != nil || a.Provisional {
+		t.Fatalf("입력 훅에서 등록·확정: %+v %v", a, err)
+	}
+}
