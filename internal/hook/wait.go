@@ -71,7 +71,11 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		}
 		flush(c, id, 0) // 데몬이 없을 때 쌓인 CLI 기록을 보낸다 (outbox.go)
 		var lines []string
+		intro := "" // 새로 들어와 아직 인사·자기소개 전인 방
 		if a, err := c.Agent(id); err == nil {
+			if a.Intro && a.Room != nil {
+				intro = *a.Room
+			}
 			room := ""
 			if a.Room != nil {
 				room = *a.Room
@@ -136,6 +140,9 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		baseline = true
 		if len(lines) == 0 {
 			continue
+		}
+		if intro != "" {
+			lines = append(lines, "", client.IntroRule(exe, intro))
 		}
 		lines = append(lines, "",
 			"atalk 스킬의 \"알림을 받았을 때\" 규칙대로 처리하세요: unread --ack → log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done.",

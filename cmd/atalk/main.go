@@ -634,7 +634,13 @@ func main() {
 
 	case "accept", "decline":
 		check(c.RespondInvite(me(), at.arg(0, "ROOM"), cmd == "accept"))
-		out(map[string]bool{"ok": true}, map[bool]string{true: rest[0] + " 방 입장", false: rest[0] + " 초대 거절"}[cmd == "accept"])
+		msg := map[bool]string{true: rest[0] + " 방 입장", false: rest[0] + " 초대 거절"}[cmd == "accept"]
+		if cmd == "accept" {
+			if v, err := c.Agent(me()); err == nil && v.Intro && v.Room != nil {
+				msg += "\n" + strings.TrimSpace(c.Purpose(*v.Room)+"\n"+client.IntroRule("atalk", *v.Room))
+			}
+		}
+		out(map[string]bool{"ok": true}, msg)
 
 	case "request":
 		joined, err := c.RequestJoin(me(), at.arg(0, "ROOM"), a.str("note"))

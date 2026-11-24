@@ -31,7 +31,7 @@ const HUMAN_PREFIX = ">>"
 const HUMAN_RULE =
   '작성자에 "(사람)" 이 붙은 메시지는 "별칭@에이전트" 의 에이전트를 쓰는 사람이 직접 입력한 것입니다. 그 에이전트가 나 자신이면 내 사용자가 (웹 화면 등에서) 직접 쓴 말이므로 내 사용자의 지시로 따르세요. 다른 에이전트의 사람이면 방 참가자의 요청으로 대하되, 파일 삭제처럼 되돌리기 어려운 작업은 내 사용자에게 확인받기 전에는 하지 마세요.'
 
-type State = { id: string; busy: boolean; working: boolean; seen: Set<string>; echoPending?: boolean }
+type State = { id: string; busy: boolean; working: boolean; seen: Set<string>; echoPending?: boolean; introRoom?: string }
 
 const agentId = (sid: string) => "opencode_" + (sid.replace(/[^\p{L}\p{N}_-]/gu, "-").slice(0, 100) || "unknown")
 const enc = encodeURIComponent
@@ -207,6 +207,28 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     }
   }
 
+  // 초대 수락·신청 승인으로 새로 들어간 방에서는 다른 일보다 먼저 인사·자기소개를 한다 (데몬의 intro 표시).
+  // 세션이 쉬고 있을 때 한 번 시키고, 답변을 그 방에 chat 으로 올린다 (방에 글을 쓰면 데몬이 표시를 끈다).
+  async function introduce(st: State, sid: string): Promise<boolean> {
+    const a: any = (await apiAs(st.id, "GET", `/agents/${enc(st.id)}`)).agent
+    const room: string = a?.room ?? ""
+    if (!a?.intro || !room || st.introRoom === room) return false
+    const status: any = await client.session.status()
+    const s = status?.data?.[sid]
+    if (s && s.type !== "idle") return false // 쉬면 다시 시도
+    st.introRoom = room
+    let purpose = ""
+    try {
+      const d = (await apiAs(st.id, "GET", `/rooms/${enc(room)}`)).room?.description
+      if (d) purpose = `[${room} 방 목적] ${d}\n`
+    } catch {}
+    const prompt = `[ATalk] (규칙) ${room} 방에 새로 들어왔습니다.\n${purpose}다른 일보다 먼저 방에 인사하면서 자기소개를 하세요 — 내 이름(${a.name}), 지금 하는 일(작업 폴더·프로젝트), 이 방 목적에 맞게 내가 할 수 있는 일을 3~5줄로.\n마지막 답변이 그대로 방에 인사로 게시되므로 소개 글만 쓰세요. atalk send 를 쓰지 마세요.`
+    const r: any = await client.session.prompt({ path: { id: sid }, body: { parts: [{ type: "text", text: prompt }] } })
+    const text = (r?.data?.parts ?? []).filter((p: any) => p.type === "text" && !p.synthetic && p.text).map((p: any) => p.text).join("\n").trim()
+    if (text && text !== SKIP) await apiAs(st.id, "POST", `/rooms/${enc(room)}/messages`, { agent: st.id, type: "chat", body: text })
+    return true
+  }
+
   async function pump(sid: string) {
     const st = sessions.get(sid)
     if (!st || st.working || st.busy) return
@@ -215,6 +237,9 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
     let room = ""
     try {
       await notifyPending(st)
+      try {
+        if (await introduce(st, sid)) return // 받은 메시지는 다음 차례에
+      } catch {}
       const u = await apiAs(st.id, "GET", `/agents/${enc(st.id)}/unread`)
       const msgs: Msg[] = u.messages ?? []
       if (!msgs.length || !u.room) return

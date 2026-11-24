@@ -485,6 +485,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Host = &h
 	if m, ok := c.memberships[card.ID]; ok {
 		v.Room, v.Role = ptr(m.Room), ptr(m.Role)
+		v.Intro = m.Intro
 	}
 	return v
 }
@@ -594,7 +595,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 			cur.LastRoom = ""
 			c.saveCard(cur)
 			if _, err := c.requireRoom(r, true); err == nil {
-				c.joinInternal(id, r, RoleMember)
+				c.joinInternal(id, r, RoleMember, false) // 복귀 — 이미 인사한 방
 				res.Recovery = c.buildRecovery(id, 0)
 			}
 		}
@@ -1144,7 +1145,7 @@ func (c *Atalk) CreateRoomWith(agent, roomID, title, description string, maxMess
 		c.saveRoom(room)
 		c.saveCursors(roomID)
 		if agent != "" {
-			c.joinInternal(agent, roomID, RoleOwner)
+			c.joinInternal(agent, roomID, RoleOwner, false) // 방을 만든 방장 — 맞이하는 쪽
 		} else {
 			c.systemMessage(roomID, c.humanOf("")+"(사람) 이 방을 만듦 — 처음 들어오는 에이전트가 방장이 됩니다", false)
 		}
@@ -1306,7 +1307,7 @@ func (c *Atalk) Invite(owner, r, target string) (v RoomView, err error) {
 		c.saveRoom(room)
 		if c.autoAccepts(owner, target) {
 			// 같은 PC 안에서 대기 중인 에이전트 → 초대를 바로 수락해 입장시킨다 (이전 세션 자리가 있으면 그 자리로)
-			c.joinInternal(target, r, RoleMember)
+			c.joinInternal(target, r, RoleMember, true)
 			v = c.roomView(room)
 			return nil
 		}
@@ -1357,7 +1358,7 @@ func (c *Atalk) RespondInvite(agent, r string, accept bool) (v RoomView, err err
 		}
 		c.saveRoom(room)
 		if accept {
-			c.joinInternal(agent, r, RoleMember)
+			c.joinInternal(agent, r, RoleMember, true)
 		} else if room.Owner != nil {
 			c.emit(Event{Type: "invite", To: []string{*room.Owner}, Data: map[string]any{"room": r, "agent": agent, "declined": true}})
 		}
@@ -1434,7 +1435,7 @@ func (c *Atalk) RespondRequest(owner, r, target string, approve bool) (v RoomVie
 		}
 		c.saveRoom(room)
 		if approve {
-			c.joinInternal(target, r, RoleMember)
+			c.joinInternal(target, r, RoleMember, true)
 		} else {
 			c.emit(Event{Type: "request", To: []string{target}, Data: map[string]any{"room": r, "rejected": true}})
 		}
@@ -1515,7 +1516,9 @@ func (c *Atalk) clearPendingFor(agent, r string) {
 	}
 }
 
-func (c *Atalk) joinInternal(agent, r, role string) {
+// greet 이면(초대 수락·신청 승인으로 새로 들어옴) 먼저 인사·자기소개를 해야 하는 상태(Intro)로 둔다.
+// 이미 있던 자리로 돌아가거나 이전 세션 자리를 이어받는 경우는 이미 인사한 방이므로 두지 않는다.
+func (c *Atalk) joinInternal(agent, r, role string, greet bool) {
 	c.activateLocked(agent) // 방에 들어가면 임시 세션 확정 (이전 세션 이름표·자리 넘겨받기)
 	if cur, ok := c.memberships[agent]; ok {
 		if cur.Room == r {
@@ -1541,7 +1544,7 @@ func (c *Atalk) joinInternal(agent, r, role string) {
 		room.Owner = ptr(agent)
 		c.saveRoom(room)
 	}
-	c.memberships[agent] = &Membership{Room: r, Role: role, State: StateInRoom, JoinedAt: now, LastSeen: now}
+	c.memberships[agent] = &Membership{Room: r, Role: role, State: StateInRoom, JoinedAt: now, LastSeen: now, Intro: greet}
 	c.saveMemberships()
 
 	c.cursors[r][agent] = c.lastSeq[r] // 입장 이후 메시지부터 읽음
@@ -2009,6 +2012,9 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 			return &Error{429, "room_limit", fmt.Sprintf("방 메시지 한도(%d) 초과. 방장이 한도를 올리거나 새 방을 만들어야 함", room.Policy.MaxMessages)}
 		}
 		m.LastSeen = c.ts()
+		if !in.Human {
+			m.Intro = false // 에이전트가 방에 처음 글을 썼으면 인사한 것으로 본다
+		}
 		if m.State == StateAway {
 			c.markBack(agent)
 		} else {
