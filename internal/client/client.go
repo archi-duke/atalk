@@ -590,3 +590,12 @@ func (c *Client) SendHuman(agent, text string) (core.Message, error) {
 	err = c.call("POST", "/rooms/"+esc(room)+"/say", map[string]string{"agent": agent, "text": text}, &out, 0)
 	return out.Message, err
 }
+
+// Wake 는 이 PC 의 에이전트를 깨운다: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고(launched), 떠 있으면 창을 앞으로.
+func (c *Client) Wake(id string) (launched bool, err error) {
+	var out struct {
+		Launched bool `json:"launched"`
+	}
+	err = c.call("POST", "/agents/"+esc(id)+"/wake", map[string]any{}, &out, 0)
+	return out.Launched, err
+}
