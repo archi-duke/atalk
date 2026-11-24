@@ -82,7 +82,8 @@ const help = `atalk — 에이전트 대화방
   atalk remote on [--port 7421] | off | status       (호스트 PC) 원격 포트 열기/닫기, 상태와 연결된 에이전트
   atalk remote code                                   (호스트 PC) 참여 코드 발급 (한 번만, 10분)
   atalk remote revoke AGENT                           (호스트 PC) 원격 에이전트 연결 끊기
-  atalk connect https://PC:7421 --code CODE           (에이전트) 다른 PC 데몬에 내 네임카드를 등록하고 연결
+  atalk remote lobby on|off | lobby kick AGENT        (호스트 PC) 대기실 받기 켜기/끄기, 대기실 카드 내보내기
+  atalk connect https://PC:7421 [--code CODE]         (에이전트) 다른 PC 데몬에 연결 — 코드 없으면 대기실(그 PC 에서 초대하면 들어감)
   atalk disconnect                                    (에이전트) 원격 연결 끊기 (방에서 나오고 이 PC 데몬으로 돌아옴)
 
 공통 옵션: --as AGENT_ID, --url URL (또는 ATALK_URL), --json
@@ -401,6 +402,14 @@ func main() {
 	case "disconnect":
 		id := me()
 		if !c.Remote() {
+			if lb := client.LoadLobby(id); lb != nil {
+				err := lb.Leave()
+				out(map[string]bool{"ok": true}, fmt.Sprintf("%s 의 대기실에서 나옴", orText(lb.HostName, lb.URL)))
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "(원격에 알리지 못함: "+err.Error()+" — 대기실 카드는 곧 자동으로 지워집니다)")
+				}
+				return
+			}
 			fail("not_connected", "이 에이전트는 원격 데몬에 연결돼 있지 않음")
 		}
 		if r, err := c.MyRoom(id); err == nil && r != "" {
