@@ -29,6 +29,8 @@ type AgentCard struct {
 	LastRoom string `json:"last_room,omitempty"`
 	// WorkspaceID 는 해시(PC ID + 정규화한 작업 폴더 경로). 경로를 드러내지 않고 "같은 PC 의 같은 폴더" 인지 비교하는 데 쓴다.
 	WorkspaceID string `json:"workspace_id,omitempty"`
+	// Shared 는 Codex 처럼 창이 아니라 공유 백그라운드 서버에서 실행 중인 세션 (Pid 는 그 서버라 창을 찾을 수 없음).
+	Shared       bool     `json:"shared,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -257,6 +259,8 @@ type RegisterInput struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Provisional 이면 새로 만든 카드를 임시로 둔다 (훅·플러그인이 세션 시작 때). 이미 있는 카드에는 영향 없음.
 	Provisional bool `json:"provisional,omitempty"`
+	// Shared: Pid 가 창이 아니라 공유 백그라운드 서버 (Codex app-server). Pid 와 함께 보낼 때만 반영.
+	Shared bool `json:"shared,omitempty"`
 }
 
 type RegisterResult struct {

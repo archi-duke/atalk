@@ -38,6 +38,9 @@ func (s *Server) wake(id string) (any, error) {
 	if !v.Local {
 		return nil, &core.Error{Status: 409, Code: "not_here", Message: "이 PC 의 에이전트만 깨울 수 있음 (다른 PC 는 그 PC 에서)"}
 	}
+	if v.Shared && v.Pid != nil && core.DefaultIsAlive(*v.Pid) {
+		return nil, &core.Error{Status: 409, Code: "shared_server", Message: "이 Codex 세션은 공유 백그라운드 서버에서 실행 중이라 창을 찾을 수 없음 — codex --no-daemon 으로 열면 됨"}
+	}
 	if v.Pid != nil && v.Status != "offline" && core.DefaultIsAlive(*v.Pid) { // 이미 떠 있음 → 창만 앞으로 (방에 있다가 꺼진 세션은 자리 비움이라 PID 로 확인)
 		return map[string]any{"launched": false}, focusPid(*v.Pid)
 	}

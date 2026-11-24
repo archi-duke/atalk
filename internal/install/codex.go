@@ -136,7 +136,8 @@ func Codex(p Paths) ([]string, error) {
 		return done, err
 	}
 	done = append(done, "훅(SessionStart/Stop/SessionEnd/UserPromptSubmit): "+p.codexHooksFile(),
-		"Codex 는 새 훅을 신뢰해야 실행합니다: Codex 를 연 뒤 /hooks 에서 ATalk 훅을 신뢰(trust)하세요.")
+		"Codex 는 새 훅을 신뢰해야 실행합니다: Codex 를 연 뒤 /hooks 에서 ATalk 훅을 신뢰(trust)하세요.",
+		"ATalk 와 쓰는 Codex 는 `codex --no-daemon` 으로 여세요 (기본은 공유 백그라운드 서버에서 돌아 웹 화면에서 창을 찾을 수 없음).")
 	return done, nil
 }
 

@@ -36,3 +36,9 @@ func CodexCommand(args ...string) (*exec.Cmd, error) {
 	}
 	return exec.Command(node, append([]string{js}, args...)...), nil
 }
+
+// IsCodexServer 는 pid 가 Codex 의 공유 백그라운드 서버(codex app-server --managed-daemon)인지.
+// Codex 는 기본으로 창(TUI)이 아니라 이 서버에서 대화·훅을 돌리므로, 훅이 찾은 PID 가 이 서버면 창 PID 를 알 수 없다.
+func IsCodexServer(pid int) bool {
+	return pid > 0 && strings.Contains(strings.ToLower(exePath(pid)), "app-server")
+}

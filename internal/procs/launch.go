@@ -20,8 +20,9 @@ func ResumeCommand(kind, sessionID string) ([]string, error) {
 	case "opencode":
 		return []string{"opencode", "-s", sessionID}, nil
 	case "codex":
-		// Codex 는 다시 연 세션에 첫 입력이 있어야 SessionStart 훅이 돈다 (등록 → 그 뒤 Stop 훅이 쌓인 메시지를 전달)
-		return []string{"codex", "resume", sessionID, CodexWakePrompt}, nil
+		// Codex 는 다시 연 세션에 첫 입력이 있어야 SessionStart 훅이 돈다 (등록 → 그 뒤 Stop 훅이 쌓인 메시지를 전달).
+		// --no-daemon: 공유 백그라운드 서버(app-server)가 아니라 이 창에서 직접 실행해야 훅이 찾는 PID 가 이 창이 된다 (Ctrl+클릭·생존 판단)
+		return []string{"codex", "resume", "--no-daemon", sessionID, CodexWakePrompt}, nil
 	}
 	return nil, errors.New(kind + " 는 아직 깨우기를 지원하지 않음 (Claude Code·opencode·Codex 만)")
 }

@@ -147,6 +147,7 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	reg := core.RegisterInput{Kind: kind, SessionID: in.SessionID, Cwd: &cwd, Name: envPtr("ATALK_NAME"), Description: envPtr("ATALK_DESCRIPTION"), Provisional: true}
 	if pid := procs.FindAgentPID(); pid > 0 {
 		reg.Pid = &pid
+		reg.Shared = kind == "codex" && procs.IsCodexServer(pid)
 	}
 	if caps := os.Getenv("ATALK_CAPABILITIES"); caps != "" {
 		list := []string{}
@@ -175,6 +176,9 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 		lines = append(lines, fmt.Sprintf("- atalk 명령에는 --as %s 를 붙이세요 (MCP 를 쓰면 atalk_attach(agent_id=%q)).", a.ID, a.ID))
 	}
 	// 새 세션은 이전 세션의 이름표만 이어받는다. 방에는 사용자가 들어가라고 할 때만 들어간다.
+	if reg.Shared {
+		lines = append(lines, sharedNote)
+	}
 	if r.InheritedFrom != "" {
 		lines = append(lines, fmt.Sprintf("- 같은 폴더의 이전 세션(%s) 이름표를 이어받았습니다.", r.InheritedFrom))
 	}
@@ -207,7 +211,11 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 			lines = append(lines, "놓친 메시지:", client.FormatMessages(rec.Unread, c.Names()))
 		}
 	}
-	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart", "additionalContext": strings.Join(lines, "\n")}}
+	out := map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "SessionStart", "additionalContext": strings.Join(lines, "\n")}}
+	if reg.Shared {
+		out["systemMessage"] = sharedNote // 사람 화면에도
+	}
+	return out
 }
 
 func stop(c *client.Client, kind string, in Input) any {
@@ -424,3 +432,6 @@ func samePath(a, b string) bool {
 	pb, _ := filepath.Abs(b)
 	return strings.EqualFold(filepath.Clean(pa), filepath.Clean(pb))
 }
+
+// sharedNote 는 Codex 가 공유 백그라운드 서버에서 돌 때의 안내 (사람에게도 보임).
+const sharedNote = "[ATalk] 이 Codex 세션은 공유 백그라운드 서버에서 실행 중이라, 웹 화면에서 이 창을 찾을 수 없고(Ctrl+클릭·깨우기) 창을 닫아도 방에 남아 보입니다. ATalk 와 함께 쓰려면 `codex --no-daemon` 으로 여세요 (이어서 열기: `codex resume --no-daemon <세션>`)."
