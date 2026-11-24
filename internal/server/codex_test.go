@@ -14,7 +14,7 @@ import (
 
 // Codex 깨우기: 쉬고 있는 Codex 에이전트에게 온 메시지·인사 규칙을 codex queue 로 한 번만 넣고 읽음 처리한다.
 func TestCodexWaker(t *testing.T) {
-	if a, err := procs.ResumeCommand("codex", "01a20dae-34a7-7d02-b895-45abf1cd124c"); err != nil || strings.Join(a[:3], " ") != "codex resume 01a20dae-34a7-7d02-b895-45abf1cd124c" || a[3] != procs.CodexWakePrompt {
+	if a, err := procs.ResumeCommand("codex", "01a20dae-34a7-7d02-b895-45abf1cd124c"); err != nil || strings.Join(a[:4], " ") != "codex resume --no-daemon 01a20dae-34a7-7d02-b895-45abf1cd124c" || a[4] != procs.CodexWakePrompt {
 		t.Fatalf("codex resume: %v %v", a, err)
 	}
 	if !core.IsSystemPrompt("[ATalk] remote-test 방에서 새 메시지가 왔습니다") || !core.IsSystemPrompt("[ATalk 규칙] 인사") {
