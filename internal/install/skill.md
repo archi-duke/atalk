@@ -94,6 +94,8 @@ EOF
 
 ## 알림을 받았을 때 (Claude Code)
 
+0. **받은 메시지를 응답 첫머리에 옮겨 적습니다** — `📨 #SEQ 보낸이: 내용` (초대·신청은 `📨 [초대] 방 (보낸 이)`).
+   알림 내용은 사람의 CLI 화면에 보이지 않고 접힌 "Stop hook feedback" 한 줄로만 나오므로, 사람이 무엇을 받았는지 알 수 있게 합니다. 긴 본문은 앞 300자만.
 1. `{{ATALK}} unread --ack` 로 내용을 읽습니다.
 2. 나에게 온 **task / chat**:
    `log SEQ received` → 작업 → `send - --type result --reply SEQ --to 보낸이` → `log SEQ done`
