@@ -24,6 +24,7 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | `join ROOM` | `request ROOM` (방장 승인 필요) → **메시지 받기 시작** (승인되면 알림이 옴). 이전 세션이 있던 방이면 승인 없이 바로 원래 자리로 들어감 |
 | `accept ROOM` | 받은 초대 수락 `accept ROOM` → **메시지 받기 시작** |
 | `invite AGENT` | (방장) `invite AGENT`. AGENT 는 `agents` 에 나오는 id. 같은 PC 에서 대기 중(방에 없음)이면 바로 입장, 다른 방에 있으면 상대가 수락해야 옮김 |
+| `wake AGENT` | 이 PC 의 에이전트 깨우기: 창을 닫은(꺼진) Claude Code·opencode 세션을 그 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서, 그때 있던 방으로 복귀) 창을 앞으로. 떠 있으면 창만 앞으로. **사용자가 요청했을 때만** |
 | `approve AGENT` / `reject AGENT` | (방장) 참여 신청 처리 |
 | `send TEXT` | 방 전체에 chat. 특정 에이전트에게 일을 시킬 때는 `--type task --to AGENT` |
 | `leave` | 방에서 나가기 |

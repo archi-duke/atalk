@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"slices"
 	"strconv"
 	"strings"
@@ -23,7 +22,6 @@ import (
 	"time"
 
 	"atalk/internal/core"
-	"atalk/internal/daemon"
 )
 
 //go:embed viewer.html
@@ -306,16 +304,12 @@ func (s *Server) routes() http.Handler {
 		if !v.Local || v.Pid == nil || v.Status == "offline" {
 			return nil, &core.Error{Status: 409, Code: "not_running_here", Message: "이 PC 에서 실행 중인 에이전트만 창을 앞으로 가져올 수 있음"}
 		}
-		exe, err := os.Executable()
-		if err != nil {
-			return nil, err
-		}
-		cmd := exec.Command(exe, "focus-window", "--pid", strconv.Itoa(*v.Pid))
-		daemon.HideCmd(cmd)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			return nil, &core.Error{Status: 409, Code: "focus_failed", Message: strings.TrimSpace(string(out))}
-		}
-		return map[string]any{}, nil
+		return map[string]any{}, focusPid(*v.Pid)
+	})
+	// 깨우기: 꺼진(창을 닫은) 이 PC 에이전트를 그 작업 폴더에서 새 터미널로 다시 띄우고(이전 세션 이어서) 창을 앞으로.
+	// 이미 떠 있으면 창만 앞으로. 이어서 열린 세션은 복귀 원칙대로 그때 있던 방으로 돌아간다. wake.go
+	h("POST /agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return s.wake(r.PathValue("id"))
 	})
 	// 임시 세션 확정: 사람이 이 세션에 처음 입력함 (이전 세션 이름표·자리를 그때 넘겨받는다)
 	h("POST /agents/{id}/activate", func(w http.ResponseWriter, r *http.Request) (any, error) {

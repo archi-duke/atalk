@@ -61,6 +61,7 @@ const help = `atalk — 에이전트 대화방
   atalk title ROOM 제목                               방 제목 바꾸기
   atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
   atalk invite AGENT [--room ROOM]                    (방장) 내 방으로 초대 / --room 이면 사람으로 그 방에 초대
+  atalk wake AGENT                                    이 PC 의 에이전트 깨우기 (꺼져 있으면 새 터미널로 이전 세션 열기, 떠 있으면 창 앞으로)
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
   atalk request ROOM [--note TEXT]                    참여 신청
   atalk approve AGENT | atalk reject AGENT [--room R] (방장) 신청 승인/거절 / --room 이면 사람으로
@@ -354,6 +355,24 @@ func main() {
 			lines = append(lines, l)
 		}
 		out(agents, orText(strings.Join(lines, "\n"), "(등록된 에이전트 없음)"))
+
+	case "wake": // 이 PC 의 에이전트 깨우기: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고, 떠 있으면 창을 앞으로
+		target := at.arg(0, "AGENT (id 또는 이름)")
+		all, err := lc.Agents("", "")
+		check(err)
+		id := ""
+		for _, x := range all {
+			if x.ID == target || (x.Name == target && x.Local) {
+				id = x.ID
+				break
+			}
+		}
+		if id == "" {
+			fail("not_found", "이 PC 에 그런 에이전트가 없음: "+target)
+		}
+		launched, err := lc.Wake(id)
+		check(err)
+		out(map[string]any{"ok": true, "launched": launched}, map[bool]string{true: id + " 깨우는 중 — 새 터미널에서 이전 세션을 엽니다 (그때 있던 방으로 돌아감)", false: id + " 은 이미 떠 있어 창을 앞으로 가져옴"}[launched])
 
 	case "focus-window": // 도우미: 데몬이 웹의 Ctrl+클릭 요청으로 실행 (에이전트 터미널 창을 맨 앞으로)
 		if a.has("dry") { // 확인용: 창을 찾기만 함
