@@ -361,6 +361,9 @@ func (s *Server) remoteHandler() http.Handler {
 			return
 		}
 		m := c.Machine()
+		if res.Agent.Host != nil {
+			forRemote(&res.Agent, res.Agent.Host.ID)
+		}
 		writeOK(w, map[string]any{"agent": res.Agent, "token": tok, "inherited_from": res.InheritedFrom, "previous_room": res.PreviousRoom,
 			"machine": map[string]string{"name": m.Name, "os": m.OS}})
 	})
@@ -368,14 +371,15 @@ func (s *Server) remoteHandler() http.Handler {
 	// 디스커버리: 다른 에이전트의 경로·PID 는 빼고 보낸다
 	fn("GET /agents", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
 		a, err := c.ListAgents(r.URL.Query().Get("status"), r.URL.Query().Get("kind"))
+		h := s.viewerHost(r)
 		for i := range a {
-			a[i].Cwd, a[i].Pid = nil, nil
+			forRemote(&a[i], h)
 		}
 		return map[string]any{"agents": a}, err
 	})
 	fn("GET /agents/{id}", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
 		a, err := c.GetAgent(r.PathValue("id"))
-		a.Cwd, a.Pid = nil, nil
+		forRemote(&a, s.viewerHost(r))
 		return map[string]any{"agent": a}, err
 	})
 	// 다시 등록 (세션 시작·복귀): 내 카드만, 다른 PC 로
@@ -396,7 +400,9 @@ func (s *Server) remoteHandler() http.Handler {
 			in.Host = cur.Host
 		}
 		in.Cwd, in.Pid, in.Provisional = nil, nil, false
-		return c.Register(in)
+		res, err := c.Register(in)
+		forRemote(&res.Agent, s.viewerHost(r))
+		return res, err
 	})
 	fn("POST /remote/disconnect", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]any{}, c.RevokeRemote(remoteAgentOf(r))
@@ -429,6 +435,21 @@ func (s *Server) remoteHandler() http.Handler {
 		writeErr(w, &core.Error{Status: 404, Code: "no_route", Message: "원격 포트에서 쓸 수 없는 경로: " + r.Method + " " + r.URL.Path})
 	})
 	return mux
+}
+
+// viewerHost 는 원격 요청을 보낸 에이전트의 PC ID.
+func (s *Server) viewerHost(r *http.Request) string {
+	if v, err := s.Core.GetAgent(remoteAgentOf(r)); err == nil && v.Host != nil {
+		return v.Host.ID
+	}
+	return ""
+}
+
+// forRemote 는 원격에 보내는 카드를 고친다: 경로·PID 는 빼고, "이 PC"(local) 는 호스트 데몬이 아니라
+// 요청한 에이전트의 PC 기준으로 다시 정한다 (원격에서 호스트 PC 의 에이전트가 "이 PC" 로 보이지 않게).
+func forRemote(a *core.AgentView, viewerHost string) {
+	a.Cwd, a.Pid = nil, nil
+	a.Local = viewerHost != "" && a.Host != nil && a.Host.ID == viewerHost
 }
 
 // setActor 는 요청 본문(JSON 객체)의 agent 를 토큰의 에이전트로 바꾼다.
