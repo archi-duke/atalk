@@ -28,6 +28,14 @@ async function api(method: string, path: string, body?: unknown): Promise<any> {
   return res.json()
 }
 
+// 에이전트 대신 부른다: 데몬의 중계(/relay/<agent>/…)를 거쳐, 그 세션이 다른 PC 데몬에 연결돼 있으면 그쪽으로.
+// 중계가 없는 예전 데몬이면 직접 부른다.
+async function apiAs(agent: string, method: string, path: string, body?: unknown): Promise<any> {
+  const j = await api(method, `/relay/${enc(agent)}${path}`, body)
+  if (j?.error?.code === "no_route" && String(j?.error?.message ?? "").includes("/relay/")) return api(method, path, body)
+  return j
+}
+
 export default {
   id: "atalk-tui",
   tui: async (tuiApi: any) => {
@@ -38,11 +46,11 @@ export default {
         const sid: string = r?.name === "session" ? String(r?.params?.sessionID ?? "") : ""
         if (!sid || sid === last) return
         last = sid
-        const card = (await api("GET", `/agents/${enc(agentId(sid))}`))?.agent
+        const card = (await apiAs(agentId(sid), "GET", `/agents/${enc(agentId(sid))}`))?.agent
         if (!card || card.provisional) return // 처음 보는 세션·쓰지 않은 임시 세션은 그대로 둔다
         if (card.room && card.status === "in_room") return // 이미 방에 있음
         // 예전에 쓰던 세션으로 복귀 → 다시 등록 (데몬이 그 방 자리·그때 있던 방으로 돌려보낸다)
-        const reg = await api("POST", "/agents", { kind: "opencode", session_id: sid, cwd: process.cwd(), pid: process.pid })
+        const reg = await apiAs(agentId(sid), "POST", "/agents", { kind: "opencode", session_id: sid, cwd: process.cwd(), pid: process.pid })
         const room = reg?.agent?.room
         if (room) tuiApi?.ui?.toast?.({ message: `ATalk: ${room} 방으로 복귀했습니다`, variant: "info" })
       } catch {}

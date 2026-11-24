@@ -50,8 +50,9 @@ type Server struct {
 	// RestartPort 가 0 이 아니면 다시 시작할 때 이 포트로 (설정에서 포트 변경)
 	RestartPort int
 
-	remoteDir string
-	remote    remoteState // 원격 포트 (remote.go)
+	remoteDir    string
+	remote       remoteState  // 원격 포트 (remote.go)
+	relayClients relayClients // 중계 (relay.go)
 }
 
 func New(opts Options) (*Server, error) {
@@ -549,6 +550,8 @@ func (s *Server) routes() http.Handler {
 		_, _ = w.Write(viewerHTML)
 		return skip{}, nil
 	})
+	// 중계: 플러그인이 에이전트 대신 부름. 원격에 연결된 에이전트면 원격 데몬으로 (relay.go)
+	mux.HandleFunc("/relay/{agent}/{rest...}", s.relay(mux))
 	h("/", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return nil, &core.Error{Status: 404, Code: "no_route", Message: r.Method + " " + r.URL.Path}
 	})

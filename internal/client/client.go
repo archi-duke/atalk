@@ -170,7 +170,7 @@ func (c *Client) SetConfig(cfg core.Config) (core.Config, error) {
 
 func (c *Client) Register(in core.RegisterInput) (r core.RegisterResult, err error) {
 	if c.Conn != nil { // 원격: 경로·PID 대신 이 PC 정보와 작업 위치 ID 만 보낸다
-		in = c.Conn.remoteCard(in)
+		in = c.Conn.RemoteCard(in)
 	}
 	err = c.call("POST", "/agents", in, &r, 0)
 	return
