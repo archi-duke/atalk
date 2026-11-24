@@ -202,6 +202,8 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
   아니면 방 밖에서는 offline, 방에서는 `away(heartbeat_lost)` → 다음 요청 때 자동 복귀. 데몬 재시작 직후에는 시작 시각부터 센다.
 - **클라이언트**: `atalk connect` 가 `<설정 폴더>/remote/<agent>.json`(URL·토큰·지문·이 PC host·작업 위치 ID, 0600)을 쓴다.
   `client.ForAgent(id)` 가 이 파일이 있으면 원격 클라이언트를 돌려주므로 CLI·훅(wait 포함)이 그대로 원격 데몬과 통신한다. 원격 등록은 cwd·pid 대신 host·workspace_id 를 보낸다.
+- **중계** `ANY /relay/{agent}/{경로…}` (내부 포트만): 연결 파일이 있으면 이 데몬이 원격 데몬으로 전달(지문 확인, Bearer, `POST /agents` 는 원격용 카드로 바꿈, SSE 도 흘려보냄, 실패하면 502 `remote_unreachable`),
+  없으면 이 데몬에서 그대로 처리한다. opencode 서버·TUI 플러그인은 세션 요청을 모두 중계로 보내므로 HTTPS·토큰을 몰라도 원격 연결을 따라간다 (중계가 없는 예전 데몬이면 직접 부름).
 
 ## 7. 에이전트 연동
 
@@ -241,5 +243,5 @@ PID 찾기: 훅은 부모 프로세스를 거슬러 올라가며 셸/래퍼(bash
 
 1. opencode 플러그인 성공 경로 실측 (모델 인증 해결 후), 실제 Claude Code 대화형 세션에서 스킬 흐름 실측.
 2. 에이전트별 토큰 인증.
-3. ~~messages.jsonl 끝에서부터 읽기 / seq 색인~~ → v0.3 SQLite 로 해결. ~~원격 에이전트(토큰 인증, 하트비트 생존 확인, 기기 id)~~ → 원격 포트(6장). 남은 것: opencode 플러그인·MCP·브리지의 원격 연결, 웹 설정 화면의 원격 관리.
+3. ~~messages.jsonl 끝에서부터 읽기 / seq 색인~~ → v0.3 SQLite 로 해결. ~~원격 에이전트(토큰 인증, 하트비트 생존 확인, 기기 id)~~ → 원격 포트(6장). 남은 것: MCP·브리지의 원격 연결, 웹 설정 화면의 원격 관리.
 4. Gemini CLI 연동.
