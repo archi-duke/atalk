@@ -28,6 +28,7 @@ type Store interface {
 	AppendMembershipEvent(e MembershipEvent)
 	PutName(id, name string)
 	PutConfig(cfg Config)
+	PutRemoteTokens(t map[string]RemoteToken)
 
 	AppendMessage(m Message)
 	Messages(room string, after, limit int) []Message // limit <= 0 이면 전부
@@ -46,14 +47,15 @@ type Store interface {
 
 // snapshot 은 시작할 때 읽는 전체 상태.
 type snapshot struct {
-	agents      []*AgentCard
-	rooms       []*Room
-	memberships map[string]*Membership
-	cursors     map[string]map[string]int
-	lastSeq     map[string]int
-	names       map[string]string
-	config      Config
-	imported    bool // 예전 파일 데이터를 이미 가져왔는가
+	agents       []*AgentCard
+	rooms        []*Room
+	memberships  map[string]*Membership
+	cursors      map[string]map[string]int
+	lastSeq      map[string]int
+	names        map[string]string
+	config       Config
+	remoteTokens map[string]RemoteToken
+	imported     bool // 예전 파일 데이터를 이미 가져왔는가
 }
 
 const schema = `
@@ -223,6 +225,8 @@ func (s *sqliteStore) Load() (*snapshot, error) {
 			_ = json.Unmarshal([]byte(v), &snap.config)
 		case "legacy_imported":
 			snap.imported = true
+		case "remote_tokens":
+			_ = json.Unmarshal([]byte(v), &snap.remoteTokens)
 		}
 		return nil
 	})
@@ -262,7 +266,8 @@ func (s *sqliteStore) AppendMembershipEvent(e MembershipEvent) {
 func (s *sqliteStore) PutName(id, name string) {
 	s.exec("INSERT INTO names(id, name) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name", id, name)
 }
-func (s *sqliteStore) PutConfig(cfg Config) { s.setMeta("config", js(cfg)) }
+func (s *sqliteStore) PutConfig(cfg Config)                     { s.setMeta("config", js(cfg)) }
+func (s *sqliteStore) PutRemoteTokens(t map[string]RemoteToken) { s.setMeta("remote_tokens", js(t)) }
 
 func (s *sqliteStore) AppendMessage(m Message) {
 	s.exec("INSERT INTO messages(trash_id, room, seq, data) VALUES(0, ?, ?, ?)", m.Room, m.Seq, js(m))

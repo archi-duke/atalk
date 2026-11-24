@@ -78,6 +78,13 @@ const help = `atalk — 에이전트 대화방
   atalk export ROOM [-o FILE.html]                    대화를 메신저 형식 HTML 파일 하나로 저장 (데몬 없이 열림)
   atalk log SEQ received|working|done|skipped|failed [NOTE]
 
+다른 PC 의 대화방 (원격, HTTPS)
+  atalk remote on [--port 7421] | off | status       (호스트 PC) 원격 포트 열기/닫기, 상태와 연결된 에이전트
+  atalk remote code                                   (호스트 PC) 참여 코드 발급 (한 번만, 10분)
+  atalk remote revoke AGENT                           (호스트 PC) 원격 에이전트 연결 끊기
+  atalk connect https://PC:7421 --code CODE           (에이전트) 다른 PC 데몬에 내 네임카드를 등록하고 연결
+  atalk disconnect                                    (에이전트) 원격 연결 끊기 (방에서 나오고 이 PC 데몬으로 돌아옴)
+
 공통 옵션: --as AGENT_ID, --url URL (또는 ATALK_URL), --json
   신원은 --as → ATALK_AGENT(opencode 플러그인이 설정) → CLAUDE_CODE_SESSION_ID(Claude Code) 순으로 정함
 `
@@ -195,7 +202,15 @@ func main() {
 		fmt.Print(help)
 		return
 	}
-	c := client.New(a.str("url"))
+	lc := client.New(a.str("url")) // 이 PC 의 데몬
+	c := lc
+	if a.str("url") == "" { // 이 에이전트가 다른 PC 의 데몬에 연결돼 있으면 그쪽으로 (atalk connect)
+		if id, _ := identity(a); id != "" {
+			if rc := client.LoadConn(id); rc != nil {
+				c = client.NewRemote(rc)
+			}
+		}
+	}
 	var meID string
 	me := func() string {
 		if meID != "" {
@@ -229,8 +244,10 @@ func main() {
 	at := args{pos: rest, flags: a.flags}
 	switch cmd {
 	case "server", "mcp", "hook", "daemon", "autostart", "install", "uninstall":
+	case "remote", "connect":
+		check(daemon.Ensure(lc))
 	default:
-		check(daemon.Ensure(c)) // 데몬이 없으면 백그라운드로 띄운다
+		check(daemon.Ensure(c)) // 데몬이 없으면 백그라운드로 띄운다 (원격이면 연결만 확인)
 	}
 	switch cmd {
 	case "server":
@@ -249,7 +266,7 @@ func main() {
 		release, err := daemon.Lock(root)
 		check(err)
 		defer release()
-		srv, err := server.New(server.Options{Root: root, Addr: fmt.Sprintf("127.0.0.1:%d", port), AwayGrace: time.Duration(graceMin) * time.Minute, MachineID: paths.MachineID()})
+		srv, err := server.New(server.Options{Root: root, Addr: fmt.Sprintf("127.0.0.1:%d", port), AwayGrace: time.Duration(graceMin) * time.Minute, MachineID: paths.MachineID(), RemoteDir: paths.RemoteServerDir()})
 		check(err)
 		p, err := srv.Listen()
 		check(err)
@@ -369,7 +386,29 @@ func main() {
 				room += " (방장)"
 			}
 		}
-		out(v, fmt.Sprintf("나: %s  %q\n상태: %s  방: %s", v.ID, v.Name, v.Status, room))
+		text := fmt.Sprintf("나: %s  %q\n상태: %s  방: %s", v.ID, v.Name, v.Status, room)
+		if c.Remote() {
+			text += fmt.Sprintf("\n원격 연결: %s (%s) — 끊기: atalk disconnect", orText(c.Conn.HostName, "원격 PC"), c.Conn.URL)
+		}
+		out(v, text)
+
+	case "remote":
+		runRemote(lc, at, out)
+
+	case "connect":
+		runConnect(lc, a, at, me, out)
+
+	case "disconnect":
+		id := me()
+		if !c.Remote() {
+			fail("not_connected", "이 에이전트는 원격 데몬에 연결돼 있지 않음")
+		}
+		if r, err := c.MyRoom(id); err == nil && r != "" {
+			_ = c.Leave(id, "원격 연결 끊기")
+		}
+		_ = c.DisconnectRemote()
+		check(client.RemoveConn(id))
+		out(map[string]bool{"ok": true}, fmt.Sprintf("%s 와의 연결을 끊음 — 이제 이 PC 의 데몬을 씁니다", orText(c.Conn.HostName, c.Conn.URL)))
 
 	case "listen":
 		check(listen(c, me()))

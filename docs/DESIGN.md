@@ -177,6 +177,32 @@ waiting ──입장──▶ in_room ──프로세스 죽음 / SessionEnd─�
 | GET | `/rooms/:r/export` | 방 대화를 메신저 형식 HTML 파일 하나로 (`?download=1` 이면 첨부 파일로). 뷰어 HTML 에 `window.ATALK_DATA` 로 데이터를 넣은 것 |
 | GET | `/` | 뷰어 HTML (메신저 형식) |
 
+### 원격 포트 (다른 PC 의 에이전트)
+
+내부 포트와 같은 핸들러를 쓰되, 원격 포트(기본 `0.0.0.0:7421`, HTTPS)에는 아래 경로만 올린다 (`internal/server/remote.go`).
+켜고 끄기는 `<설정 폴더>/remote-server/settings.json` 에 저장하고 데몬이 시작할 때 따른다.
+
+| 인증 | 경로 | 규칙 |
+|---|---|---|
+| 없음 | `GET /health` | PC 이름·OS 만 (데이터 폴더·PID 없음) |
+| 없음 | `POST /remote/pair` `{code, card}` | 참여 코드(일회용, 10분, 10분에 10번 틀리면 잠시 막음) → 카드 등록(`host` 필수, cwd·pid 버림) + 토큰 `{agent, token, machine}` |
+| 토큰 | `POST /remote/disconnect` | 내 토큰 철회 |
+| 토큰 | `GET /agents`, `GET /agents/:id`, `GET /names` | 모든 카드의 cwd·pid 를 뺌 |
+| 토큰 | `POST /agents` | 다시 등록. `kind_session` 이 토큰의 에이전트여야 함, host 는 카드의 것 유지 |
+| 토큰 + 내 id | `PATCH /agents/:id`, `POST …/echo,activate,activity,away,leave,ack`, `GET …/unread,pending,wait,stream` | 경로 `{id}` = 토큰의 에이전트 |
+| 토큰 + 행위자 고정 | `POST /rooms`, `…/invites`, `…/invites/respond`, `…/requests`, `…/requests/respond` | 본문 `agent` 를 토큰의 에이전트로 덮어씀 (없으면 "사람" 으로 처리되는 경로를 막음, 다르면 403) |
+| 토큰 + 내 방 | `GET/POST /rooms/:r/messages`, `GET/POST …/logs`, `POST …/say` | 들어가 있는 방만 |
+| 토큰 | `GET /rooms`, `GET /rooms/:r` | |
+
+관리 API (내부 포트, localOnly): `GET/PUT /admin/remote {on, port}`, `POST /admin/remote/code`, `DELETE /admin/remote/agents/:id`.
+
+- **인증서**: 처음 켤 때 ECDSA P-256 자체 서명 인증서를 만든다. 지문 = base64url(sha256(DER)). 참여 코드 = `<비밀값>.<지문>` 이고 클라이언트는 지문으로만 확인한다(TLS 1.3).
+- **토큰**: 32바이트 무작위. DB `meta.remote_tokens` 에 sha256 만 저장. 다시 페어링하면 예전 토큰 무효, 카드를 지우면 함께 무효.
+- **하트비트**: 원격 카드는 PID 가 없으므로 토큰 요청을 하트비트로 기록한다(메모리). 열린 요청(wait·SSE)이 있거나 마지막 요청이 3분(`RemoteTTL`) 안이면 살아 있음.
+  아니면 방 밖에서는 offline, 방에서는 `away(heartbeat_lost)` → 다음 요청 때 자동 복귀. 데몬 재시작 직후에는 시작 시각부터 센다.
+- **클라이언트**: `atalk connect` 가 `<설정 폴더>/remote/<agent>.json`(URL·토큰·지문·이 PC host·작업 위치 ID, 0600)을 쓴다.
+  `client.ForAgent(id)` 가 이 파일이 있으면 원격 클라이언트를 돌려주므로 CLI·훅(wait 포함)이 그대로 원격 데몬과 통신한다. 원격 등록은 cwd·pid 대신 host·workspace_id 를 보낸다.
+
 ## 7. 에이전트 연동
 
 핵심 문제는 SSE 를 받는 것이 아니라 **받은 메시지를 에이전트 세션 안으로 넣는 것**이다.
@@ -215,5 +241,5 @@ PID 찾기: 훅은 부모 프로세스를 거슬러 올라가며 셸/래퍼(bash
 
 1. opencode 플러그인 성공 경로 실측 (모델 인증 해결 후), 실제 Claude Code 대화형 세션에서 스킬 흐름 실측.
 2. 에이전트별 토큰 인증.
-3. ~~messages.jsonl 끝에서부터 읽기 / seq 색인~~ → v0.3 SQLite 로 해결. 서버·원격 에이전트(토큰 인증, 하트비트 생존 확인, 기기 id)는 별도 계획.
+3. ~~messages.jsonl 끝에서부터 읽기 / seq 색인~~ → v0.3 SQLite 로 해결. ~~원격 에이전트(토큰 인증, 하트비트 생존 확인, 기기 id)~~ → 원격 포트(6장). 남은 것: opencode 플러그인·MCP·브리지의 원격 연결, 웹 설정 화면의 원격 관리.
 4. Gemini CLI 연동.

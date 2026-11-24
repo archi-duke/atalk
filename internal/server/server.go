@@ -35,6 +35,8 @@ type Options struct {
 	AwayGrace  time.Duration
 	SweepEvery time.Duration
 	MachineID  string // 이 PC 의 ID (paths.MachineID). 없으면 core 가 임시로 만든다
+	// RemoteDir 는 원격 포트의 인증서·설정 폴더 (paths.RemoteServerDir). 없으면 원격 기능을 쓰지 않는다.
+	RemoteDir string
 }
 
 type Server struct {
@@ -47,6 +49,9 @@ type Server struct {
 	Restart chan struct{}
 	// RestartPort 가 0 이 아니면 다시 시작할 때 이 포트로 (설정에서 포트 변경)
 	RestartPort int
+
+	remoteDir string
+	remote    remoteState // 원격 포트 (remote.go)
 }
 
 func New(opts Options) (*Server, error) {
@@ -54,7 +59,7 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{Core: c, stop: make(chan struct{}), Restart: make(chan struct{}, 1)}
+	s := &Server{Core: c, stop: make(chan struct{}), Restart: make(chan struct{}, 1), remoteDir: opts.RemoteDir}
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:7420"
 	}
@@ -92,6 +97,7 @@ func (s *Server) Listen() (int, error) {
 			log.Printf("http: %v", err)
 		}
 	}()
+	s.startRemoteFromSettings()
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -167,6 +173,7 @@ func (s *Server) ExportHTML(roomID string) ([]byte, error) {
 
 func (s *Server) Close() error {
 	s.stopMu.Do(func() { close(s.stop) })
+	s.StopRemote()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	err := s.http.Shutdown(ctx)
@@ -216,6 +223,7 @@ func (s *Server) routes() http.Handler {
 		return map[string]any{"recovery": rec, "from": from}, err
 	})
 	s.adminRoutes(h)
+	s.remoteAdminRoutes(h)
 	h("GET /names", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		names, err := c.Names()
 		return map[string]any{"names": names}, err

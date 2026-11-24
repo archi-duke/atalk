@@ -67,6 +67,12 @@ type Atalk struct {
 	trashSwept  time.Time         // 휴지통을 마지막으로 정리한 시각 (한 시간에 한 번)
 	cfg         Config            // 설정 (DB meta.config 의 사본)
 
+	// 원격 에이전트 (다른 PC). remote.go
+	remoteTokens map[string]RemoteToken // 토큰 해시 → 에이전트 (DB meta.remote_tokens 의 사본)
+	remoteSeen   map[string]time.Time   // 원격 에이전트의 마지막 요청 시각 (메모리에만 = 하트비트)
+	remoteActive map[string]int         // 지금 열려 있는 요청 수 (wait 롱폴링·SSE). 열려 있으면 살아 있음
+	started      time.Time              // 데몬 시작 시각 (재시작 직후 원격 에이전트를 바로 끊긴 것으로 보지 않기 위해)
+
 	st      *sqliteStore // 저장 계층 (<root>/atalk.db)
 	inGuard bool
 	pending []Event // 트랜잭션이 확정된 뒤에 내보낼 이벤트
@@ -97,6 +103,8 @@ func New(opts Options) (*Atalk, error) {
 	if c.now == nil {
 		c.now = time.Now
 	}
+	c.started = c.now()
+	c.remoteSeen, c.remoteActive = map[string]time.Time{}, map[string]int{}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
@@ -258,6 +266,10 @@ func (c *Atalk) load() {
 	must(err)
 	c.pastNames = snap.names
 	c.cfg = snap.config
+	c.remoteTokens = snap.remoteTokens
+	if c.remoteTokens == nil {
+		c.remoteTokens = map[string]RemoteToken{}
+	}
 	for _, a := range snap.agents {
 		c.agents[a.ID] = a
 	}
@@ -434,6 +446,7 @@ func (c *Atalk) removeCard(id, reason string) {
 	c.st.PutName(id, card.Name)
 	delete(c.agents, id)
 	c.st.DeleteAgent(id)
+	c.revokeRemote(id)
 	c.logMembership(MembershipEvent{TS: c.ts(), Agent: id, Room: "-", Event: "unregister", Detail: reason})
 	c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "unregister"}})
 }
@@ -446,6 +459,9 @@ func (c *Atalk) statusOf(id string) string {
 		return "offline"
 	}
 	if card, ok := c.agents[id]; ok && card.Pid != nil && !c.isAlive(*card.Pid) {
+		return "offline"
+	}
+	if card, ok := c.agents[id]; ok && !c.isLocal(card) && !c.remoteAlive(id) { // 다른 PC: PID 대신 하트비트
 		return "offline"
 	}
 	return "waiting"
@@ -1911,6 +1927,8 @@ func (c *Atalk) Sweep() error {
 			}
 			if m.State == StateInRoom && card.Pid != nil && !c.isAlive(*card.Pid) {
 				c.markAway(agent, "process_exit")
+			} else if m.State == StateInRoom && !c.isLocal(card) && !c.remoteAlive(agent) {
+				c.markAway(agent, AwayHeartbeatLost)
 			} else if grace := c.awayGrace(); m.State == StateAway && m.AwaySince != nil && grace > 0 {
 				if t, err := time.Parse(time.RFC3339Nano, *m.AwaySince); err == nil && now.Sub(t) > grace {
 					c.leaveInternal(agent, "expire", "자리 비움 유예 시간 초과")

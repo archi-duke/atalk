@@ -33,6 +33,12 @@ func ConfigDir() string {
 
 func RootFile() string { return filepath.Join(ConfigDir(), "root.txt") }
 
+// RemoteServerDir 는 이 PC 가 원격 에이전트를 받을 때 쓰는 인증서·설정 폴더.
+func RemoteServerDir() string { return filepath.Join(ConfigDir(), "remote-server") }
+
+// RemoteConnDir 는 이 PC 의 에이전트가 다른 PC 데몬에 연결한 정보(주소·토큰·인증서 지문) 폴더. 에이전트마다 파일 하나.
+func RemoteConnDir() string { return filepath.Join(ConfigDir(), "remote") }
+
 // MachineFile 은 이 PC 의 ID 를 저장하는 파일. 데이터 폴더가 아니라 설정 폴더에 둔다 (데이터를 다른 PC 로 옮겨도 PC ID 는 따라가지 않게).
 func MachineFile() string { return filepath.Join(ConfigDir(), "machine-id") }
 

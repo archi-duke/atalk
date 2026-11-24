@@ -31,6 +31,19 @@ func (e *Error) Error() string { return e.Message }
 type Client struct {
 	Base string
 	HTTP *http.Client
+	// Token 이 있으면 원격 데몬에 연결한 클라이언트 (Authorization: Bearer). remote.go
+	Token string
+	// Conn 은 원격 연결 정보 (원격일 때만)
+	Conn *RemoteConn
+}
+
+// Remote 는 다른 PC 의 데몬에 연결한 클라이언트인지.
+func (c *Client) Remote() bool { return c.Conn != nil }
+
+func (c *Client) auth(req *http.Request) {
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
 }
 
 func New(base string) *Client {
@@ -61,6 +74,7 @@ func (c *Client) call(method, path string, body any, out any, timeout time.Durat
 	if body != nil {
 		req.Header.Set("content-type", "application/json")
 	}
+	c.auth(req)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return &Error{0, "unreachable", fmt.Sprintf("ATalk 데몬에 연결할 수 없음 (%s): %v", c.Base, err)}
@@ -155,6 +169,9 @@ func (c *Client) SetConfig(cfg core.Config) (core.Config, error) {
 }
 
 func (c *Client) Register(in core.RegisterInput) (r core.RegisterResult, err error) {
+	if c.Conn != nil { // 원격: 경로·PID 대신 이 PC 정보와 작업 위치 ID 만 보낸다
+		in = c.Conn.remoteCard(in)
+	}
 	err = c.call("POST", "/agents", in, &r, 0)
 	return
 }
@@ -408,6 +425,7 @@ func (c *Client) SSE(ctx context.Context, path string, onEvent func(event string
 	if err != nil {
 		return err
 	}
+	c.auth(req)
 	res, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
