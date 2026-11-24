@@ -599,3 +599,27 @@ func (c *Client) Wake(id string) (launched bool, err error) {
 	err = c.call("POST", "/agents/"+esc(id)+"/wake", map[string]any{}, &out, 0)
 	return out.Launched, err
 }
+
+// ProcessRule 은 받은 메시지를 처리하는 순서 안내.
+const ProcessRule = "처리 순서는 atalk 스킬의 \"알림을 받았을 때\" 를 따르세요: log SEQ received → 작업 → send - --type result --reply SEQ --to 보낸이 → log SEQ done. result/status 에는 답장하지 마세요. 답할 필요가 없으면 log SEQ skipped."
+
+// Notice 는 에이전트에게 주는 새 메시지 알림 글 (Claude Stop 훅의 reason, Codex 대기열 메시지).
+// show 가 true 면 받은 메시지를 응답에 옮겨 적게 한다 (Claude CLI 는 훅 알림을 사람 화면에 보여 주지 않음).
+func (c *Client) Notice(room string, msgs []core.InboxMessage, extra []string, show bool) string {
+	parts := []string{fmt.Sprintf("[ATalk] %s 방에서 새 메시지가 왔습니다. 처리하세요.", room)}
+	if p := c.Purpose(room); p != "" {
+		parts = append(parts, p)
+	}
+	if len(msgs) > 0 {
+		parts = append(parts, FormatMessages(msgs, c.Names()))
+	}
+	if len(extra) > 0 {
+		parts = append(parts, strings.Join(extra, "\n"))
+	}
+	parts = append(parts, HumanRule)
+	if show {
+		parts = append(parts, ShowRule)
+	}
+	parts = append(parts, ProcessRule)
+	return strings.Join(parts, "\n\n")
+}

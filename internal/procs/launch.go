@@ -19,6 +19,12 @@ func ResumeCommand(kind, sessionID string) ([]string, error) {
 		return []string{"claude", "--resume", sessionID}, nil
 	case "opencode":
 		return []string{"opencode", "-s", sessionID}, nil
+	case "codex":
+		// Codex 는 다시 연 세션에 첫 입력이 있어야 SessionStart 훅이 돈다 (등록 → 그 뒤 Stop 훅이 쌓인 메시지를 전달)
+		return []string{"codex", "resume", sessionID, CodexWakePrompt}, nil
 	}
-	return nil, errors.New(kind + " 는 아직 깨우기를 지원하지 않음 (Claude Code·opencode 만)")
+	return nil, errors.New(kind + " 는 아직 깨우기를 지원하지 않음 (Claude Code·opencode·Codex 만)")
 }
+
+// CodexWakePrompt 는 깨우기로 다시 연 Codex 세션의 첫 입력. "[ATalk" 로 시작해 CLI 입력 기록에서 빠진다.
+const CodexWakePrompt = "[ATalk] 이 세션을 다시 열었습니다. 대화방 알림이 오면 처리하고, 없으면 대기 중 이라고만 답하세요."

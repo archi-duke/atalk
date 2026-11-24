@@ -9,13 +9,18 @@ import (
 	"strings"
 )
 
+func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
 // LaunchTerminal 은 cwd 에서 새 터미널 창을 열어 argv 를 실행한다 (macOS: Terminal, Linux: x-terminal-emulator·gnome-terminal).
-// argv 는 ResumeCommand 가 만든 안전한 토큰만.
+// 인자는 하나씩 따옴표로 감싸므로 공백이 있는 글(첫 메시지)도 그대로 전달된다.
 func LaunchTerminal(cwd string, argv []string) error {
-	q := "'" + strings.ReplaceAll(cwd, "'", `'\''`) + "'"
-	line := "cd " + q + " && " + strings.Join(argv, " ")
+	q := make([]string, len(argv))
+	for i, a := range argv {
+		q[i] = shQuote(a)
+	}
+	line := "cd " + shQuote(cwd) + " && " + strings.Join(q, " ")
 	if runtime.GOOS == "darwin" {
-		esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(line)
+		esc := strings.NewReplacer(`\`, `\`, `"`, `\"`).Replace(line)
 		return exec.Command("osascript", "-e", `tell application "Terminal" to do script "`+esc+`"`, "-e", `tell application "Terminal" to activate`).Start()
 	}
 	for _, t := range [][]string{{"x-terminal-emulator", "-e"}, {"gnome-terminal", "--"}, {"konsole", "-e"}, {"xterm", "-e"}} {

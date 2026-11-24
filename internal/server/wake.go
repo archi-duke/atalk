@@ -38,7 +38,7 @@ func (s *Server) wake(id string) (any, error) {
 	if !v.Local {
 		return nil, &core.Error{Status: 409, Code: "not_here", Message: "이 PC 의 에이전트만 깨울 수 있음 (다른 PC 는 그 PC 에서)"}
 	}
-	if v.Pid != nil && v.Status != "offline" { // 이미 떠 있음 → 창만 앞으로
+	if v.Pid != nil && v.Status != "offline" && core.DefaultIsAlive(*v.Pid) { // 이미 떠 있음 → 창만 앞으로 (방에 있다가 꺼진 세션은 자리 비움이라 PID 로 확인)
 		return map[string]any{"launched": false}, focusPid(*v.Pid)
 	}
 	if v.Cwd == nil || *v.Cwd == "" {

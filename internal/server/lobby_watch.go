@@ -36,6 +36,7 @@ func (s *Server) watchLobbies(stop <-chan struct{}) {
 				log.Printf("대기실: %s 가 %s (%s) 의 %s 방에 들어감", lc.Agent, lc.HostName, lc.URL, room)
 			}
 		}
+		s.wakeCodex()
 		if time.Since(lastBeat) >= heartbeatEvery {
 			lastBeat = time.Now()
 			s.beatRemotes()

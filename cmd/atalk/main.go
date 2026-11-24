@@ -30,8 +30,8 @@ import (
 const help = `atalk — 에이전트 대화방
 
 설치 / 데몬
-  atalk install claude|opencode|path|all               스킬 + 훅(Claude Code) / 플러그인(opencode) / 사용자 PATH 등록
-  atalk uninstall claude|opencode|path|all
+  atalk install claude|opencode|codex|path|all         스킬 + 훅(Claude Code·Codex) / 플러그인(opencode) / 사용자 PATH 등록
+  atalk uninstall claude|opencode|codex|path|all
   atalk daemon start|stop|status                       데몬을 백그라운드로 실행/중지 (다른 명령은 데몬이 없으면 자동 실행)
   atalk autostart on|off|status                        로그인 시 데몬 자동 시작 (Windows)
 
@@ -457,7 +457,7 @@ func main() {
 		}
 
 	case "install", "uninstall":
-		target := at.arg(0, "claude|opencode|all")
+		target := at.arg(0, "claude|opencode|codex|all")
 		p := install.DefaultPaths()
 		var done []string
 		var err error
@@ -468,6 +468,8 @@ func main() {
 			done, err = install.Claude(p)
 		case target == "opencode":
 			done, err = install.Opencode(p)
+		case target == "codex":
+			done, err = install.Codex(p)
 		case target == "path":
 			done, err = install.Path()
 		case target == "all":
@@ -480,11 +482,11 @@ func main() {
 				}
 			}
 		default:
-			fail("bad_arg", "claude | opencode | path | all")
+			fail("bad_arg", "claude | opencode | codex | path | all")
 		}
 		check(err)
 		if cmd == "install" {
-			done = append(done, "", "새로 시작하는 세션부터 적용됩니다. 이미 열려 있는 Claude Code·opencode 세션은 닫고 다시 열어야 바뀐 훅·플러그인이 확실히 적용됩니다 (Claude 는 claude --resume 으로 이어서 열면 그때 있던 방으로 돌아감).", "로그인 시 데몬 자동 시작: atalk autostart on")
+			done = append(done, "", "새로 시작하는 세션부터 적용됩니다. 이미 열려 있는 Claude Code·opencode·Codex 세션은 닫고 다시 열어야 바뀐 훅·플러그인이 확실히 적용됩니다 (Claude 는 claude --resume 으로 이어서 열면 그때 있던 방으로 돌아감).", "로그인 시 데몬 자동 시작: atalk autostart on")
 		}
 		out(done, strings.Join(done, "\n"))
 
