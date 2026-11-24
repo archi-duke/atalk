@@ -200,6 +200,8 @@ type RemoteStatus struct {
 	Fingerprint string            `json:"fingerprint"`
 	Addresses   []string          `json:"addresses"`
 	Connections []core.RemoteConn `json:"connections"`
+	LobbyOn     bool              `json:"lobby_enabled"`
+	Lobby       []core.AgentView  `json:"lobby"`
 }
 
 func (c *Client) RemoteStatus() (st RemoteStatus, err error) {

@@ -99,6 +99,9 @@ func (s *Server) Listen() (int, error) {
 		}
 	}()
 	s.startRemoteFromSettings()
+	if s.remoteDir != "" { // 실제 데몬: 이 PC 에이전트가 다른 PC 대기실에 있으면 확인 (lobby_watch.go)
+		go s.watchLobbies(s.stop)
+	}
 	return ln.Addr().(*net.TCPAddr).Port, nil
 }
 
@@ -148,7 +151,7 @@ func (s *Server) ExportHTML(roomID string) ([]byte, error) {
 		if !related[a.ID] {
 			continue
 		}
-		a.Cwd, a.Pid, a.Host, a.Workspace, a.WorkspaceID, a.Local = nil, nil, nil, nil, "", false
+		a.Cwd, a.Pid, a.Host, a.Workspace, a.WorkspaceID, a.Local, a.Lobby = nil, nil, nil, nil, "", false, nil
 		agents = append(agents, a)
 	}
 	allNames, err := c.Names()

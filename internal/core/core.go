@@ -71,6 +71,7 @@ type Atalk struct {
 	remoteTokens map[string]RemoteToken // 토큰 해시 → 에이전트 (DB meta.remote_tokens 의 사본)
 	remoteSeen   map[string]time.Time   // 원격 에이전트의 마지막 요청 시각 (메모리에만 = 하트비트)
 	remoteActive map[string]int         // 지금 열려 있는 요청 수 (wait 롱폴링·SSE). 열려 있으면 살아 있음
+	lobby        map[string]*LobbyEntry // 대기실 (코드 없이 들어와 초대를 기다리는 원격 에이전트, 메모리에만). lobby.go
 	started      time.Time              // 데몬 시작 시각 (재시작 직후 원격 에이전트를 바로 끊긴 것으로 보지 않기 위해)
 	events       map[string][]string    // 에이전트별 최근 처리한 훅 기록 id (echo_queue.go, 메모리에만)
 
@@ -105,7 +106,7 @@ func New(opts Options) (*Atalk, error) {
 		c.now = time.Now
 	}
 	c.started = c.now()
-	c.remoteSeen, c.remoteActive = map[string]time.Time{}, map[string]int{}
+	c.remoteSeen, c.remoteActive, c.lobby = map[string]time.Time{}, map[string]int{}, map[string]*LobbyEntry{}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
@@ -487,6 +488,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 		v.Room, v.Role = ptr(m.Room), ptr(m.Role)
 		v.Intro = m.Intro
 	}
+	v.Lobby = c.lobbyInfo(card.ID)
 	return v
 }
 

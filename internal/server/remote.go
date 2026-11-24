@@ -65,6 +65,8 @@ type remoteState struct {
 type remoteSettings struct {
 	Enabled bool `json:"enabled"`
 	Port    int  `json:"port,omitempty"`
+	// NoLobby 이면 대기실(코드 없이 접속)을 막는다. 기본은 허용 (core/lobby.go)
+	NoLobby bool `json:"no_lobby,omitempty"`
 }
 
 func (s *Server) remoteSettingsFile() string { return filepath.Join(s.remoteDir, "settings.json") }
@@ -368,6 +370,78 @@ func (s *Server) remoteHandler() http.Handler {
 			"machine": map[string]string{"name": m.Name, "os": m.OS}})
 	})
 
+	// 대기실 (인증 없이, 토큰 대신 에이전트가 만든 비밀값): 코드 없이 접속해 네임카드만 올리고 초대를 기다린다
+	lobbyOn := func(w http.ResponseWriter) bool {
+		if s.readRemoteSettings().NoLobby {
+			writeErr(w, &core.Error{Status: 403, Code: "lobby_off", Message: "이 PC 는 대기실을 받지 않음 — 호스트 PC 에서 참여 코드(atalk remote code)를 받아 --code 로 연결하세요"})
+			return false
+		}
+		return true
+	}
+	mux.HandleFunc("POST /remote/lobby", func(w http.ResponseWriter, r *http.Request) {
+		if !lobbyOn(w) {
+			return
+		}
+		var b struct {
+			Card   core.RegisterInput `json:"card"`
+			Secret string             `json:"secret"`
+			Nonce  string             `json:"nonce"`
+		}
+		if err := readBody(r, &b); err != nil {
+			writeErr(w, err)
+			return
+		}
+		_, fp, err := s.remoteCert()
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		if len(b.Nonce) < 16 {
+			writeErr(w, &core.Error{Status: 400, Code: "invalid_lobby", Message: "nonce 가 필요함"})
+			return
+		}
+		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+		v, err := c.EnterLobby(b.Card, b.Secret, core.LobbyConfirm(fp, b.Nonce), ip)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		forRemote(&v, "")
+		m := c.Machine()
+		writeOK(w, map[string]any{"agent": v, "machine": map[string]string{"name": m.Name, "os": m.OS}})
+	})
+	mux.HandleFunc("POST /remote/lobby/poll", func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Agent  string `json:"agent"`
+			Secret string `json:"secret"`
+		}
+		if err := readBody(r, &b); err != nil {
+			writeErr(w, err)
+			return
+		}
+		tok, room, err := c.LobbyPoll(b.Agent, b.Secret)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeOK(w, map[string]any{"token": tok, "room": room})
+	})
+	mux.HandleFunc("POST /remote/lobby/leave", func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			Agent  string `json:"agent"`
+			Secret string `json:"secret"`
+		}
+		if err := readBody(r, &b); err != nil {
+			writeErr(w, err)
+			return
+		}
+		if err := c.LeaveLobby(b.Agent, b.Secret); err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeOK(w, map[string]any{})
+	})
+
 	// 디스커버리: 다른 에이전트의 경로·PID 는 빼고 보낸다
 	fn("GET /agents", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
 		a, err := c.ListAgents(r.URL.Query().Get("status"), r.URL.Query().Get("kind"))
@@ -448,7 +522,7 @@ func (s *Server) viewerHost(r *http.Request) string {
 // forRemote 는 원격에 보내는 카드를 고친다: 경로·PID 는 빼고, "이 PC"(local) 는 호스트 데몬이 아니라
 // 요청한 에이전트의 PC 기준으로 다시 정한다 (원격에서 호스트 PC 의 에이전트가 "이 PC" 로 보이지 않게).
 func forRemote(a *core.AgentView, viewerHost string) {
-	a.Cwd, a.Pid = nil, nil
+	a.Cwd, a.Pid, a.Lobby = nil, nil, nil
 	a.Local = viewerHost != "" && a.Host != nil && a.Host.ID == viewerHost
 }
 
@@ -492,9 +566,37 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 			}
 		}
 		conns, err := c.RemoteConns()
+		lobby := []core.AgentView{}
+		if all, e := c.ListAgents("", ""); e == nil {
+			for _, a := range all {
+				if a.Lobby != nil {
+					lobby = append(lobby, a)
+				}
+			}
+		}
 		return map[string]any{"enabled": s.RemotePort() > 0, "port": s.RemotePort(), "saved_port": st.Port, "fingerprint": fp,
-			"addresses": LocalAddrs(), "connections": conns}, err
+			"addresses": LocalAddrs(), "connections": conns, "lobby_enabled": !st.NoLobby, "lobby": lobby}, err
 	}
+	h("PUT /admin/remote/lobby", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			On bool `json:"on"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		if s.remoteDir == "" {
+			return nil, &core.Error{Status: 409, Code: "remote_unavailable", Message: "원격 기능을 쓸 수 없음"}
+		}
+		st := s.readRemoteSettings()
+		st.NoLobby = !b.On
+		if err := s.writeRemoteSettings(st); err != nil {
+			return nil, err
+		}
+		return status()
+	})
+	h("DELETE /admin/remote/lobby/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]any{}, c.RemoveLobby(r.PathValue("id"))
+	})
 	h("GET /admin/remote", func(w http.ResponseWriter, r *http.Request) (any, error) { return status() })
 	h("PUT /admin/remote", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
