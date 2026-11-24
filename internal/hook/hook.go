@@ -35,6 +35,9 @@ type Input struct {
 	TranscriptPath string `json:"transcript_path"`
 	// LastAssistantMessage 는 Stop 훅에 오는 마지막 응답 (Claude Code 버전에 따라 없을 수 있어 transcript 로 대신 읽는다)
 	LastAssistantMessage string `json:"last_assistant_message"`
+	// PostToolUse: 쓴 도구와 입력 (진행 줄을 만든다. 도구 출력은 쓰지 않는다)
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // Run 은 stdin 에서 훅 입력을 읽고 stdout 에 훅 출력을 쓴다.
@@ -52,31 +55,81 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	if event == "session-start" || (event == "prompt" && strings.HasPrefix(strings.TrimSpace(in.Prompt), client.HumanPrefix)) {
 		_ = daemon.Ensure(c) // 데몬이 없으면 백그라운드로 띄운다
 	}
-	if c.Health() != nil {
-		return
+	id := core.MakeAgentID(kind, in.SessionID)
+	// CLI 입력·응답·진행 줄 기록은 데몬이 없어도 outbox 에 남겨 두고 나중에 보낸다 (outbox.go)
+	healthy := c.Health() == nil
+	if healthy {
+		flush(c, id, 0) // 전에 못 보낸 기록부터
 	}
 	var out any
 	switch event {
 	case "session-start":
-		out = sessionStart(c, kind, in)
-	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장을 실시간으로 기록 + 작업 중 신호 갱신
-		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), true)
-		if texts, prompt := turnTexts(in.TranscriptPath); len(texts) > 0 {
-			_ = c.EchoReply(core.MakeAgentID(kind, in.SessionID), texts, false, prompt)
+		if healthy {
+			out = sessionStart(c, kind, in)
+		}
+	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장 + 진행 줄을 실시간으로 기록 + 작업 중 신호 갱신
+		if healthy {
+			_ = c.Activity(id, true)
+		}
+		texts, p := turnTexts(in.TranscriptPath)
+		if len(texts) > 0 {
+			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p})
+		}
+		if line := progressLine(in.ToolName, in.ToolInput); line != "" {
+			enqueue(c, id, client.EchoEvent{Progress: line, Prompt: p})
 		}
 	case "stop":
-		out = stop(c, kind, in)
-		// 응답이 끝났으면 대기. 처리할 방 메시지가 있어 Claude 를 계속 일하게 하면(block) 작업 중 유지
-		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), out != nil)
+		echoTurnEnd(c, id, in)
+		if healthy {
+			out = stop(c, kind, in)
+			// 응답이 끝났으면 대기. 처리할 방 메시지가 있어 Claude 를 계속 일하게 하면(block) 작업 중 유지
+			_ = c.Activity(id, out != nil)
+		}
 	case "prompt":
-		out = prompt(c, kind, in)
+		echoPrompt(c, id, in)
+		if healthy {
+			out = prompt(c, kind, in)
+		}
 	case "session-end":
-		_ = c.Activity(core.MakeAgentID(kind, in.SessionID), false)
-		_ = c.Away(core.MakeAgentID(kind, in.SessionID), "session_end:"+orDefault(in.Reason, "exit"))
+		echoTurnEnd(c, id, in) // Esc 로 중단한 턴의 남은 문장
+		if healthy {
+			_ = c.Activity(id, false)
+			_ = c.Away(id, "session_end:"+orDefault(in.Reason, "exit"))
+		}
 	}
 	if out != nil {
 		_ = json.NewEncoder(stdout).Encode(out)
 	}
+}
+
+func ptrBool(b bool) *bool { return &b }
+
+// echoTurnEnd 는 턴이 끝날 때(Stop) 이번 턴의 응답 문장 중 아직 기록 안 된 것을 남기고 그 입력을 닫는다 (기록할 입력이 없으면 데몬이 무시).
+// transcript 에 중간 문장이 빠지거나 늦게 저장되는 경우가 있어, 훅이 주는 마지막 응답은 항상 덧붙인다.
+// SessionEnd 에도 불러, Esc 로 중단해 Stop 이 오지 않은 턴의 남은 문장을 남긴다.
+func echoTurnEnd(c *client.Client, id string, in Input) {
+	texts, p := turnTexts(in.TranscriptPath)
+	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
+		texts = append(texts, last)
+	}
+	if len(texts) == 0 && p == "" {
+		return
+	}
+	enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(true), Prompt: p})
+}
+
+// echoPrompt 는 사람이 입력한 말을 대화 기록으로 남긴다 (방에 있을 때, /명령·>> 제외, 알림 없음).
+// 그 전에 앞 턴의 남은 문장을 보낸다: Esc 로 중단하면 Stop 이 오지 않아 마지막 문장이 빠지기 때문이다.
+// 앞 턴이 아직 진행 중(이 입력이 대기열에 들어감)일 수 있으므로 앞 입력을 닫지는 않는다 — 다음 턴이 끝날 때 함께 닫힌다.
+func echoPrompt(c *client.Client, id string, in Input) {
+	text := strings.TrimSpace(in.Prompt)
+	if text == "" || strings.HasPrefix(text, client.HumanPrefix) || strings.HasPrefix(text, "/") {
+		return
+	}
+	if texts, p := turnTexts(in.TranscriptPath); len(texts) > 0 && p != "" && !core.SamePrompt(p, text) {
+		enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p})
+	}
+	enqueue(c, id, client.EchoEvent{Text: text})
 }
 
 func orDefault(s, d string) string {
@@ -162,13 +215,6 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 
 func stop(c *client.Client, kind string, in Input) any {
 	id := core.MakeAgentID(kind, in.SessionID)
-	// CLI 입력을 기록했으면 이번 턴의 응답 문장 중 아직 기록 안 된 것을 남기고 턴을 닫는다 (기록할 입력이 없으면 데몬이 무시).
-	// transcript 에 중간 문장이 빠지는 경우가 있어, 훅이 주는 마지막 응답이 없으면 덧붙인다.
-	texts, prompt := turnTexts(in.TranscriptPath)
-	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
-		texts = append(texts, last)
-	}
-	_ = c.EchoReply(id, texts, true, prompt)
 	u, err := c.Unread(id, false)
 	if err != nil {
 		return nil
@@ -246,11 +292,7 @@ func prompt(c *client.Client, kind string, in Input) any {
 	if text != "" && !core.IsSystemPrompt(text) { // 사람이 입력함 → 임시 세션 확정
 		_ = c.Activate(core.MakeAgentID(kind, in.SessionID))
 	}
-	if !strings.HasPrefix(text, client.HumanPrefix) {
-		// 방에 있으면 사람이 입력한 말을 대화 기록으로 남긴다 (/명령 제외, 알림 없음)
-		if text != "" && !strings.HasPrefix(text, "/") {
-			_ = c.EchoPrompt(core.MakeAgentID(kind, in.SessionID), text)
-		}
+	if !strings.HasPrefix(text, client.HumanPrefix) { // CLI 입력 기록은 Run 이 outbox 로 (echoPrompt)
 		return nil
 	}
 	text = strings.TrimSpace(strings.TrimPrefix(text, client.HumanPrefix))

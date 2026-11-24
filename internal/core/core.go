@@ -72,6 +72,7 @@ type Atalk struct {
 	remoteSeen   map[string]time.Time   // 원격 에이전트의 마지막 요청 시각 (메모리에만 = 하트비트)
 	remoteActive map[string]int         // 지금 열려 있는 요청 수 (wait 롱폴링·SSE). 열려 있으면 살아 있음
 	started      time.Time              // 데몬 시작 시각 (재시작 직후 원격 에이전트를 바로 끊긴 것으로 보지 않기 위해)
+	events       map[string][]string    // 에이전트별 최근 처리한 훅 기록 id (echo_queue.go, 메모리에만)
 
 	st      *sqliteStore // 저장 계층 (<root>/atalk.db)
 	inGuard bool
@@ -2082,7 +2083,11 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 			c.saveMemberships()
 		}
 		out := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
-		m.EchoOpen = out.Seq // 이 입력의 응답을 받기 시작 (턴이 끝나면 닫힘)
+		m.normalizeEcho()
+		m.EchoQueue = append(m.EchoQueue, out.Seq) // 이 입력의 응답을 받기 시작 (그 턴이 끝나면 빠짐)
+		if len(m.EchoQueue) > echoQueueMax {
+			m.EchoQueue = m.EchoQueue[len(m.EchoQueue)-echoQueueMax:]
+		}
 		c.saveMemberships()
 		msg = &out
 		return nil
@@ -2102,30 +2107,20 @@ const echoPendingMaxAge = 12 * time.Hour
 func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt string) (out []Message, err error) {
 	err = c.guard(func() error {
 		m, ok := c.memberships[agent]
-		if !ok || m.EchoOpen == 0 {
+		if !ok {
 			return nil
 		}
-		seq := m.EchoOpen
-		if prompt != "" {
-			if q, ok := c.st.MessagesBySeq(m.Room, []int{seq})[seq]; ok && !samePrompt(q.Body, prompt) {
-				return nil // 다른(앞선) 턴의 응답 — 기록하지 않고, 기다리는 입력의 기록도 닫지 않는다
-			}
+		seq, idx := c.echoTarget(m, prompt)
+		if seq == 0 {
+			return nil // 기다리는 입력이 없거나, 다른(앞선) 턴의 응답 — 기록하지 않고 큐도 건드리지 않는다
 		}
-		if final {
-			m.EchoOpen = 0
+		if final { // 이 입력과 그보다 앞선 입력(턴이 중단돼 닫히지 않은 것)을 닫는다
+			m.EchoQueue = slices.Clone(m.EchoQueue[idx+1:])
 			c.saveMemberships()
 		}
 		room, err := c.requireRoom(m.Room, true)
-		if err != nil || seq > c.lastSeq[m.Room] {
+		if err != nil {
 			return nil
-		}
-		// 오래된 입력에는 붙이지 않는다 (턴이 비정상으로 끝나 닫히지 않은 경우)
-		if q, ok := c.st.MessagesBySeq(m.Room, []int{seq})[seq]; ok {
-			if t, err := time.Parse(time.RFC3339Nano, q.TS); err == nil && c.now().Sub(t) > echoPendingMaxAge {
-				m.EchoOpen = 0
-				c.saveMemberships()
-				return nil
-			}
 		}
 		if c.readConfig().EchoFinalOnly { // 결과만: 중간 문장은 버리고 턴이 끝날 때 마지막 답만
 			if !final {
@@ -2144,7 +2139,7 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 		}
 		have := map[string]bool{}
 		for _, x := range c.st.Messages(m.Room, seq, 0) {
-			if x.From == agent && x.Echo && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {
+			if x.From == agent && x.Echo && !x.Progress && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == seq {
 				have[x.Body] = true
 			}
 		}
@@ -2170,6 +2165,9 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 	})
 	return
 }
+
+// SamePrompt 는 samePrompt 를 훅에서 쓰게 내보낸 것.
+func SamePrompt(recorded, prompt string) bool { return samePrompt(recorded, prompt) }
 
 // samePrompt 는 CLI 입력 기록(잘렸을 수 있음)과 transcript 의 입력이 같은 말인지 본다 (앞 200자 비교, 공백 정리).
 func samePrompt(recorded, prompt string) bool {

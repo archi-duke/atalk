@@ -271,9 +271,21 @@ func (s *Server) routes() http.Handler {
 			Final *bool    `json:"final"` // 응답: 턴이 끝났음 (없으면 true)
 			// 응답: 이번 턴을 시작한 사람 입력. 응답을 기다리는 CLI 입력과 다르면(대기열의 앞선 턴) 무시
 			Prompt string `json:"prompt"`
+			// Progress 는 진행 줄 한 줄 (도구 사용). 그 입력의 진행 줄 메시지에 덧붙인다
+			Progress string `json:"progress"`
+			// EID 는 훅이 다시 보낼 때 같은 기록을 두 번 남기지 않기 위한 id (훅의 outbox)
+			EID string `json:"eid"`
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
+		}
+		id := r.PathValue("id")
+		if !c.MarkEvent(id, b.EID) {
+			return map[string]any{"recorded": false, "duplicate": true}, nil
+		}
+		if b.Progress != "" {
+			m, err := c.EchoProgress(id, b.Progress, b.Prompt)
+			return map[string]any{"recorded": m != nil, "message": m}, err
 		}
 		if b.Reply {
 			texts := b.Texts
