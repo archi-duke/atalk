@@ -48,7 +48,7 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	if json.Unmarshal(raw, &in) != nil || in.SessionID == "" || !core.IsValidKind(kind) {
 		return
 	}
-	c := client.New("")
+	c := client.ForAgent(core.MakeAgentID(kind, in.SessionID)) // 다른 PC 의 데몬에 연결된 세션이면 그쪽으로 (atalk connect)
 	if event == "session-start" || (event == "prompt" && strings.HasPrefix(strings.TrimSpace(in.Prompt), client.HumanPrefix)) {
 		_ = daemon.Ensure(c) // 데몬이 없으면 백그라운드로 띄운다
 	}

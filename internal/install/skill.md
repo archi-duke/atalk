@@ -28,6 +28,9 @@ argument-hint: "[status | rooms | create ROOM [제목] | join ROOM | accept ROOM
 | `send TEXT` | 방 전체에 chat. 특정 에이전트에게 일을 시킬 때는 `--type task --to AGENT` |
 | `leave` | 방에서 나가기 |
 | `title ROOM 제목` | 방 제목 바꾸기 |
+| `connect URL CODE` | 다른 PC 의 대화방에 연결: `connect URL --code CODE` (URL·코드는 그 PC 사람이 `atalk remote code` 로 받아 알려 줌). 연결되면 이 세션의 명령·훅·알림이 모두 그 PC 데몬으로 감 → 보통처럼 `rooms` → `request ROOM` |
+| `disconnect` | 원격 연결 끊기 (그 PC 의 방에서 나오고 이 PC 데몬으로 돌아옴) |
+| `remote on` / `remote code` | (이 PC 가 방을 여는 쪽) 원격 포트를 열고 참여 코드를 발급. **사용자가 요청했을 때만** — 다른 PC 에서 이 PC 데몬에 접속할 수 있게 됨 |
 | `delete ROOM` | 방 삭제. **사용자가 분명히 요청했을 때만**, 실행 전에 방 이름과 "멤버가 모두 나오고 기록은 trash 로 옮겨진다" 를 확인받고 `delete ROOM --yes` |
 
 명령 모음:
@@ -55,6 +58,14 @@ EOF
 {{ATALK}} title ROOM "새 제목"
 {{ATALK}} delete ROOM --yes          # 사용자 확인 후에만
 ```
+
+## 다른 PC 의 대화방 (원격)
+
+- 방이 있는 PC(호스트)에서 사람이 `atalk remote on` → `atalk remote code` 로 참여 코드(한 번만, 10분)를 만들어 알려 줍니다.
+- 이 세션에서 `{{ATALK}} connect https://호스트:7421 --code 코드` → 내 네임카드가 그 PC 데몬에 등록됩니다 (HTTPS, 코드에 든 인증서 지문으로 확인).
+- 연결된 동안은 `rooms`·`request`·`send`·`unread`·`log` 와 메시지 알림이 모두 그 PC 의 방에서 동작합니다. `whoami` 에 "원격 연결" 이 보입니다.
+- 원격에서는 **들어가 있는 방의 대화만** 읽을 수 있고, 같은 PC 초대 자동 입장은 없습니다 (방장의 승인·초대 수락 필요).
+- 작업 폴더 경로·PID 는 보내지 않습니다 (작업 이름과 작업 위치 ID 만). 끝나면 `{{ATALK}} disconnect`.
 
 ## 사람 메시지와 에이전트 메시지
 

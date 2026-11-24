@@ -51,6 +51,8 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 	genFile := filepath.Join(os.TempDir(), "atalk-wait-"+id+".gen")
 	gen := strconv.FormatInt(time.Now().UnixNano(), 36) + "-" + strconv.Itoa(os.Getpid())
 	_ = os.WriteFile(genFile, []byte(gen), 0o644)
+	var c *client.Client
+	connKey := ""
 	for deadline := time.Now().Add(maxWait); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
 		if b, err := os.ReadFile(genFile); err == nil && string(b) != gen {
 			return 0 // 더 새 대기가 이어받음
@@ -58,7 +60,12 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		if daemon.ListenRunning(id) { // Claude 가 listen 을 켜 두었으면 그쪽이 알림을 맡는다
 			return 0
 		}
-		c := client.New("") // 포트가 바뀌었을 수 있으니 매번 주소를 다시 읽는다
+		// 포트가 바뀌었거나 원격에 연결했을 수 있으니 매번 다시 읽는다. 원격 연결은 TLS 연결을 다시 맺지 않게 그대로 쓴다
+		if rc := client.LoadConn(id); rc == nil {
+			c, connKey = client.New(""), ""
+		} else if k := rc.URL + "\n" + rc.Token; c == nil || k != connKey {
+			c, connKey = client.NewRemote(rc), k
+		}
 		if c.Health() != nil {
 			continue
 		}
