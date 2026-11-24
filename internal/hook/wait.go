@@ -78,9 +78,10 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 			if !known {
 				startRoom, known = room, true
 			} else if room != "" && room != startRoom && !seen["room:"+room] {
-				// 같은 PC 에서 대기 중이라 초대와 함께 자동으로 들어감 → 깨워서 알린다
+				// 방에 들어감 → 깨워서 알린다. 이유는 여기서 알 수 없다: 같은 PC 초대 자동 입장(초대는 바로 사라짐)일 수도,
+				// 내 참여 신청이 승인된 것일 수도 있으므로 단정하지 않는다
 				seen["room:"+room] = true
-				lines = append(lines, fmt.Sprintf("[ATalk] 초대를 받아 %s 방에 들어왔습니다 (같은 PC 에서 대기 중이라 자동 입장).", room))
+				lines = append(lines, fmt.Sprintf("[ATalk] %s 방에 들어왔습니다 (참여 신청이 승인됐거나, 대기 중에 받은 초대로 자동 입장).", room))
 				if p := c.Purpose(room); p != "" {
 					lines = append(lines, p)
 				}

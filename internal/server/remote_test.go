@@ -58,7 +58,7 @@ func TestRemoteFlow(t *testing.T) {
 	rc, v, err := client.Pair(client.PairInput{URL: url, Code: pc.Code, Card: card, Host: me, Cwd: "/home/guest/proj"})
 	must(err)
 	G := v.ID
-	if v.Local || v.Cwd != nil || v.Host == nil || v.Host.ID != "guest-pc" || v.WorkspaceID == "" || v.Workspace == nil || *v.Workspace != "proj" {
+	if !v.Local || v.Cwd != nil || v.Host == nil || v.Host.ID != "guest-pc" || v.WorkspaceID == "" || v.Workspace == nil || *v.Workspace != "proj" {
 		t.Fatalf("원격 카드: %+v", v)
 	}
 	if _, _, err := client.Pair(client.PairInput{URL: url, Code: pc.Code, Card: card, Host: me}); err == nil {
@@ -79,12 +79,19 @@ func TestRemoteFlow(t *testing.T) {
 		if a.Cwd != nil || a.Pid != nil {
 			t.Fatalf("원격에 경로·PID 노출: %+v", a)
 		}
+		// "이 PC" 는 요청한 에이전트의 PC 기준: 호스트 PC 의 에이전트는 아니고 내 카드만
+		if a.Local != (a.ID == G) {
+			t.Fatalf("원격에서 본 local 이 잘못됨: %s local=%v", a.ID, a.Local)
+		}
+	}
+	if me, err := rcl.Agent(L); err != nil || me.Local {
+		t.Fatalf("호스트 에이전트를 원격에서 보면 이 PC 가 아님: %+v %v", me, err)
 	}
 	// 다시 등록(세션 시작 훅): 경로 대신 작업 위치 ID
 	cwd := "/home/guest/proj"
 	rr, err := rcl.Register(core.RegisterInput{Kind: "claude-code", SessionID: "guest", Cwd: &cwd})
 	must(err)
-	if rr.Agent.Cwd != nil || rr.Agent.Host.ID != "guest-pc" || rr.Agent.WorkspaceID != v.WorkspaceID {
+	if rr.Agent.Cwd != nil || !rr.Agent.Local || rr.Agent.Host.ID != "guest-pc" || rr.Agent.WorkspaceID != v.WorkspaceID {
 		t.Fatalf("다시 등록: %+v", rr.Agent)
 	}
 	if _, err := rcl.Register(core.RegisterInput{Kind: "claude-code", SessionID: "someone-else"}); err == nil {
