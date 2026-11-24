@@ -55,6 +55,9 @@ type Membership struct {
 	EchoQueue []int `json:"echo_queue,omitempty"`
 	// EchoOpen 은 예전 형식(한 칸). 읽을 때 EchoQueue 로 옮긴다.
 	EchoOpen int `json:"echo_open,omitempty"`
+	// Intro 는 초대 수락·신청 승인으로 새로 들어와 아직 방에 인사·자기소개를 하지 않았음.
+	// 이 에이전트가 방에 처음 글을 쓰면 꺼진다. 훅·플러그인이 보고 "먼저 인사하고 자기소개" 를 지시한다.
+	Intro bool `json:"intro,omitempty"`
 }
 
 type MembershipEvent struct {
@@ -169,6 +172,7 @@ type AgentView struct {
 	Status string  `json:"status"` // waiting | in_room | away | offline
 	Room   *string `json:"room"`
 	Role   *string `json:"role"`
+	Intro  bool    `json:"intro,omitempty"` // 새로 들어와 아직 인사·자기소개 전 (Membership.Intro)
 }
 
 type RoomMember struct {

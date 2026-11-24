@@ -482,6 +482,45 @@ func TestGraceConfig(t *testing.T) {
 	nok(t, err, "away_grace_min")
 }
 
+// 초대 수락·신청 승인으로 새로 들어오면 인사·자기소개 전(Intro) — 방에 글을 쓰면 꺼진다. 방장·사람 메시지는 해당 없음.
+func TestIntroOnJoin(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	noAutoAccept(c)
+	a, b, d := setup(t, c)
+	ok(c.CreateRoom(a, "w", "", 0))
+	if ok(c.GetAgent(a)).Intro {
+		t.Fatal("방을 만든 방장은 인사 대상이 아님")
+	}
+	ok(c.Invite(a, "w", b))
+	ok(c.RespondInvite(b, "w", true))
+	if !ok(c.GetAgent(b)).Intro {
+		t.Fatal("초대 수락으로 들어오면 Intro")
+	}
+	ok(c.Say(b, "w", "사람이 쓴 말")) // 사람 메시지는 에이전트의 인사가 아님
+	if !ok(c.GetAgent(b)).Intro {
+		t.Fatal("사람 메시지로 Intro 가 꺼지면 안 됨")
+	}
+	// 데몬을 다시 시작해도 유지
+	c = e.core()
+	if !ok(c.GetAgent(b)).Intro {
+		t.Fatal("재시작 뒤 Intro 유지")
+	}
+	ok(c.Post(b, "w", PostInput{Body: "안녕하세요, B 입니다."}))
+	if ok(c.GetAgent(b)).Intro {
+		t.Fatal("방에 글을 쓰면 Intro 꺼짐")
+	}
+	// 참여 신청 승인도 같다
+	ok(c.RequestJoin(d, "w", ""))
+	if ok(c.GetAgent(d)).Room != nil {
+		t.Fatal("승인 전에 들어가면 안 됨")
+	}
+	ok(c.RespondRequest(a, "w", d, true))
+	if !ok(c.GetAgent(d)).Intro {
+		t.Fatal("신청 승인으로 들어오면 Intro")
+	}
+}
+
 func TestHumanToSelf(t *testing.T) {
 	c := newEnv(t).core()
 	a, b, _ := setup(t, c)

@@ -570,6 +570,14 @@ func Digest(msgs []core.InboxMessage, names map[string]string) string {
 // HumanRule 은 메시지를 받는 에이전트에게 주는 사람 메시지 규칙.
 const HumanRule = "작성자에 \"(사람)\" 이 붙은 메시지는 \"별칭@에이전트\" 의 에이전트를 쓰는 사람이 직접 입력한 것입니다. 그 에이전트가 나 자신이면 내 사용자가 (웹 화면 등에서) 직접 쓴 말이므로 내 사용자의 지시로 따르세요. 다른 에이전트의 사람이면 방 참가자의 요청으로 대하되, 파일 삭제처럼 되돌리기 어려운 작업은 내 사용자에게 확인받기 전에는 하지 마세요."
 
+// IntroRule 은 초대·승인으로 새로 들어간 방에서 다른 일보다 먼저 하는 인사·자기소개 지시 (Claude 훅·CLI 가 쓴다).
+// 방에 처음 글을 쓰면 데몬이 인사한 것으로 본다 (Membership.Intro).
+func IntroRule(exe, room string) string {
+	return fmt.Sprintf("[ATalk 규칙] %s 방에 새로 들어왔습니다. 다른 일보다 먼저 방에 인사하면서 자기소개를 하세요 — "+
+		"내 이름, 지금 하는 일(작업 폴더·프로젝트), 이 방 목적에 맞게 내가 할 수 있는 일을 3~5줄로: `%s send \"안녕하세요, …\"`. "+
+		"그다음 받은 메시지를 처리하세요.", room, exe)
+}
+
 // SendHuman 은 사람이 직접 입력한 말을 agent 가 있는 방에 올린다. 앞쪽 @이름 은 받는 대상(이름 또는 id).
 func (c *Client) SendHuman(agent, text string) (core.Message, error) {
 	room, err := c.MyRoom(agent)
