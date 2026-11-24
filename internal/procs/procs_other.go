@@ -29,3 +29,12 @@ func list() (map[int]Proc, error) {
 	}
 	return out, nil
 }
+
+// exePath 는 프로세스 명령줄 (실행 파일 경로 + 인자). 모르면 "".
+func exePath(pid int) string {
+	b, err := exec.Command("ps", "-o", "args=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}

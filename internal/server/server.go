@@ -305,6 +305,9 @@ func (s *Server) routes() http.Handler {
 		if !v.Local || v.Pid == nil || v.Status == "offline" {
 			return nil, &core.Error{Status: 409, Code: "not_running_here", Message: "이 PC 에서 실행 중인 에이전트만 창을 앞으로 가져올 수 있음"}
 		}
+		if v.Shared {
+			return nil, &core.Error{Status: 409, Code: "shared_server", Message: "이 Codex 세션은 공유 백그라운드 서버에서 실행 중이라 창을 찾을 수 없음 — codex --no-daemon 으로 열면 됨"}
+		}
 		return map[string]any{}, focusPid(*v.Pid)
 	})
 	// 깨우기: 꺼진(창을 닫은) 이 PC 에이전트를 그 작업 폴더에서 새 터미널로 다시 띄우고(이전 세션 이어서) 창을 앞으로.
