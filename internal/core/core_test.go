@@ -1397,6 +1397,18 @@ func TestBusyAckTargetAndOnce(t *testing.T) {
 	if n != 1 {
 		t.Fatal("새 작업 중 구간에는 다시 한 번")
 	}
+	// 내 사람이 웹에서 쓴 말에 대한 자동 수신 확인(From=To=나, 사람 표시 없음)은 나도 깨우지 않는다
+	ok(c.Unread(b, true))
+	h := ok(c.Say(b, "r", "지금 뭐 해?"))
+	u := ok(c.Unread(b, false))
+	for _, m := range u.Messages {
+		if m.Type == "status" && m.ReplyTo != nil && *m.ReplyTo == h.Seq {
+			t.Fatal("내 사람 말에 대한 자동 수신 확인이 나를 깨우면 안 됨")
+		}
+	}
+	if !slices.ContainsFunc(u.Messages, func(m InboxMessage) bool { return m.Seq == h.Seq && m.ForMe }) {
+		t.Fatal("내 사람의 말 자체는 나에게 와야 함")
+	}
 }
 
 // 작업 중 표시: 훅·플러그인이 알린 대로, 방에 없어도(CLI 에서 일함) 보이고, 끝나거나 15분 신호가 없거나 자리 비움이면 꺼진다.
