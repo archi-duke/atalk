@@ -924,24 +924,18 @@ $("#mDelete").onclick = async () => {
 };
 
 // ───────── 참여 에이전트 상태 ─────────
-// 작업중: 처리 기록상 받았거나(received) 처리 중(working)인데 아직 끝나지 않은 메시지가 있음
-// 대기: 방에 있고 처리 중인 메시지 없음 · 비활성: 자리 비움(에이전트가 꺼짐)
-// 처리 기록을 닫지 않고 쉬러 간 경우(세션은 busy 아님 + 기록이 STALE_MS 넘게 그대로)는 "대기 · 미완료 #N" — 작업중으로 계속 보이지 않게.
-// busy 를 알리지 않는 에이전트(브리지 등)도 있어, 최근 기록은 busy 신호 없이도 작업중으로 본다.
-const STALE_MS = 15 * 60 * 1000; // 데몬 busyTimeout 과 같게
+// 작업중/대기는 에이전트 목록과 같이 세션 상태(busy: 훅·플러그인이 알림)로 판단한다.
+// 처리 기록(received/working 이 마지막인 메시지)은 작업중일 때 "#N" 표시에만 쓴다 — 기록을 안 닫고 쉬러 가도 작업중으로 남지 않게.
+// 비활성: 자리 비움(에이전트가 꺼짐)
 function presenceRows(room, logs) {
-  const last = {}; // agent → seq → 마지막 {state, ts}
-  for (const e of logs) (last[e.agent] ||= {})[e.seq] = e;
-  const now = Date.now();
+  const last = {}; // agent → seq → 마지막 상태
+  for (const e of logs) (last[e.agent] ||= {})[e.seq] = e.state;
   return room.members.map((m) => {
-    const open = Object.entries(last[m.agent] || {}).filter(([, e]) => e.state === "received" || e.state === "working");
     if (m.state === "away") return { m, cls: "off", text: "비활성", title: "자리 비움: 에이전트가 꺼져 있음" };
-    const live = open.filter(([, e]) => m.busy || now - Date.parse(e.ts) < STALE_MS).map(([seq]) => Number(seq));
-    const stale = open.map(([seq]) => Number(seq)).filter((s) => !live.includes(s));
-    if (live.length) return { m, cls: "busy", text: "작업중 #" + Math.max(...live) + (live.length > 1 ? " 외 " + (live.length - 1) : ""), title: "처리 중인 메시지: #" + live.join(", #") };
-    if (stale.length && !m.busy) return { m, cls: "idle", text: "대기 · 미완료 #" + Math.max(...stale) + (stale.length > 1 ? " 외 " + (stale.length - 1) : ""), title: "처리 기록이 닫히지 않은 메시지: #" + stale.join(", #") + " (에이전트는 쉬는 중)" };
-    if (m.busy) return { m, cls: "busy", text: "작업중", title: "일하는 중 (CLI 에서 받은 일 포함)" };
-    return { m, cls: "idle", text: "대기", title: "방에 있고 처리 중인 메시지 없음" };
+    if (!m.busy) return { m, cls: "idle", text: "대기", title: "방에 있고 쉬는 중" };
+    const open = Object.entries(last[m.agent] || {}).filter(([, st]) => st === "received" || st === "working").map(([seq]) => Number(seq));
+    if (open.length) return { m, cls: "busy", text: "작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : ""), title: "처리 중인 메시지: #" + open.join(", #") };
+    return { m, cls: "busy", text: "작업중", title: "일하는 중 (CLI 에서 받은 일 포함)" };
   });
 }
 function renderPresence(room, logs) {
