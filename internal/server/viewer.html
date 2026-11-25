@@ -56,6 +56,17 @@
   .row .title { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .row .when { color:var(--muted); font-size:11px; flex:none; }
   .row .prev { color:var(--muted); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* 아이콘: 이모지 또는 이미지 (에이전트·방) */
+  .ava img, .room-ico img, .ico-prev img { width:100%; height:100%; object-fit:cover; border-radius:inherit; display:block; }
+  .ava .emo, .room-ico .emo, .ico-prev .emo { font-size:1.35em; line-height:1; }
+  .ava.has-img, .room-ico.has-img { background:transparent !important; overflow:hidden; }
+  .ico-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(40px, 1fr)); gap:6px; }
+  .ico-grid button { height:40px; border:1px solid var(--line); border-radius:12px; background:var(--bg); font-size:20px; cursor:pointer; }
+  .ico-grid button:hover, .ico-grid button.on { border-color:var(--accent); }
+  .crop { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+  .crop canvas { width:240px; height:240px; border-radius:16px; background:var(--chat); cursor:grab; touch-action:none; max-width:100%; }
+  .crop canvas:active { cursor:grabbing; }
+  .ico-prev { width:56px; height:56px; border-radius:18px; display:grid; place-items:center; color:#fff; font-weight:700; font-size:22px; overflow:hidden; }
   .room-ico { width:44px; height:44px; border-radius:16px; background:var(--chat); display:grid; place-items:center; font-weight:700; color:var(--sys); flex:none; }
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
   .st-busy { background:#e08a1e; animation:pulse 1.2s ease-in-out infinite; }
@@ -309,6 +320,7 @@
         <div class="menu" id="menu" hidden>
           <button id="mRename">제목 변경</button>
           <button id="mDesc">목적(설명) 변경…</button>
+          <button id="mIcon">아이콘 변경…</button>
           <button id="mInvite">에이전트 초대·신청…</button>
           <button id="mLimit">메시지 한도…</button>
           <a id="export">내보내기 (HTML 파일)</a>
@@ -328,6 +340,22 @@
     <div class="send-err" id="sendErr"></div>
   </section>
 </div>
+<dialog class="settings" id="iconDlg" aria-labelledby="icoTitle">
+  <form method="dialog">
+    <header><h2 id="icoTitle">아이콘 변경</h2><button class="x" aria-label="닫기">×</button></header>
+    <div class="body">
+      <section><h3>후보 아이콘</h3><div class="ico-grid" id="icoGrid"></div></section>
+      <section><h3>내 이미지</h3>
+        <p class="note">이미지를 고른 뒤 끌어서 위치를, 막대로 크기를 맞추세요. 128px 로 줄여 저장합니다.</p>
+        <input type="file" id="icoFile" accept="image/*">
+        <div class="crop" id="icoCrop" hidden><canvas id="icoCanvas" width="480" height="480"></canvas>
+          <label class="f">확대 <input type="range" id="icoZoom" min="1" max="4" step="0.01" value="1"></label></div>
+      </section>
+      <section><h3>미리 보기</h3><div style="display:flex;gap:10px;align-items:center"><div class="ico-prev" id="icoPrev"></div><button type="button" class="btn2" id="icoReset">기본(첫 글자)으로</button></div></section>
+    </div>
+    <footer><span class="msg" id="icoMsg"></span><button class="btn2" value="cancel">취소</button><button type="button" class="btn2 primary" id="icoSave">저장</button></footer>
+  </form>
+</dialog>
 <dialog class="settings" id="inviteDlg" aria-labelledby="invTitle">
   <form method="dialog">
     <header><h2 id="invTitle">에이전트 초대·신청</h2><button class="x" aria-label="닫기">×</button></header>
@@ -538,11 +566,18 @@ function md(src) {
 // 말풍선 본문: 마크다운으로 렌더
 function fmt(s) { return md(s); }
 const FOCUS_HINT = "Ctrl+클릭: 이 에이전트의 CLI 창을 맨 앞으로";
+// 아이콘 내용: "emoji:…" → 그 글자, data:image/… → 이미지, 없으면 이름 첫 글자
+function icoInner(icon, name) {
+  if (typeof icon === "string" && icon.startsWith("emoji:")) return '<span class="emo">' + esc(icon.slice(6)) + "</span>";
+  if (typeof icon === "string" && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(icon)) return '<img src="' + icon + '" alt="">';
+  return esc([...(name || "")][0] || "?");
+}
+const imgCls = (icon) => (typeof icon === "string" && icon.startsWith("data:image/") ? " has-img" : "");
 function avatar(m) {
   if (m.human) return '<div class="ava" style="background:#e0a526" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + esc([...m.human][0] || "?") + "</div>";
   const a = agents[m.from];
   const color = KIND_COLOR[a?.kind] || "#8a9099";
-  return '<div class="ava" style="background:' + color + '" data-agent="' + esc(m.from) + '" title="' + esc(a?.kind || "") + " · " + FOCUS_HINT + '">' + esc([...nameOf(m.from)][0] || "?") + "</div>";
+  return '<div class="ava' + imgCls(a?.avatar) + '" style="background:' + color + '" data-agent="' + esc(m.from) + '" title="' + esc(a?.kind || "") + " · " + FOCUS_HINT + '">' + icoInner(a?.avatar, nameOf(m.from)) + "</div>";
 }
 // 에이전트(아바타·이름·멤버·목록)를 Ctrl+클릭(맥은 ⌘+클릭) → 그 에이전트의 CLI 창을 맨 앞으로 (이 PC 에서 실행 중일 때)
 // 깨우기: 이 PC 의 Claude Code·opencode·Codex 세션. 꺼져 있으면 새 터미널로 이전 세션을 이어서 열고, 떠 있으면 창을 앞으로
@@ -642,7 +677,7 @@ function renderSide() {
     const groups = [...pcs.values()].sort((p, q) => (q.local - p.local) || (p.host.name || "").localeCompare(q.host.name || ""));
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
-      return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
+      return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava' + imgCls(x.avatar) + '" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + icoInner(x.avatar, x.name) + '</div><div class="txt">' +
         '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : deaf(x) ? '<span title="' + DEAF_HINT + '">🔕 알림 꺼짐 · ' + (STATUS_KO[x.status] || x.status) + "</span>" : x.shared ? '<span title="Codex 공유 백그라운드 서버에서 실행 중: 창을 찾을 수 없음 (codex --no-daemon 으로 열면 됨)">창 없음 · ' + (x.busy ? "작업 중" : STATUS_KO[x.status] || x.status) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
         '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (canWake(x) ? '<button class="wake" data-wake="' + esc(x.id) + '" title="' + (x.status === "offline" || x.status === "away" ? "이 세션을 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서) 창을 앞으로" : "이 에이전트의 CLI 창을 앞으로") + '">깨우기</button>' : "") +
@@ -657,6 +692,12 @@ function renderSide() {
     $("#list").querySelectorAll(".row[data-a]").forEach((el) => (el.onclick = (e) => {
       if (e.target.closest(".del, .wake")) return;
       openAgent = openAgent === el.dataset.a ? null : el.dataset.a; renderSide();
+    }));
+    $("#list").querySelectorAll("[data-icon-agent]").forEach((b) => (b.onclick = (e) => {
+      e.stopPropagation();
+      const a = agents[b.dataset.iconAgent];
+      if (a) openIconEditor({ title: a.name + " 아이콘", current: a.avatar || "", name: a.name, color: KIND_COLOR[a.kind] || "#8a9099",
+        save: (icon) => send("PATCH", "/agents/" + encodeURIComponent(a.id), { avatar: icon }) });
     }));
     $("#list").querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async (e) => {
       e.stopPropagation();
@@ -679,7 +720,7 @@ function renderSide() {
     const p = previews[x.room_id];
     const plain = (t) => clean(t).replace(/\*\*|__|~~|`/g, "").replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, ""); // 미리보기는 마크다운 기호를 걷어 낸다
     const prev = p ? (p.type === "system" ? clean(p.body) : (p.human ? p.human + "@" : "") + nameOf(p.from) + ": " + plain(p.body)) : "메시지 없음";
-    return '<div class="row' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><div class="room-ico">' + esc([...(x.title || x.room_id)][0]) + "</div>" +
+    return '<div class="row' + (x.room_id === selected ? " sel" : "") + '" data-r="' + esc(x.room_id) + '"><div class="room-ico' + imgCls(x.icon) + '">' + icoInner(x.icon, x.title || x.room_id) + "</div>" +
       '<div class="txt"><div class="top"><span class="title">' + esc(x.title || x.room_id) + ' <span class="when">' + x.members.length + "</span>" + (x.closed_at ? ' <span class="when">닫힘</span>' : "") +
       '</span><span class="when">' + shortWhen(p?.ts) + '</span></div><div class="prev">' + esc(prev.split("\n")[0]) + "</div>" + cardPresence(x) + "</div></div>";
   }).join("") || '<div class="empty">대화방 없음</div>';
@@ -696,7 +737,8 @@ function agentDetail(x) {
     kv("폴더", x.local && x.cwd ? "<code>" + esc(x.cwd) + '</code><button data-copy="' + esc(x.cwd) + '">복사</button>' : x.local ? "" : "(다른 PC — 표시 안 함)") +
     kv("종류", esc(x.kind)) + kv("ID", "<code>" + esc(x.id) + "</code>") +
     kv("사람", x.human ? esc(x.human) : "") + kv("능력", (x.capabilities || []).map(esc).join(", ")) +
-    kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") + "</div>";
+    kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") +
+    (DATA ? "" : '<div><b>아이콘</b><span><button data-icon-agent="' + esc(x.id) + '">아이콘 변경…</button></span></div>') + "</div>";
 }
 
 // 대화방 카드 안의 참여 에이전트 상태: "● 마스터  ● 오1 작업중 #5  ○ 오2"
@@ -802,7 +844,7 @@ function renderChat(scroll) {
     // 이 메시지를 지금 처리 중인 에이전트 (처리 기록이 받음·처리 중 + 세션이 실제로 일하는 중) → 도는 테두리 아이콘
     const working = Object.values(logs[m.seq] || {}).filter((e) => (e.state === "received" || e.state === "working") && busyNow[e.agent]).map((e) => e.agent);
     const wk = working.length ? '<span class="wk">' + working.map((id) =>
-      '<span class="ava mini" style="background:' + (KIND_COLOR[agents[id]?.kind] || "#8a9099") + '" title="' + esc(nameOf(id)) + ' 작업 중">' + esc([...nameOf(id)][0] || "?") + "</span>").join("") + "</span>" : "";
+      '<span class="ava mini' + imgCls(agents[id]?.avatar) + '" style="background:' + (KIND_COLOR[agents[id]?.kind] || "#8a9099") + '" title="' + esc(nameOf(id)) + ' 작업 중">' + icoInner(agents[id]?.avatar, nameOf(id)) + "</span>").join("") + "</span>" : "";
     // 답장하기: 그 말풍선을 쓴 에이전트에게만 (내가 쓴 말·닫힌 방·내보낸 화면 제외)
     const canReply = !DATA && !room.closed_at && !mine && room.members.some((x) => x.agent === m.from && x.state === "in_room");
     const rp = canReply ? '<button type="button" class="rp" data-reply="' + m.seq + '" title="이 말에 답장 (' + esc(nameOf(m.from)) + '에게만)">↩ 답장</button>' : "";
@@ -885,6 +927,84 @@ $("#mRename").onclick = () => {
   };
   inp.onkeydown = (e) => { if (e.key === "Enter" && !e.isComposing && e.keyCode !== 229) finish(true); if (e.key === "Escape") finish(false); };
   inp.onblur = () => finish(true);
+};
+$("#mIcon").onclick = () => {
+  $("#menu").hidden = true;
+  const r = chat.room;
+  openIconEditor({ title: (r.title || r.room_id) + " 방 아이콘", current: r.icon || "", name: r.title || r.room_id, color: "#8a9099",
+    save: (icon) => send("PATCH", "/rooms/" + encodeURIComponent(r.room_id), { icon }) });
+};
+// ───────── 아이콘 고르기 (후보 이모지 / 내 이미지 자르기·줄이기) ─────────
+const ICON_PRESETS = ["🤖","🧠","🦊","🐙","🐱","🐶","🐼","🦉","🐝","🦄","🐢","🐳","🚀","🛠️","🔧","🧪","📊","📝","🔍","🛡️","💡","🎨","⚙️","🌐","💬","📦","🔥","⭐"];
+let icoState = null; // { opts, value, img, zoom, ox, oy }
+function openIconEditor(opts) {
+  icoState = { opts, value: opts.current || "", img: null, zoom: 1, ox: 0, oy: 0 };
+  $("#icoTitle").textContent = opts.title; $("#icoMsg").textContent = "";
+  $("#icoFile").value = ""; $("#icoCrop").hidden = true; $("#icoZoom").value = "1";
+  $("#icoGrid").innerHTML = ICON_PRESETS.map((e) => '<button type="button" data-e="' + esc(e) + '">' + esc(e) + "</button>").join("");
+  $("#icoGrid").querySelectorAll("button").forEach((b) => (b.onclick = () => { icoState.img = null; $("#icoCrop").hidden = true; icoState.value = "emoji:" + b.dataset.e; icoPreview(); }));
+  icoPreview();
+  $("#iconDlg").showModal();
+}
+function icoPreview() {
+  const p = $("#icoPrev"), v = icoState.value;
+  p.style.background = v.startsWith("data:image/") ? "transparent" : icoState.opts.color;
+  p.innerHTML = icoInner(v, icoState.opts.name);
+  $("#icoGrid").querySelectorAll("button").forEach((b) => b.classList.toggle("on", v === "emoji:" + b.dataset.e));
+}
+// 자르기: 이미지가 정사각형 캔버스를 덮도록 놓고, 끌어서 옮기고 막대로 확대. 결과는 128px
+function icoBase() { const c = $("#icoCanvas"), i = icoState.img; return Math.max(c.width / i.width, c.height / i.height); }
+function icoDraw() {
+  const c = $("#icoCanvas"), g = c.getContext("2d"), i = icoState.img, s = icoBase() * icoState.zoom;
+  icoState.ox = Math.min(0, Math.max(c.width - i.width * s, icoState.ox));
+  icoState.oy = Math.min(0, Math.max(c.height - i.height * s, icoState.oy));
+  g.clearRect(0, 0, c.width, c.height);
+  g.drawImage(i, icoState.ox, icoState.oy, i.width * s, i.height * s);
+  const out = document.createElement("canvas"); out.width = out.height = 128;
+  const og = out.getContext("2d"), k = 128 / c.width;
+  og.imageSmoothingQuality = "high";
+  og.drawImage(i, icoState.ox * k, icoState.oy * k, i.width * s * k, i.height * s * k);
+  let url = out.toDataURL("image/webp", 0.85);
+  if (!url.startsWith("data:image/webp")) url = out.toDataURL("image/png");
+  icoState.value = url; icoPreview();
+}
+$("#icoFile").onchange = () => {
+  const file = $("#icoFile").files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    icoState.img = img; icoState.zoom = 1; $("#icoZoom").value = "1";
+    const c = $("#icoCanvas"), s = icoBase();
+    icoState.ox = (c.width - img.width * s) / 2; icoState.oy = (c.height - img.height * s) / 2;
+    $("#icoCrop").hidden = false; icoDraw(); URL.revokeObjectURL(img.src);
+  };
+  img.onerror = () => { $("#icoMsg").textContent = "이미지를 읽지 못함"; };
+  img.src = URL.createObjectURL(file);
+};
+$("#icoZoom").oninput = () => {
+  if (!icoState || !icoState.img) return;
+  const c = $("#icoCanvas"), old = icoBase() * icoState.zoom;
+  icoState.zoom = Number($("#icoZoom").value);
+  const nu = icoBase() * icoState.zoom, cx = c.width / 2, cy = c.height / 2; // 가운데를 기준으로 확대
+  icoState.ox = cx - (cx - icoState.ox) * (nu / old); icoState.oy = cy - (cy - icoState.oy) * (nu / old);
+  icoDraw();
+};
+(() => {
+  const c = $("#icoCanvas"); let drag = null;
+  c.addEventListener("pointerdown", (e) => { if (!icoState || !icoState.img) return; drag = { x: e.clientX, y: e.clientY }; c.setPointerCapture(e.pointerId); });
+  c.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const k = c.width / c.getBoundingClientRect().width; // 화면 크기 → 캔버스 픽셀
+    icoState.ox += (e.clientX - drag.x) * k; icoState.oy += (e.clientY - drag.y) * k; drag = { x: e.clientX, y: e.clientY };
+    icoDraw();
+  });
+  c.addEventListener("pointerup", () => { drag = null; });
+})();
+$("#icoReset").onclick = () => { icoState.img = null; $("#icoCrop").hidden = true; icoState.value = ""; icoPreview(); };
+$("#icoSave").onclick = async () => {
+  $("#icoMsg").textContent = "";
+  try { await icoState.opts.save(icoState.value); $("#iconDlg").close(); loadSide(); if (selected) loadChat(false); }
+  catch (err) { $("#icoMsg").textContent = "저장하지 못함: " + (err.message || err); }
 };
 $("#mDesc").onclick = async () => {
   $("#menu").hidden = true;

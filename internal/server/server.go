@@ -429,9 +429,16 @@ func (s *Server) routes() http.Handler {
 			Title       string  `json:"title"`
 			Description *string `json:"description"`
 			MaxMessages int     `json:"max_messages"`
+			Icon        *string `json:"icon"` // 방 아이콘 ("" 이면 기본)
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
+		}
+		if b.Icon != nil {
+			room, err := c.SetRoomIcon(r.PathValue("r"), *b.Icon)
+			if err != nil || (b.Title == "" && b.Description == nil && b.MaxMessages == 0) {
+				return map[string]any{"room": room}, err
+			}
 		}
 		var room core.RoomView
 		var err error

@@ -1612,3 +1612,31 @@ func TestListening(t *testing.T) {
 		t.Fatal("마친 뒤 대기가 다시 걸리지 않으면 꺼짐")
 	}
 }
+
+// 아이콘: 에이전트(네임카드)·방. 이모지 / 작은 이미지만, 새 세션은 이름표와 함께 이어받음.
+func TestIcons(t *testing.T) {
+	c := newEnv(t).core()
+	a, _, _ := setup(t, c)
+	if v := ok(c.UpdateCard(a, CardPatch{Avatar: ptr("emoji:🦊")})); v.Avatar != "emoji:🦊" {
+		t.Fatalf("이모지: %q", v.Avatar)
+	}
+	png := "data:image/png;base64,iVBORw0KGgo="
+	if v := ok(c.UpdateCard(a, CardPatch{Avatar: &png})); v.Avatar != png {
+		t.Fatal("이미지")
+	}
+	for _, bad := range []string{"javascript:alert(1)", "emoji:<b>", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,***", "data:image/png;base64," + strings.Repeat("A", IconMax)} {
+		if _, err := c.UpdateCard(a, CardPatch{Avatar: ptr(bad)}); err == nil {
+			t.Fatalf("거절해야 함: %.40s", bad)
+		}
+	}
+	if v := ok(c.UpdateCard(a, CardPatch{Avatar: ptr("")})); v.Avatar != "" {
+		t.Fatal("기본으로")
+	}
+	ok(c.CreateRoom(a, "r", "", 0))
+	if v := ok(c.SetRoomIcon("r", "emoji:🚀")); v.Icon != "emoji:🚀" {
+		t.Fatalf("방 아이콘: %q", v.Icon)
+	}
+	if _, err := c.SetRoomIcon("r", "http://x/a.png"); err == nil {
+		t.Fatal("방 아이콘 URL 거절")
+	}
+}

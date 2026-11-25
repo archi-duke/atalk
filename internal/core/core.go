@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -797,6 +798,9 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 		return
 	}
 	card.Name, card.Description = best.Name, best.Description
+	if card.Avatar == "" {
+		card.Avatar = best.Avatar
+	}
 	if best.Workspace != nil {
 		card.Workspace = ptr(*best.Workspace) // 사용자가 바꾼 작업 이름(숨김 포함)을 유지
 	}
@@ -978,6 +982,51 @@ func truncate(s string, n int) string {
 	return s
 }
 
+// IconMax 는 아이콘 이미지(data URL)의 최대 길이. 화면에서 128px 로 줄여 올리므로 보통 10KB 안팎이다.
+const IconMax = 96 << 10
+
+// CheckIcon 은 아이콘 값 검사: ""(기본), "emoji:…"(짧은 글자), 또는 png·jpeg·webp data URL.
+func CheckIcon(s string) error {
+	switch {
+	case s == "":
+		return nil
+	case strings.HasPrefix(s, "emoji:"):
+		if e := strings.TrimPrefix(s, "emoji:"); e == "" || len([]rune(e)) > 8 || strings.ContainsAny(e, "<>\"'&") {
+			return bad("invalid_icon", "이모지 아이콘은 8글자까지")
+		}
+		return nil
+	case strings.HasPrefix(s, "data:image/png;base64,"), strings.HasPrefix(s, "data:image/jpeg;base64,"), strings.HasPrefix(s, "data:image/webp;base64,"):
+		if len(s) > IconMax {
+			return bad("icon_too_large", "아이콘 이미지가 너무 큼 (최대 %dKB)", IconMax>>10)
+		}
+		b64 := s[strings.Index(s, ",")+1:]
+		if _, err := base64.StdEncoding.DecodeString(b64); err != nil {
+			return bad("invalid_icon", "아이콘 이미지 형식이 잘못됨")
+		}
+		return nil
+	}
+	return bad("invalid_icon", "아이콘은 emoji:… 또는 png·jpeg·webp 이미지(data URL)")
+}
+
+// SetRoomIcon 은 방 아이콘을 바꾼다 ("" 이면 기본).
+func (c *Atalk) SetRoomIcon(r, icon string) (v RoomView, err error) {
+	err = c.guard(func() error {
+		if err := CheckIcon(icon); err != nil {
+			return err
+		}
+		room, err := c.requireRoom(r, false)
+		if err != nil {
+			return err
+		}
+		room.Icon = icon
+		c.saveRoom(room)
+		c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "icon"}})
+		v = c.roomView(room)
+		return nil
+	})
+	return
+}
+
 func (c *Atalk) UpdateCard(id string, p CardPatch) (v AgentView, err error) {
 	err = c.guard(func() error {
 		card, err := c.requireAgent(id)
@@ -999,6 +1048,12 @@ func (c *Atalk) UpdateCard(id string, p CardPatch) (v AgentView, err error) {
 				return err
 			}
 			card.Workspace = &w
+		}
+		if p.Avatar != nil {
+			if err := CheckIcon(*p.Avatar); err != nil {
+				return err
+			}
+			card.Avatar = *p.Avatar
 		}
 		if p.Human != nil {
 			if h := strings.TrimSpace(*p.Human); h == "" {
@@ -1939,6 +1994,9 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 		}
 		if nu.Human == nil {
 			nu.Human = old.Human
+		}
+		if nu.Avatar == "" {
+			nu.Avatar = old.Avatar
 		}
 		nu.UpdatedAt = now
 		c.saveCard(nu)

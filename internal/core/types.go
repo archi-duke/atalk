@@ -31,6 +31,8 @@ type AgentCard struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Shared 는 Codex 처럼 창이 아니라 공유 백그라운드 서버에서 실행 중인 세션 (Pid 는 그 서버라 창을 찾을 수 없음).
 	Shared       bool     `json:"shared,omitempty"`
+	// Avatar 는 화면의 아이콘: "emoji:🦊" 또는 작은 이미지 data URL (png·jpeg·webp). 없으면 이름 첫 글자
+	Avatar string `json:"avatar,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -102,6 +104,8 @@ type Room struct {
 	Policy      Policy        `json:"policy"`
 	// Persistent 인 방(사람이 화면에서 방장 없이 만든 방)은 멤버가 모두 나가도 닫히지 않고 방장 없이 남는다.
 	Persistent bool `json:"persistent,omitempty"`
+	// Icon 은 방 아이콘 (에이전트 Avatar 와 같은 형식). 없으면 제목 첫 글자
+	Icon string `json:"icon,omitempty"`
 }
 
 var AgentMessageTypes = []string{"chat", "task", "result", "status"}
@@ -281,6 +285,7 @@ type CardPatch struct {
 	Capabilities *[]string `json:"capabilities,omitempty"`
 	Human        *string   `json:"human,omitempty"` // 빈 문자열이면 지움 (config.json 의 user 를 따름)
 	Workspace    *string   `json:"workspace,omitempty"` // 작업 이름. 빈 문자열이면 숨김
+	Avatar       *string   `json:"avatar,omitempty"`    // 아이콘 (CheckIcon 형식). 빈 문자열이면 기본(이름 첫 글자)
 }
 
 type PostInput struct {
