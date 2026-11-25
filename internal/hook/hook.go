@@ -83,9 +83,22 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		if healthy {
 			out = sessionStart(c, kind, in)
 		}
+	case "pre": // PreToolUse(모든 도구): 곧 쓸 도구를 기억 — 허가 창이 뜨면 그 내용으로 알림. 질문 도구면 바로 질문을 대화방에
+		rememberTool(id, in)
+		if healthy && in.ToolName == "AskUserQuestion" {
+			if text := askText(in.ToolInput); text != "" {
+				_ = c.NeedInput(id, text)
+			}
+		}
 	case "notify": // Notification: 사람의 확인이 필요하면 대화방에 알리고 "확인 필요" 로 표시 (오래 쉬는 중 알림은 제외)
 		if healthy {
 			if text := needInputText(in); text != "" {
+				if t, ok := recentTool(id); ok {
+					if t.ToolName == "AskUserQuestion" {
+						break // 질문은 pre 에서 내용과 함께 이미 알림
+					}
+					text = permissionText(Input{ToolName: t.ToolName, ToolInput: t.ToolInput}) // "Claude needs your permission" 대신 도구·명령
+				}
 				_ = c.NeedInput(id, text)
 			}
 		}

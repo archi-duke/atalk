@@ -2,7 +2,10 @@ package hook
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 // needInputText: Notification 훅 내용 중 사람의 확인이 필요한 것만 (도구 허가, 질문 창). 오래 쉬는 중 알림 등은 "".
@@ -52,8 +55,9 @@ func askText(raw json.RawMessage) string {
 // permissionText: 도구 허가 요청(Codex PermissionRequest)을 사람이 읽을 한 줄로 — 도구 이름과 명령(있으면).
 func permissionText(in Input) string {
 	var ti struct {
-		Command any    `json:"command"`
-		Path    string `json:"path"`
+		Command  any    `json:"command"`
+		Path     string `json:"path"`
+		FilePath string `json:"file_path"`
 	}
 	_ = json.Unmarshal(in.ToolInput, &ti)
 	what := ""
@@ -71,6 +75,9 @@ func permissionText(in Input) string {
 	}
 	if what == "" {
 		what = ti.Path
+	}
+	if what == "" {
+		what = ti.FilePath
 	}
 	if what == "" && len(in.ToolInput) > 0 && string(in.ToolInput) != "null" {
 		what = string(in.ToolInput)
@@ -90,4 +97,28 @@ func permissionText(in Input) string {
 		text += " — " + m
 	}
 	return text
+}
+
+// 곧 쓸 도구 기억 (PreToolUse → Notification): Claude Code 의 허가 알림 문구에는 어떤 도구·명령인지가 없어서.
+type lastTool struct {
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
+	At        time.Time       `json:"at"`
+}
+
+func lastToolFile(id string) string { return filepath.Join(os.TempDir(), "atalk-pretool-"+id+".json") }
+
+func rememberTool(id string, in Input) {
+	b, _ := json.Marshal(lastTool{ToolName: in.ToolName, ToolInput: in.ToolInput, At: time.Now()})
+	_ = os.WriteFile(lastToolFile(id), b, 0o644)
+}
+
+// recentTool: 2분 안에 쓰려던 도구 (허가 창은 도구 바로 앞에 뜬다).
+func recentTool(id string) (lastTool, bool) {
+	var t lastTool
+	b, err := os.ReadFile(lastToolFile(id))
+	if err != nil || json.Unmarshal(b, &t) != nil || t.ToolName == "" || time.Since(t.At) > 2*time.Minute {
+		return t, false
+	}
+	return t, true
 }

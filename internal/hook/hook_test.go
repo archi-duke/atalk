@@ -104,3 +104,16 @@ func TestNeedInputTexts(t *testing.T) {
 		t.Fatalf("Codex 허가: %q", s)
 	}
 }
+
+// 허가 알림: 곧 쓸 도구를 기억해 두었다가 "Claude needs your permission" 대신 도구·명령으로.
+func TestPermissionFromPreTool(t *testing.T) {
+	id := "claude-code_test-pretool"
+	rememberTool(id, Input{ToolName: "Bash", ToolInput: []byte(`{"command":"git push origin main","description":"push"}`)})
+	lt, ok := recentTool(id)
+	if !ok || permissionText(Input{ToolName: lt.ToolName, ToolInput: lt.ToolInput}) != "Bash 실행 허가: git push origin main" {
+		t.Fatalf("%+v", lt)
+	}
+	if s := permissionText(Input{ToolName: "Write", ToolInput: []byte(`{"file_path":"C:/x/a.go","content":"…"}`)}); s != "Write 실행 허가: C:/x/a.go" {
+		t.Fatalf("%q", s)
+	}
+}
