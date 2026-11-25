@@ -408,6 +408,8 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
               if (busy && SPAWN && !spawnUsed) {
                 spawnUsed = true
                 apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN }).catch(() => {})
+                // 창(TUI)도 이 세션을 보여 주게 — opencode 가 켜질 때 만든 다른 세션을 보고 있으면 허가 창·진행이 안 보인다
+                client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: p.sessionID } } as any }).catch(() => {})
               }
               if (busy !== st.busy) apiAs(st.id, "POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
               st.busy = busy
