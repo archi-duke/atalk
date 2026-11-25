@@ -117,7 +117,7 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 			_ = c.Activity(id, true) // 일을 이어 감 → "확인 필요" 도 풀림 (허가했거나 답했음)
 		}
 		texts, p, wake := turnInfo(in.TranscriptPath)
-		if len(texts) > 0 {
+		if len(texts) > 0 && p != KeepaliveNotice {
 			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p, Wake: wake})
 		}
 	case "stop":
@@ -151,6 +151,9 @@ func ptrBool(b bool) *bool { return &b }
 // SessionEnd 에도 불러, Esc 로 중단해 Stop 이 오지 않은 턴의 남은 문장을 남긴다.
 func echoTurnEnd(c *client.Client, id string, in Input) {
 	texts, p, wake := turnInfo(in.TranscriptPath)
+	if p == KeepaliveNotice { // 대기 갱신 턴은 기록하지 않는다
+		return
+	}
 	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
 		texts = append(texts, last)
 	}
@@ -482,6 +485,9 @@ func turnInfo(path string) (texts []string, prompt string, wake []int) {
 			// ATalk 알림(대기 훅이 깨움 / 응답 끝 훅이 계속 일하게 함)으로 시작한 턴 → 그 알림이 경계, 응답은 그 메시지들에 대한 것
 			for _, bl := range blocks {
 				if bl.Type == "text" {
+					if strings.Contains(bl.Text, KeepaliveNotice) { // 대기 갱신 턴: 기록할 것 없음
+						return nil, KeepaliveNotice, nil
+					}
 					if seqs := noticeSeqs(bl.Text); len(seqs) > 0 {
 						wake = seqs
 						return done()

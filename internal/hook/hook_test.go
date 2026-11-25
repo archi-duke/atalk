@@ -53,6 +53,11 @@ func TestTurnTexts(t *testing.T) {
 	if _, p, w := turnInfo(write(wakeN, final, user, final)); p != "파일 몇 개야?" || w != nil {
 		t.Fatalf("사람 입력 턴은 wake 없음: %q %v", p, w)
 	}
+	// 대기 갱신 턴: 기록할 응답 없음 (앞 턴의 답을 다시 붙이지 않게)
+	keep := `{"type":"user","message":{"role":"user","content":"<task-notification>\n</task-notification>\n` + KeepaliveNotice + ` 메시지 대기 시간이 다 되어"}}`
+	if got, p, w := turnInfo(write(user, final, keep, final)); p != KeepaliveNotice || w != nil || len(got) != 0 {
+		t.Fatalf("대기 갱신 턴: %q %q %v", got, p, w)
+	}
 	if a, _ := turnTexts(""); len(a) != 0 {
 		t.Fatal("경로 없음")
 	}

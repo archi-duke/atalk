@@ -53,6 +53,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 	_ = os.WriteFile(genFile, []byte(gen), 0o644)
 	var c *client.Client
 	connKey := ""
+	inRoom := false // 마지막으로 본 상태가 방 안인지 (대기 갱신 여부)
 	for deadline := time.Now().Add(maxWait); time.Now().Before(deadline); time.Sleep(2 * time.Second) {
 		if b, err := os.ReadFile(genFile); err == nil && string(b) != gen {
 			return 0 // 더 새 대기가 이어받음
@@ -77,6 +78,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 				intro = *a.Room
 			}
 			room := ""
+			inRoom = a.Room != nil
 			if a.Room != nil {
 				room = *a.Room
 			}
@@ -153,5 +155,14 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		fmt.Fprintln(stderr, strings.Join(lines, "\n"))
 		return 2
 	}
+	// 제한 시간이 다 됨: 그냥 끝나면 Claude Code 를 깨울 길이 없어져(🔕) 방에서 메시지가 와도 먹통이 된다.
+	// 방에 있으면 짧은 갱신 턴으로 한 번 깨운다 — 그 턴이 끝나면(Stop) 대기가 새로 걸린다. 비용: 제한 시간마다 짧은 턴 하나.
+	if b, err := os.ReadFile(genFile); inRoom && err == nil && string(b) == gen && !daemon.ListenRunning(id) {
+		fmt.Fprintln(stderr, KeepaliveNotice+" 메시지 대기 시간이 다 되어 대기를 다시 겁니다. 새 메시지는 없습니다 — 아무 도구도 쓰지 말고 \"대기 갱신\" 한 마디로 응답을 끝내세요.")
+		return 2
+	}
 	return 0
 }
+
+// KeepaliveNotice 는 대기 갱신 턴을 여는 알림의 머리말 (응답 기록의 턴 경계로도 쓴다).
+const KeepaliveNotice = "[ATalk 대기 갱신]"
