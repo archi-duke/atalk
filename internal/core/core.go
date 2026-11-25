@@ -2028,6 +2028,9 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 			c.saveMemberships()
 		}
 		out := Message{From: agent, Type: typ, To: slices.Clone(in.To), ReplyTo: in.ReplyTo, Body: in.Body}
+		if len(out.To) == 0 && !in.Human {
+			out.To = c.replyTarget(r, in.ReplyTo)
+		}
 		if in.Human {
 			out.Human = c.humanOf(agent)
 		}
@@ -2551,6 +2554,20 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 	}
 	m.LastSeen = c.ts()
 	return Unread{Room: ptr(m.Room), Cursor: newCursor, Messages: msgs}
+}
+
+// replyTarget: 받는 대상 없이 보낸 답장(--reply)은 방 전체가 아니라 원래 메시지를 보낸 쪽에게만 간다.
+// 에이전트가 맡긴 일의 답은 그 에이전트에게, 사람이 쓴 말(별칭@X)의 답은 X 에게 — X 는 replyToMyHuman 으로
+// 깨우지 않으므로 사람만 (웹 화면에서) 보게 된다. 다른 에이전트에게는 필요 없는 메시지가 전달되지 않는다.
+func (c *Atalk) replyTarget(room string, replyTo *int) []string {
+	if replyTo == nil || *replyTo <= 0 {
+		return nil
+	}
+	ms := c.st.Messages(room, *replyTo-1, 1)
+	if len(ms) != 1 || ms[0].Seq != *replyTo || ms[0].Type == "system" || ms[0].From == "" {
+		return nil
+	}
+	return []string{ms[0].From}
 }
 
 // replyToMyHuman: x 가 agent 의 사람이 (웹 화면에서 agent 이름으로) 쓴 메시지에 대한 답인가.
