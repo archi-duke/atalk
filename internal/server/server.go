@@ -5,7 +5,7 @@ package server
 import (
 	"bytes"
 	"context"
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +26,11 @@ import (
 
 //go:embed viewer.html
 var viewerHTML []byte
+
+// iconFS 는 아이콘 고르기 창의 후보 이미지 (이 저장소에서 그린 SVG). 고르면 화면에서 128px 이미지로 바꿔 저장한다.
+//
+//go:embed icons/*.svg
+var iconFS embed.FS
 
 type Options struct {
 	Root       string
@@ -561,6 +566,16 @@ func (s *Server) routes() http.Handler {
 			w.Header().Set("content-disposition", "attachment; filename*=UTF-8''"+url.PathEscape(r.PathValue("r"))+".html")
 		}
 		_, _ = w.Write(page)
+		return skip{}, nil
+	})
+	h("GET /icons/{name}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		b, err := iconFS.ReadFile("icons/" + r.PathValue("name"))
+		if err != nil || !strings.HasSuffix(r.PathValue("name"), ".svg") {
+			return nil, &core.Error{Status: 404, Code: "not_found", Message: "아이콘 없음"}
+		}
+		w.Header().Set("content-type", "image/svg+xml")
+		w.Header().Set("cache-control", "max-age=86400")
+		_, _ = w.Write(b)
 		return skip{}, nil
 	})
 	h("GET /{$}", func(w http.ResponseWriter, r *http.Request) (any, error) {

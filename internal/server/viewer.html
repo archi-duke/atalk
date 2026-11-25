@@ -63,6 +63,8 @@
   .ico-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(40px, 1fr)); gap:6px; }
   .ico-grid button { height:40px; border:1px solid var(--line); border-radius:12px; background:var(--bg); font-size:20px; cursor:pointer; }
   .ico-grid button:hover, .ico-grid button.on { border-color:var(--accent); }
+  .ico-grid.imgs button { height:48px; padding:3px; }
+  .ico-grid.imgs img { width:100%; height:100%; border-radius:9px; display:block; }
   .crop { display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:8px; }
   .crop canvas { width:240px; height:240px; border-radius:16px; background:var(--chat); cursor:grab; touch-action:none; max-width:100%; }
   .crop canvas:active { cursor:grabbing; }
@@ -354,6 +356,7 @@
     <header><h2 id="icoTitle">아이콘 변경</h2><button class="x" aria-label="닫기">×</button></header>
     <div class="body">
       <section><h3>후보 아이콘</h3><div class="ico-grid" id="icoGrid"></div></section>
+      <section><h3>후보 이미지</h3><div class="ico-grid imgs" id="icoImgs"></div></section>
       <section><h3>내 이미지</h3>
         <p class="note">이미지를 고른 뒤 끌어서 위치를, 막대로 크기를 맞추세요. 128px 로 줄여 저장합니다.</p>
         <input type="file" id="icoFile" accept="image/*">
@@ -958,6 +961,7 @@ $("#mIcon").onclick = () => {
     save: (icon) => send("PATCH", "/rooms/" + encodeURIComponent(r.room_id), { icon }) });
 };
 // ───────── 아이콘 고르기 (후보 이모지 / 내 이미지 자르기·줄이기) ─────────
+const ICON_IMAGES = ["robot-blue", "robot-green", "cat-orange", "owl-purple", "chip", "rocket", "sprout", "bubble"]; // internal/server/icons/*.svg
 const ICON_PRESETS = ["🤖","🧠","🦊","🐙","🐱","🐶","🐼","🦉","🐝","🦄","🐢","🐳","🚀","🛠️","🔧","🧪","📊","📝","🔍","🛡️","💡","🎨","⚙️","🌐","💬","📦","🔥","⭐"];
 let icoState = null; // { opts, value, img, zoom, ox, oy }
 function openIconEditor(opts) {
@@ -965,7 +969,21 @@ function openIconEditor(opts) {
   $("#icoTitle").textContent = opts.title; $("#icoMsg").textContent = "";
   $("#icoFile").value = ""; $("#icoCrop").hidden = true; $("#icoZoom").value = "1";
   $("#icoGrid").innerHTML = ICON_PRESETS.map((e) => '<button type="button" data-e="' + esc(e) + '">' + esc(e) + "</button>").join("");
-  $("#icoGrid").querySelectorAll("button").forEach((b) => (b.onclick = () => { icoState.img = null; $("#icoCrop").hidden = true; icoState.value = "emoji:" + b.dataset.e; icoPreview(); }));
+  $("#icoGrid").querySelectorAll("button").forEach((b) => (b.onclick = () => { icoState.img = null; icoState.pick = null; $("#icoCrop").hidden = true; icoState.value = "emoji:" + b.dataset.e; icoPreview(); }));
+  // 후보 이미지: 데몬에 들어 있는 SVG 를 고르면 128px 이미지로 바꿔 저장 (다른 PC 에서도 그대로 보이게)
+  $("#icoImgs").innerHTML = ICON_IMAGES.map((n) => '<button type="button" data-img="' + esc(n) + '" title="' + esc(n) + '"><img src="/icons/' + esc(n) + '.svg" alt=""></button>').join("");
+  $("#icoImgs").querySelectorAll("button").forEach((b) => (b.onclick = () => {
+    const img = new Image();
+    img.onload = () => {
+      const out = document.createElement("canvas"); out.width = out.height = 128;
+      out.getContext("2d").drawImage(img, 0, 0, 128, 128);
+      let url = out.toDataURL("image/webp", 0.9);
+      if (!url.startsWith("data:image/webp")) url = out.toDataURL("image/png");
+      icoState.img = null; $("#icoCrop").hidden = true; icoState.value = url; icoState.pick = b.dataset.img; icoPreview();
+    };
+    img.onerror = () => { $("#icoMsg").textContent = "후보 이미지를 읽지 못함"; };
+    img.src = "/icons/" + b.dataset.img + ".svg";
+  }));
   icoPreview();
   $("#iconDlg").showModal();
 }
@@ -974,6 +992,7 @@ function icoPreview() {
   p.style.background = v.startsWith("data:image/") ? "transparent" : icoState.opts.color;
   p.innerHTML = icoInner(v, icoState.opts.name);
   $("#icoGrid").querySelectorAll("button").forEach((b) => b.classList.toggle("on", v === "emoji:" + b.dataset.e));
+  $("#icoImgs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", v.startsWith("data:image/") && icoState.pick === b.dataset.img));
 }
 // 자르기: 이미지가 정사각형 캔버스를 덮도록 놓고, 끌어서 옮기고 막대로 확대. 결과는 128px
 function icoBase() { const c = $("#icoCanvas"), i = icoState.img; return Math.max(c.width / i.width, c.height / i.height); }
@@ -996,7 +1015,7 @@ $("#icoFile").onchange = () => {
   if (!file) return;
   const img = new Image();
   img.onload = () => {
-    icoState.img = img; icoState.zoom = 1; $("#icoZoom").value = "1";
+    icoState.img = img; icoState.pick = null; icoState.zoom = 1; $("#icoZoom").value = "1";
     const c = $("#icoCanvas"), s = icoBase();
     icoState.ox = (c.width - img.width * s) / 2; icoState.oy = (c.height - img.height * s) / 2;
     $("#icoCrop").hidden = false; icoDraw(); URL.revokeObjectURL(img.src);
