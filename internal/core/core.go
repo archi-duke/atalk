@@ -56,6 +56,7 @@ type Atalk struct {
 	isAlive   func(int) bool
 	machineID string
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
+	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -509,7 +510,50 @@ func (c *Atalk) roomView(room *Room) RoomView {
 
 // ───────────────────────── 에이전트 (디스커버리) ─────────────────────────
 
+type pendingSpawn struct {
+	By, Room, Name string
+	At             time.Time
+}
+
+// spawnTTL 안에 새 세션이 등록되지 않으면 표식을 버린다.
+const spawnTTL = 10 * time.Minute
+
+// NewSpawn 은 atalk spawn 이 새 창을 열기 전에 표식을 만든다. 새 세션이 이 표식으로 등록하면 by 가 띄운 것으로 기록되고 room 에 들어간다.
+func (c *Atalk) NewSpawn(by, room, name string) (token string, err error) {
+	err = c.guard(func() error {
+		if _, err := c.requireAgent(by); err != nil {
+			return err
+		}
+		if c.spawns == nil {
+			c.spawns = map[string]pendingSpawn{}
+		}
+		for k, p := range c.spawns {
+			if c.now().Sub(p.At) > spawnTTL {
+				delete(c.spawns, k)
+			}
+		}
+		token = newSecret()[:24]
+		c.spawns[token] = pendingSpawn{By: by, Room: room, Name: name, At: c.now()}
+		return nil
+	})
+	return
+}
+
 func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
+	var spawnRoom, spawnBy string
+	defer func() {
+		if err == nil && spawnRoom != "" { // 띄운 에이전트의 방으로 (같은 PC 대기 중이면 초대 즉시 입장)
+			owner := ""
+			if room, e := c.GetRoom(spawnRoom); e == nil && room.Owner != nil && *room.Owner == spawnBy {
+				owner = spawnBy
+			}
+			if _, e := c.Invite(owner, spawnRoom, res.Agent.ID); e == nil {
+				if v, e := c.GetAgent(res.Agent.ID); e == nil {
+					res.Agent = v
+				}
+			}
+		}
+	}()
 	err = c.guard(func() error {
 		if !IsValidKind(in.Kind) {
 			return bad("invalid_kind", "kind 는 소문자/숫자/- 로 된 1~32자여야 함 (예: claude-code)")
@@ -604,6 +648,29 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 			if _, err := c.requireRoom(r, true); err == nil {
 				c.joinInternal(id, r, RoleMember, false) // 복귀 — 이미 인사한 방
 				res.Recovery = c.buildRecovery(id, 0)
+			}
+		}
+		if cur := c.agents[id]; cur != nil && cur.SpawnedBy == "" { // 누가 띄웠나: atalk spawn 표식, 아니면 부모 프로세스가 등록된 에이전트
+			if p, ok := c.spawns[in.Spawn]; in.Spawn != "" && ok && c.now().Sub(p.At) <= spawnTTL {
+				delete(c.spawns, in.Spawn)
+				cur.SpawnedBy, spawnRoom, spawnBy = p.By, p.Room, p.By
+				if p.Name != "" {
+					cur.Name = p.Name
+				}
+			} else if c.isLocal(cur) {
+			find:
+				for _, pid := range in.Ancestors {
+					for oid, o := range c.agents {
+						if oid != id && o.Pid != nil && *o.Pid == pid && c.isLocal(o) && o.RetiredBy == nil {
+							cur.SpawnedBy = oid
+							break find
+						}
+					}
+				}
+			}
+			if cur.SpawnedBy != "" {
+				c.saveCard(cur)
+				card.SpawnedBy, card.Name = cur.SpawnedBy, cur.Name
 			}
 		}
 		action := "register"

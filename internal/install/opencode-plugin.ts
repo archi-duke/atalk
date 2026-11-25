@@ -120,6 +120,7 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       // (시작하자마자 만든 빈 세션이 이전 세션을 밀어내지 않게. 이전 세션이 다시 쓰이면 쓰지 않은 빈 세션 카드는 정리된다)
       const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid, provisional: true }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
+      if (process.env.ATALK_SPAWN) body.spawn = process.env.ATALK_SPAWN // atalk spawn 으로 연 창
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
       const reg = await apiAs(agentId(sid), "POST", "/agents", body)

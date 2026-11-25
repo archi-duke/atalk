@@ -16,6 +16,21 @@ type Proc struct {
 
 var wrappers = regexp.MustCompile(`(?i)^(bash|sh|zsh|dash|fish|cmd|powershell|pwsh|conhost|env|timeout|npx|npm|winpty|wsl|git-bash|mintty)(\.exe)?$`)
 
+// Ancestors 는 pid 의 부모 체인 (가까운 것부터, 최대 20단계). 누가 이 에이전트를 띄웠는지 찾는 데 쓴다.
+func Ancestors(pid int) []int {
+	procs, err := list()
+	if err != nil {
+		return nil
+	}
+	var out []int
+	p, ok := procs[pid]
+	for i := 0; ok && i < 20 && p.PPID > 1; i++ {
+		out = append(out, p.PPID)
+		p, ok = procs[p.PPID]
+	}
+	return out
+}
+
 // FindAgentPID 는 ATALK_AGENT_PID 가 있으면 그것을, 없으면 부모 체인에서 셸/래퍼가 아닌 첫 프로세스를 돌려준다.
 // node 는 래퍼로 보지 않는다: npm 으로 설치한 Claude Code 는 node.exe 자체가 에이전트 본체다.
 // 찾지 못하면 0.

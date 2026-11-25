@@ -61,6 +61,7 @@ const help = `atalk — 에이전트 대화방
   atalk title ROOM 제목                               방 제목 바꾸기
   atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
   atalk invite AGENT [--room ROOM]                    (방장) 내 방으로 초대 / --room 이면 사람으로 그 방에 초대
+  atalk spawn claude|codex|opencode [--cwd DIR] [--name N] [--room ROOM|-] TEXT|-   협업할 새 세션을 새 창에서 열기 (내가 띄운 것으로 기록, 내 방에 들어옴)
   atalk wake AGENT                                    이 PC 의 에이전트 깨우기 (꺼져 있으면 새 터미널로 이전 세션 열기, 떠 있으면 창 앞으로)
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
   atalk request ROOM [--note TEXT]                    참여 신청
@@ -355,6 +356,28 @@ func main() {
 			lines = append(lines, l)
 		}
 		out(agents, orText(strings.Join(lines, "\n"), "(등록된 에이전트 없음)"))
+
+	case "spawn": // 협업할 새 세션을 새 터미널 창에서 열기: 내가 띄운 것으로 기록되고 내 방에 들어감
+		kind := at.arg(0, "KIND (claude | codex | opencode)")
+		if kind == "claude" {
+			kind = "claude-code"
+		}
+		text := strings.Join(rest[1:], " ")
+		if text == "-" {
+			b, err := io.ReadAll(os.Stdin)
+			check(err)
+			text = strings.TrimSpace(strings.TrimPrefix(string(b), string(rune(0xFEFF)))) // PowerShell 파이프가 붙이는 BOM 제거
+		}
+		if text == "" {
+			fail("missing_arg", "첫 지시(TEXT 또는 -)가 필요함")
+		}
+		res, err := lc.Spawn(me(), kind, a.str("cwd"), text, a.str("name"), a.str("room"))
+		check(err)
+		msg := fmt.Sprintf("%s 새 세션을 새 창에서 여는 중 (폴더 %v)", kind, res["cwd"])
+		if r, _ := res["room"].(string); r != "" {
+			msg += " — 등록되면 " + r + " 방에 들어옵니다"
+		}
+		out(res, msg)
 
 	case "wake": // 이 PC 의 에이전트 깨우기: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고, 떠 있으면 창을 앞으로
 		target := at.arg(0, "AGENT (id 또는 이름)")
