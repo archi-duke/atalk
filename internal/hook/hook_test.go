@@ -89,3 +89,18 @@ func TestCodexTurn(t *testing.T) {
 		t.Fatalf("알림 턴: %q %q %v", got, p, w)
 	}
 }
+
+func TestNeedInputTexts(t *testing.T) {
+	if s := needInputText(Input{NotificationType: "permission_prompt", Message: "Claude needs your permission to use Bash"}); s == "" {
+		t.Fatal("허가 요청")
+	}
+	if s := needInputText(Input{NotificationType: "idle_prompt", Message: "Claude is waiting for your input"}); s != "" {
+		t.Fatal("오래 쉬는 중은 확인 요청 아님")
+	}
+	if s := askText([]byte(`{"questions":[{"question":"어느 쪽?","options":[{"label":"A"},{"label":"B"}]}]}`)); s != "어느 쪽? (A / B)" {
+		t.Fatalf("질문: %q", s)
+	}
+	if s := permissionText(Input{ToolName: "shell", ToolInput: []byte(`{"command":["git","push"]}`)}); s != "shell 실행 허가: git push" {
+		t.Fatalf("Codex 허가: %q", s)
+	}
+}

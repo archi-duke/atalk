@@ -57,6 +57,7 @@ type Atalk struct {
 	machineID string
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
 	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
+	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -480,6 +481,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Local = c.isLocal(card)
 	v.Busy = c.isBusy(card.ID)
 	v.Listening = c.isListening(card.ID)
+	v.NeedsInput = c.needInput[card.ID]
 	h := Host{ID: c.machineID, OS: LocalOS()}
 	if card.Host != nil {
 		h = *card.Host
@@ -1794,6 +1796,10 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		if c.busy == nil {
 			c.busy = map[string]time.Time{}
 		}
+		if _, ok := c.needInput[agent]; ok { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침)
+			delete(c.needInput, agent)
+			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "need_input", "text": ""}})
+		}
 		if busy {
 			c.busy[agent] = c.now()
 		} else {
@@ -1809,6 +1815,38 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		if was != busy {
 			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "activity", "busy": busy}})
 		}
+		return nil
+	})
+}
+
+// SetNeedInput 은 사람의 확인·답을 기다리는지 기록한다. 새로 기다리기 시작하면 그 내용을 방에 status 로 남긴다 (아무도 깨우지 않음).
+// 일을 다시 시작하거나(입력·도구·응답 끝) text 가 "" 이면 풀린다.
+func (c *Atalk) SetNeedInput(agent, text string) error {
+	return c.guard(func() error {
+		if _, err := c.requireAgent(agent); err != nil {
+			return err
+		}
+		text = strings.TrimSpace(text)
+		if r := []rune(text); len(r) > 1500 {
+			text = string(r[:1500]) + "…"
+		}
+		if c.needInput[agent] == text {
+			return nil
+		}
+		if c.needInput == nil {
+			c.needInput = map[string]string{}
+		}
+		if text == "" {
+			delete(c.needInput, agent)
+		} else {
+			c.needInput[agent] = text
+			if m, ok := c.memberships[agent]; ok {
+				if room, err := c.requireRoom(m.Room, true); err == nil && c.lastSeq[m.Room] < room.Policy.MaxMessages {
+					c.appendMessage(m.Room, Message{From: agent, Type: "status", To: []string{}, Body: "🙋 사용자 확인 필요 — " + text})
+				}
+			}
+		}
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "need_input", "text": text}})
 		return nil
 	})
 }

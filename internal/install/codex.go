@@ -33,6 +33,8 @@ var codexHookEvents = []struct {
 	{"Stop", "stop", 0},
 	{"SessionEnd", "session-end", 3}, // Codex 기본 1초, 최대 3초
 	{"UserPromptSubmit", "prompt", 0},
+	{"PermissionRequest", "permission", 5}, // 도구 허가를 사람에게 물음 → 대화방에 알리고 "확인 필요" (결정은 하지 않음)
+	{"PostToolUse", "tool", 0},              // 도구를 쓸 때마다: 작업 중 신호, 확인 필요 풀림, 응답 문장 실시간 기록
 }
 
 func isOursCodex(cmd string) bool {

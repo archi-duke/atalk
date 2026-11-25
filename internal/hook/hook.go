@@ -38,6 +38,12 @@ type Input struct {
 	TranscriptPath string `json:"transcript_path"`
 	// LastAssistantMessage 는 Stop 훅에 오는 마지막 응답 (Claude Code 버전에 따라 없을 수 있어 transcript 로 대신 읽는다)
 	LastAssistantMessage string `json:"last_assistant_message"`
+	// Notification: 사람에게 알리는 내용과 종류 (permission_prompt·elicitation_dialog = 확인 필요, idle_prompt = 오래 쉬는 중)
+	Message          string `json:"message"`
+	NotificationType string `json:"notification_type"`
+	// PreToolUse
+	ToolName  string          `json:"tool_name"`
+	ToolInput json.RawMessage `json:"tool_input"`
 }
 
 // Run 은 stdin 에서 훅 입력을 읽고 stdout 에 훅 출력을 쓴다.
@@ -77,9 +83,25 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		if healthy {
 			out = sessionStart(c, kind, in)
 		}
+	case "notify": // Notification: 사람의 확인이 필요하면 대화방에 알리고 "확인 필요" 로 표시 (오래 쉬는 중 알림은 제외)
+		if healthy {
+			if text := needInputText(in); text != "" {
+				_ = c.NeedInput(id, text)
+			}
+		}
+	case "permission": // Codex PermissionRequest: 도구 허가를 사람에게 물음 → 대화방에 알림 (허가·거절은 사람이 Codex 창에서)
+		if healthy {
+			_ = c.NeedInput(id, permissionText(in))
+		}
+	case "ask": // PreToolUse(AskUserQuestion): 사용자에게 묻는 질문을 대화방에
+		if healthy && in.ToolName == "AskUserQuestion" {
+			if text := askText(in.ToolInput); text != "" {
+				_ = c.NeedInput(id, text)
+			}
+		}
 	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장(흰색 ●)을 실시간으로 기록 + 작업 중 신호 갱신. 도구 줄(녹색 ●)·출력은 남기지 않음
 		if healthy {
-			_ = c.Activity(id, true)
+			_ = c.Activity(id, true) // 일을 이어 감 → "확인 필요" 도 풀림 (허가했거나 답했음)
 		}
 		texts, p, wake := turnInfo(in.TranscriptPath)
 		if len(texts) > 0 {
