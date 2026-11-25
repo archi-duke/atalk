@@ -347,24 +347,29 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
   // atalk spawn 으로 연 창: 시작하면 세션 하나를 정해(있으면 그것, 없으면 새로) 표식을 쓰고(띄운 에이전트·이름·방),
   // 받은 첫 지시를 그 세션에 직접 보낸 뒤 창(TUI)도 그 세션을 보여 주게 한다. (opencode --prompt 는 입력되지 않을 때가 있음)
   if (SPAWN) {
-    setTimeout(async () => {
-      try {
-        if (spawnUsed) return
-        spawnUsed = true
-        let sid = [...sessions.keys()][0] ?? ""
-        if (!sid) {
-          const r: any = await client.session.create({ body: { title: process.env.ATALK_NAME ?? "ATalk" } })
-          sid = r?.data?.id ?? ""
-          if (!sid) return
-          await track(sid)
+    // 서버·창이 준비되는 데 몇 초 걸리고, 창(TUI)이 켜지며 세션을 하나 만든다 → 2초마다 다시 시도:
+    // 창이 만든 세션이 있으면 그것을, 8초가 지나도 없으면 새로 만들어 쓴다. 표식을 쓰는 데 성공해야 끝난다.
+    void (async () => {
+      for (let i = 0; i < 20 && !spawnUsed; i++) {
+        await new Promise((res) => setTimeout(res, 2000))
+        try {
+          let sid = [...sessions.keys()][0] ?? ""
+          if (!sid && i >= 3) {
+            const r: any = await client.session.create({ body: { title: process.env.ATALK_NAME ?? "ATalk" } })
+            sid = r?.data?.id ?? ""
+            if (sid) await track(sid)
+          }
+          const st = sid ? sessions.get(sid) : undefined
+          if (!st) continue
+          const res = await apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN })
+          spawnUsed = true
+          await client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: sid } } as any }).catch(() => {})
+          if (res?.prompt) await client.session.prompt({ path: { id: sid }, body: { parts: [{ type: "text", text: res.prompt }] } })
+        } catch (e: any) {
+          if (e?.code === "spawn_expired" || String(e?.message ?? e).includes("spawn_expired")) return // 표식이 없거나 지남 — 다시 해도 소용없음
         }
-        const st = sessions.get(sid)
-        if (!st) return
-        const res = await apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN })
-        await client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: sid } } as any }).catch(() => {})
-        if (res?.prompt) await client.session.prompt({ path: { id: sid }, body: { parts: [{ type: "text", text: res.prompt }] } })
-      } catch {}
-    }, 3000)
+      }
+    })()
   }
   const skipEager = ["run", "serve", "web", "attach", "acp", "mcp", "export", "import", "-c", "--continue", "-s", "--session", "--prompt"]
   if (!SPAWN && !argv.some((a) => skipEager.includes(a) || a.startsWith("--session=") || a.startsWith("--continue"))) {
