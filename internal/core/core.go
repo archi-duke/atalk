@@ -2466,6 +2466,9 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 		toSelf := x.From == agent && x.Human != "" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 		if x.Seq > cursor && (x.From != agent || toSelf) {
 			forMe := x.Type != "system" && (len(x.To) == 0 || slices.Contains(x.To, agent))
+			if forMe && x.From != agent && c.replyToMyHuman(m.Room, x, agent) {
+				forMe = false // 사람(대장@나)이 쓴 말에 대한 답은 그 사람에게 — 나를 깨워 내 컨텍스트를 쓰지 않는다
+			}
 			msgs = append(msgs, InboxMessage{Message: x, ForMe: forMe})
 		}
 	}
@@ -2479,6 +2482,16 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 	}
 	m.LastSeen = c.ts()
 	return Unread{Room: ptr(m.Room), Cursor: newCursor, Messages: msgs}
+}
+
+// replyToMyHuman: x 가 agent 의 사람이 (웹 화면에서 agent 이름으로) 쓴 메시지에 대한 답인가.
+// 사람이 쓴 말은 그 에이전트 이름으로 저장되므로 답장의 받는 대상도 그 에이전트가 되지만, 실제 받을 이는 사람이다.
+func (c *Atalk) replyToMyHuman(room string, x Message, agent string) bool {
+	if x.ReplyTo == nil || *x.ReplyTo <= 0 {
+		return false
+	}
+	ms := c.st.Messages(room, *x.ReplyTo-1, 1)
+	return len(ms) == 1 && ms[0].Seq == *x.ReplyTo && ms[0].From == agent && ms[0].Human != ""
 }
 
 func (c *Atalk) Ack(agent string, seq int) (cursor int, err error) {
