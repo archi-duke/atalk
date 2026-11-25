@@ -2221,6 +2221,74 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 	return
 }
 
+// EchoWake 는 사람 입력 없이 ATalk 알림으로 깨어난 턴의 응답 문장(CLI 의 흰색 ●)을 그 알림 메시지의 답으로 기록한다 (알림 없음).
+// wake 는 그 알림에 담긴 메시지 번호들 — 이 에이전트에게 온 것 중 가장 마지막 메시지에 붙인다.
+// 받은 메시지를 옮겨 적은 "📨" 줄은 빼고, 에이전트가 이미 send 로 그 메시지에 답한 글과 같은 문장은 다시 남기지 않는다.
+// CLI 입력 큐(EchoQueue)는 건드리지 않는다.
+func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (out []Message, err error) {
+	err = c.guard(func() error {
+		m, ok := c.memberships[agent]
+		if !ok {
+			return nil
+		}
+		room, err := c.requireRoom(m.Room, true)
+		if err != nil {
+			return nil
+		}
+		target := 0
+		for s, x := range c.st.MessagesBySeq(m.Room, wake) {
+			fromOther := x.From != agent || x.Human != "" // 남이 보낸 것, 또는 내 사람이 쓴 말
+			if s > target && fromOther && (len(x.To) == 0 || slices.Contains(x.To, agent)) {
+				target = s
+			}
+		}
+		if target == 0 {
+			return nil
+		}
+		var clean []string
+		for _, t := range texts {
+			var keep []string
+			for _, ln := range strings.Split(t, "\n") {
+				if !strings.HasPrefix(strings.TrimSpace(ln), "📨") {
+					keep = append(keep, ln)
+				}
+			}
+			if s := strings.TrimSpace(strings.Join(keep, "\n")); s != "" {
+				clean = append(clean, s)
+			}
+		}
+		texts = clean
+		if c.readConfig().EchoFinalOnly {
+			if !final || len(texts) == 0 {
+				return nil
+			}
+			texts = texts[len(texts)-1:]
+		}
+		have := map[string]bool{}
+		for _, x := range c.st.Messages(m.Room, target, 0) {
+			if x.From == agent && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == target {
+				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록, 또는 send 로 보낸 답장
+			}
+		}
+		for _, text := range texts {
+			if r := []rune(text); len(r) > EchoMax {
+				text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
+			}
+			if have[text] {
+				continue
+			}
+			if c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+				break
+			}
+			s := target
+			out = append(out, c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &s, Body: text, Echo: true}))
+			have[text] = true
+		}
+		return nil
+	})
+	return
+}
+
 // SamePrompt 는 samePrompt 를 훅에서 쓰게 내보낸 것.
 func SamePrompt(recorded, prompt string) bool { return samePrompt(recorded, prompt) }
 

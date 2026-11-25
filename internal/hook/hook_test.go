@@ -41,6 +41,18 @@ func TestTurnTexts(t *testing.T) {
 	if got, _ := turnTexts(write(user, final, user, toolUse, toolRes)); len(got) != 0 {
 		t.Fatalf("이전 턴 답을 가져옴: %q", got)
 	}
+	// ATalk 알림으로 깨어난 턴: 알림이 경계, wake = 알림의 메시지 번호 (대기 훅 알림·응답 끝 훅 알림(isMeta) 모두)
+	wakeN := `{"type":"user","message":{"role":"user","content":"<task-notification>\n</task-notification>\n[ATalk] r 방에서 나에게 온 메시지 1개:\n#278 [chat] 사용자@마스터 (사람) → 마스터\n반영해봐"}}`
+	if got, p, w := turnInfo(write(user, final, wakeN, interim, toolUse, toolRes, final)); p != "" || len(w) != 1 || w[0] != 278 || strings.Join(got, "|") != "세어 보겠습니다.|42개입니다." {
+		t.Fatalf("알림 턴: %q %q %v", got, p, w)
+	}
+	stopN := `{"type":"user","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\n[ATalk] r 방에서 새 메시지가 왔습니다.\n\n#229 [result] 맥 → 마스터 (re #228)\n네\n\n#231 [result] 코덱스 → 마스터\n네"}}`
+	if got, _, w := turnInfo(write(user, interim, stopN, final)); len(w) != 2 || w[1] != 231 || strings.Join(got, "|") != "42개입니다." {
+		t.Fatalf("응답 끝 훅 알림 턴: %q %v", got, w)
+	}
+	if _, p, w := turnInfo(write(wakeN, final, user, final)); p != "파일 몇 개야?" || w != nil {
+		t.Fatalf("사람 입력 턴은 wake 없음: %q %v", p, w)
+	}
 	if a, _ := turnTexts(""); len(a) != 0 {
 		t.Fatal("경로 없음")
 	}

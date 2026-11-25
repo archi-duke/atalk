@@ -234,6 +234,7 @@ type EchoEvent struct {
 	Texts  []string `json:"texts,omitempty"`  // 응답: 이번 턴에 지금까지 쓴 문장들
 	Final  *bool    `json:"final,omitempty"`  // 응답: 턴이 끝남 (없으면 true)
 	Prompt string   `json:"prompt,omitempty"` // 응답: 이번 턴을 시작한 사람 입력
+	Wake   []int    `json:"wake,omitempty"`   // 응답: 이번 턴을 시작한 ATalk 알림의 메시지 번호들 (사람 입력 없이 알림으로 깨어난 턴)
 }
 
 // Activity 는 에이전트가 일을 시작(busy=true)·끝냈음(false)을 알린다 (작업 중 표시).
