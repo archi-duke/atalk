@@ -725,6 +725,11 @@ func TestSayAll(t *testing.T) {
 	if m := ok(c.Say(a, "w", "@B 너만")); len(m.To) != 1 || m.To[0] != b {
 		t.Fatalf("한 명: %v", m.To)
 	}
+	// 말풍선 답장하기: 답장(reply_to) + 그 에이전트에게만
+	q := ok(c.Post(b, "w", PostInput{Body: "질문 있어요"}))
+	if m := ok(c.SayReply(a, "w", "@"+b+" 답이에요", ptr(q.Seq))); m.ReplyTo == nil || *m.ReplyTo != q.Seq || len(m.To) != 1 || m.To[0] != b || m.Human == "" {
+		t.Fatalf("답장: %+v", m)
+	}
 }
 
 func TestOwnerlessRoomAndDescription(t *testing.T) {

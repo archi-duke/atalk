@@ -2341,7 +2341,10 @@ func IsAllMention(m string) bool {
 }
 
 // Say 는 사람이 agent 를 통해 room 에 직접 쓴 말을 올린다. 앞쪽 "@이름"(이름 또는 id)은 받는 대상.
-func (c *Atalk) Say(agent, room, text string) (Message, error) {
+func (c *Atalk) Say(agent, room, text string) (Message, error) { return c.SayReply(agent, room, text, nil) }
+
+// SayReply 는 Say 에 더해 특정 메시지에 대한 답장으로 보낸다 (웹 화면의 말풍선 답장하기).
+func (c *Atalk) SayReply(agent, room, text string, replyTo *int) (Message, error) {
 	mentions, body := SplitMentions(text)
 	if body == "" {
 		return Message{}, bad("empty_body", "보낼 내용이 없음")
@@ -2385,7 +2388,7 @@ func (c *Atalk) Say(agent, room, text string) (Message, error) {
 			return Message{}, err
 		}
 	}
-	return c.Post(agent, room, PostInput{Type: "chat", To: to, Body: body, Human: true})
+	return c.Post(agent, room, PostInput{Type: "chat", To: to, Body: body, Human: true, ReplyTo: replyTo})
 }
 
 // humanOf 는 에이전트를 쓰는 사람의 별칭: 카드 human → config.json user → "사용자".
