@@ -276,6 +276,8 @@ func (s *Server) routes() http.Handler {
 			Prompt string `json:"prompt"`
 			// EID 는 훅이 다시 보낼 때 같은 기록을 두 번 남기지 않기 위한 id (훅의 outbox)
 			EID string `json:"eid"`
+			// 응답: 이번 턴을 시작한 ATalk 알림의 메시지 번호들 — 사람 입력 없이 알림으로 깨어난 턴의 응답은 그 메시지의 답으로 기록
+			Wake []int `json:"wake"`
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
@@ -288,6 +290,10 @@ func (s *Server) routes() http.Handler {
 			texts := b.Texts
 			if len(texts) == 0 && b.Text != "" {
 				texts = []string{b.Text}
+			}
+			if len(b.Wake) > 0 && b.Prompt == "" {
+				ms, err := c.EchoWake(id, texts, b.Final == nil || *b.Final, b.Wake)
+				return map[string]any{"recorded": len(ms) > 0, "messages": ms}, err
 			}
 			ms, err := c.EchoReply(r.PathValue("id"), texts, b.Final == nil || *b.Final, b.Prompt)
 			return map[string]any{"recorded": len(ms) > 0, "messages": ms}, err

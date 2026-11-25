@@ -15,7 +15,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"atalk/internal/client"
@@ -79,9 +81,9 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		if healthy {
 			_ = c.Activity(id, true)
 		}
-		texts, p := turnTexts(in.TranscriptPath)
+		texts, p, wake := turnInfo(in.TranscriptPath)
 		if len(texts) > 0 {
-			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p})
+			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p, Wake: wake})
 		}
 	case "stop":
 		echoTurnEnd(c, id, in)
@@ -113,14 +115,14 @@ func ptrBool(b bool) *bool { return &b }
 // transcript 에 중간 문장이 빠지거나 늦게 저장되는 경우가 있어, 훅이 주는 마지막 응답은 항상 덧붙인다.
 // SessionEnd 에도 불러, Esc 로 중단해 Stop 이 오지 않은 턴의 남은 문장을 남긴다.
 func echoTurnEnd(c *client.Client, id string, in Input) {
-	texts, p := turnTexts(in.TranscriptPath)
+	texts, p, wake := turnInfo(in.TranscriptPath)
 	if last := strings.TrimSpace(in.LastAssistantMessage); last != "" && !slices.Contains(texts, last) && !strings.Contains(strings.Join(texts, "\n"), last) {
 		texts = append(texts, last)
 	}
 	if len(texts) == 0 && p == "" {
 		return
 	}
-	enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(true), Prompt: p})
+	enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(true), Prompt: p, Wake: wake})
 }
 
 // echoPrompt 는 사람이 입력한 말을 대화 기록으로 남긴다 (방에 있을 때, /명령·>> 제외, 알림 없음).
@@ -342,12 +344,36 @@ func prompt(c *client.Client, kind string, in Input) any {
 // 함께 이번 턴을 시작한 사람 입력(prompt)도 돌려준다 — 데몬이 응답을 기다리는 CLI 입력과 같은지 확인하는 데 쓴다
 // (사람이 입력한 말이 대기열에 들어간 동안 끝난 앞선 턴의 문장이 그 입력의 응답으로 붙지 않게).
 func turnTexts(path string) (texts []string, prompt string) {
+	texts, prompt, _ = turnInfo(path)
+	return
+}
+
+// noticeRe 는 ATalk 알림 본문의 메시지 줄 "#SEQ [type] ..." (대기 훅·응답 끝 훅 알림 공통).
+var noticeRe = regexp.MustCompile(`(?m)^#(\d+) \[`)
+
+// noticeSeqs 는 ATalk 알림이면 그 안의 메시지 번호들, 아니면 nil.
+func noticeSeqs(text string) []int {
+	if !strings.Contains(text, "[ATalk]") {
+		return nil
+	}
+	var out []int
+	for _, m := range noticeRe.FindAllStringSubmatch(text, -1) {
+		if n, err := strconv.Atoi(m[1]); err == nil {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// turnInfo 는 turnTexts 에 더해, 이번 턴이 ATalk 알림으로 시작했으면 그 알림의 메시지 번호들(wake)도 돌려준다
+// (사람 입력이 아니라 알림으로 깨어난 턴 — 응답을 그 메시지의 답으로 기록하는 데 쓴다).
+func turnInfo(path string) (texts []string, prompt string, wake []int) {
 	if path == "" {
-		return nil, ""
+		return nil, "", nil
 	}
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, ""
+		return nil, "", nil
 	}
 	defer f.Close()
 	const tail = 4 << 20 // 끝에서 4MB 만 읽는다
@@ -356,13 +382,13 @@ func turnTexts(path string) (texts []string, prompt string) {
 	}
 	b, err := io.ReadAll(f)
 	if err != nil {
-		return nil, ""
+		return nil, "", nil
 	}
 	lines := strings.Split(string(b), "\n")
 	// texts 는 뒤에서부터 모은다
-	done := func() ([]string, string) {
+	done := func() ([]string, string, []int) {
 		slices.Reverse(texts)
-		return texts, prompt
+		return texts, prompt, wake
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e struct {
@@ -410,6 +436,15 @@ func turnTexts(path string) (texts []string, prompt string) {
 				texts = append(texts, strings.TrimSpace(strings.Join(parts, "\n")))
 			}
 		case "user":
+			// ATalk 알림(대기 훅이 깨움 / 응답 끝 훅이 계속 일하게 함)으로 시작한 턴 → 그 알림이 경계, 응답은 그 메시지들에 대한 것
+			for _, bl := range blocks {
+				if bl.Type == "text" {
+					if seqs := noticeSeqs(bl.Text); len(seqs) > 0 {
+						wake = seqs
+						return done()
+					}
+				}
+			}
 			if e.IsMeta {
 				continue
 			}

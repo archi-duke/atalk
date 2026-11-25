@@ -953,6 +953,36 @@ func TestEchoReplyAfterRestart(t *testing.T) {
 	}
 }
 
+// 알림으로 깨어난 턴의 응답: 그 메시지의 답으로 기록. 📨 줄과 이미 send 한 답장과 같은 문장은 빼고, CLI 입력 큐는 그대로.
+func TestEchoWake(t *testing.T) {
+	c := newEnv(t).core()
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m"}))
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o"}))
+	ok(c.CreateRoom("claude-code_m", "r", "", 0))
+	ok(c.Invite("claude-code_m", "r", "opencode_o"))
+	ok(c.RespondInvite("opencode_o", "r", true))
+
+	q := ok(c.Post("opencode_o", "r", PostInput{Type: "result", Body: "맥 반영 완료", To: []string{"claude-code_m"}}))
+	ok(c.Post("claude-code_m", "r", PostInput{Type: "result", Body: "확인했습니다.", ReplyTo: ptr(q.Seq)})) // send 로 보낸 답장
+	r := ok(c.EchoWake("claude-code_m", []string{"📨 #1 맥: 맥 반영 완료\n\n중앙 상태를 보겠습니다.", "확인했습니다.", "진행할까요?"}, true, []int{q.Seq}))
+	if len(r) != 2 || r[0].Body != "중앙 상태를 보겠습니다." || r[1].Body != "진행할까요?" || *r[1].ReplyTo != q.Seq || !r[1].Echo {
+		t.Fatalf("알림 턴 응답 기록: %+v", r)
+	}
+	if r := ok(c.EchoWake("claude-code_m", []string{"진행할까요?"}, true, []int{q.Seq})); len(r) != 0 {
+		t.Fatal("같은 문장 두 번")
+	}
+	// 내 사람이 웹에서 쓴 말(내 이름)에 대한 답도
+	h := ok(c.Post("claude-code_m", "r", PostInput{Body: "반영해봐", Human: true, To: []string{"claude-code_m"}}))
+	if r := ok(c.EchoWake("claude-code_m", []string{"반영했습니다."}, true, []int{h.Seq})); len(r) != 1 || *r[0].ReplyTo != h.Seq {
+		t.Fatalf("사람 메시지 답: %+v", r)
+	}
+	// 내가 보낸 메시지 번호뿐이면 기록 안 함
+	mine := ok(c.Post("claude-code_m", "r", PostInput{Body: "x"}))
+	if r := ok(c.EchoWake("claude-code_m", []string{"y"}, true, []int{mine.Seq})); len(r) != 0 {
+		t.Fatal("내 메시지에 붙음")
+	}
+}
+
 // 결과만 기록: 중간 문장은 빼고 턴이 끝날 때 마지막 답만.
 func TestEchoFinalOnly(t *testing.T) {
 	e := newEnv(t)
