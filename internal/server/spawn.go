@@ -63,11 +63,12 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 			return nil, err
 		}
 	}
-	argv, err := procs.SpawnCommand(in.Kind, spawnIntro(by.Name, by.ID, room)+in.Prompt)
+	prompt := spawnIntro(by.Name, by.ID, room) + in.Prompt
+	argv, err := procs.SpawnCommand(in.Kind, prompt)
 	if err != nil {
 		return nil, &core.Error{Status: 409, Code: "spawn_unsupported", Message: err.Error()}
 	}
-	token, err := c.NewSpawn(by.ID, room, strings.TrimSpace(in.Name))
+	token, err := c.NewSpawn(by.ID, room, strings.TrimSpace(in.Name), prompt) // opencode 는 플러그인이 이 지시를 세션에 직접 보낸다
 	if err != nil {
 		return nil, err
 	}

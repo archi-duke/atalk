@@ -514,6 +514,7 @@ func (c *Atalk) roomView(room *Room) RoomView {
 
 type pendingSpawn struct {
 	By, Room, Name string
+	Prompt         string // 첫 지시 — 플러그인이 세션에 직접 보낼 때 (opencode)
 	At             time.Time
 }
 
@@ -521,7 +522,7 @@ type pendingSpawn struct {
 const spawnTTL = 10 * time.Minute
 
 // NewSpawn 은 atalk spawn 이 새 창을 열기 전에 표식을 만든다. 새 세션이 이 표식으로 등록하면 by 가 띄운 것으로 기록되고 room 에 들어간다.
-func (c *Atalk) NewSpawn(by, room, name string) (token string, err error) {
+func (c *Atalk) NewSpawn(by, room, name, prompt string) (token string, err error) {
 	err = c.guard(func() error {
 		if _, err := c.requireAgent(by); err != nil {
 			return err
@@ -535,7 +536,7 @@ func (c *Atalk) NewSpawn(by, room, name string) (token string, err error) {
 			}
 		}
 		token = newSecret()[:24]
-		c.spawns[token] = pendingSpawn{By: by, Room: room, Name: name, At: c.now()}
+		c.spawns[token] = pendingSpawn{By: by, Room: room, Name: name, Prompt: prompt, At: c.now()}
 		return nil
 	})
 	return
@@ -543,7 +544,7 @@ func (c *Atalk) NewSpawn(by, room, name string) (token string, err error) {
 
 // ClaimSpawn 은 이미 등록된 세션이 spawn 표식을 쓴다 — 띄운 에이전트로 기록하고 이름을 주고 그 방에 들인다.
 // opencode 는 켜질 때 빈 세션을 하나 더 만들어, 등록 순서가 아니라 처음 일을 시작한 세션이 표식을 써야 한다.
-func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, err error) {
+func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, prompt string, err error) {
 	var room, by string
 	err = c.guard(func() error {
 		cur, err := c.requireAgent(agent)
@@ -555,7 +556,7 @@ func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, err error) {
 			return conflict("spawn_expired", "띄우기 표식이 없거나 지났음")
 		}
 		delete(c.spawns, token)
-		cur.SpawnedBy, room, by = p.By, p.Room, p.By
+		cur.SpawnedBy, room, by, prompt = p.By, p.Room, p.By, p.Prompt
 		if p.Name != "" {
 			cur.Name = p.Name
 		}
@@ -574,7 +575,8 @@ func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, err error) {
 		}
 		_, _ = c.Invite(owner, room, agent)
 	}
-	return c.GetAgent(agent)
+	v, err = c.GetAgent(agent)
+	return
 }
 
 func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {

@@ -1649,7 +1649,7 @@ func TestSpawn(t *testing.T) {
 	c := e.core()
 	a, _, _ := setup(t, c)
 	ok(c.CreateRoom(a, "r", "", 0))
-	tok := ok(c.NewSpawn(a, "r", "설계봇"))
+	tok := ok(c.NewSpawn(a, "r", "설계봇", ""))
 	res := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "kid", Pid: i(401), Spawn: tok, Provisional: true}))
 	if res.Agent.SpawnedBy != a || res.Agent.Name != "설계봇" {
 		t.Fatalf("띄운 쪽·이름: %+v", res.Agent.AgentCard)
@@ -1732,14 +1732,18 @@ func TestClaimSpawn(t *testing.T) {
 	c := e.core()
 	a, _, _ := setup(t, c)
 	ok(c.CreateRoom(a, "r", "", 0))
-	tok := ok(c.NewSpawn(a, "r", "오픈코드시험"))
+	tok := ok(c.NewSpawn(a, "r", "오픈코드시험", "할 일"))
 	empty := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "empty", Pid: i(501), Provisional: true})).Agent.ID
 	work := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "work", Pid: i(501), Provisional: true})).Agent.ID
-	v := ok(c.ClaimSpawn(work, tok))
+	v, prompt, err := c.ClaimSpawn(work, tok)
+	check(t, err)
+	if prompt != "할 일" {
+		t.Fatalf("지시: %q", prompt)
+	}
 	if v.SpawnedBy != a || v.Name != "오픈코드시험" || v.Room == nil || *v.Room != "r" {
 		t.Fatalf("일한 세션이 표식을 씀: %+v", v)
 	}
-	if _, err := c.ClaimSpawn(empty, tok); err == nil {
+	if _, _, err := c.ClaimSpawn(empty, tok); err == nil {
 		t.Fatal("표식은 한 번만")
 	}
 	if ok(c.GetAgent(empty)).Room != nil {
