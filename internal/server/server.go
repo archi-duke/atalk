@@ -331,6 +331,17 @@ func (s *Server) routes() http.Handler {
 		}
 		return s.spawn(b)
 	})
+	// 메시지를 에이전트에게 전달함(훅 알림·Codex 깨우기) → 그 에이전트 이름으로 "received" (이미 기록이 있으면 건너뜀)
+	h("POST /agents/{id}/delivered", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Room string `json:"room"`
+			Seqs []int  `json:"seqs"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs)
+	})
 	h("POST /agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.wake(r.PathValue("id"))
 	})

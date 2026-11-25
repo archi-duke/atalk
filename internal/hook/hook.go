@@ -268,6 +268,9 @@ func stop(c *client.Client, kind string, in Input) any {
 	}
 	if forMe {
 		_ = c.Ack(id, u.Messages[len(u.Messages)-1].Seq)
+		if u.Room != nil {
+			_ = c.Delivered(id, *u.Room, client.ForMeSeqs(u.Messages)) // 처리 기록을 늦게 남겨도 일하는 동안 "처리 중" 으로
+		}
 	}
 	if len(fresh) > 0 {
 		for _, f := range fresh {

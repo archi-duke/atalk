@@ -2853,6 +2853,30 @@ func (c *Atalk) Log(agent, r string, seq int, state, note string) (e LogEntry, e
 	return
 }
 
+// LogDelivered 는 데몬·훅이 에이전트에게 메시지를 전달했을 때(알림·Codex 깨우기) 그 에이전트 이름으로 "received" 를 남긴다.
+// 에이전트가 이미 처리 기록을 남긴 메시지는 건너뛴다. 처리 기록을 늦게(끝날 때) 남기는 에이전트도 일하는 동안 "처리 중" 으로 보이게 하려는 것.
+func (c *Atalk) LogDelivered(agent, r string, seqs []int) error {
+	return c.guard(func() error {
+		if m, ok := c.memberships[agent]; !ok || m.Room != r {
+			return nil
+		}
+		have := map[int]bool{}
+		for _, e := range c.st.Logs(r, agent) {
+			have[e.Seq] = true
+		}
+		for _, seq := range seqs {
+			if have[seq] || seq < 1 || seq > c.lastSeq[r] {
+				continue
+			}
+			e := LogEntry{TS: c.ts(), Agent: agent, Seq: seq, State: "received", Note: "전달됨"}
+			c.st.AppendLog(r, e)
+			c.emit(Event{Type: "log", Data: map[string]any{"room": r, "ts": e.TS, "agent": agent, "seq": seq, "state": e.State, "note": e.Note}})
+			have[seq] = true
+		}
+		return nil
+	})
+}
+
 func (c *Atalk) ReadLogs(r, agent string) (out []LogEntry, err error) {
 	err = c.guard(func() error {
 		if _, err := c.requireRoom(r, false); err != nil {
