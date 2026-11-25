@@ -2270,7 +2270,11 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 		have := map[string]bool{}
 		for _, x := range c.st.Messages(m.Room, target, 0) {
 			if x.From == agent && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == target {
-				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록, 또는 send 로 보낸 답장
+				if !x.Echo {
+					// 이미 send 로 이 메시지에 답했음 → 그 뒤 CLI 응답(보통 같은 내용을 다르게 쓴 것)은 남기지 않는다 (답이 두 번 보이지 않게)
+					return nil
+				}
+				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록
 			}
 		}
 		for _, text := range texts {

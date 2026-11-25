@@ -968,13 +968,17 @@ func TestEchoWake(t *testing.T) {
 	ok(c.RespondInvite("opencode_o", "r", true))
 
 	q := ok(c.Post("opencode_o", "r", PostInput{Type: "result", Body: "맥 반영 완료", To: []string{"claude-code_m"}}))
-	ok(c.Post("claude-code_m", "r", PostInput{Type: "result", Body: "확인했습니다.", ReplyTo: ptr(q.Seq)})) // send 로 보낸 답장
-	r := ok(c.EchoWake("claude-code_m", []string{"📨 #1 맥: 맥 반영 완료\n\n중앙 상태를 보겠습니다.", "확인했습니다.", "진행할까요?"}, true, []int{q.Seq}))
+	r := ok(c.EchoWake("claude-code_m", []string{"📨 #1 맥: 맥 반영 완료\n\n중앙 상태를 보겠습니다.", "진행할까요?"}, false, []int{q.Seq}))
 	if len(r) != 2 || r[0].Body != "중앙 상태를 보겠습니다." || r[1].Body != "진행할까요?" || *r[1].ReplyTo != q.Seq || !r[1].Echo {
 		t.Fatalf("알림 턴 응답 기록: %+v", r)
 	}
 	if r := ok(c.EchoWake("claude-code_m", []string{"진행할까요?"}, true, []int{q.Seq})); len(r) != 0 {
 		t.Fatal("같은 문장 두 번")
+	}
+	// send 로 답한 뒤의 CLI 응답(같은 내용을 다르게 쓴 것)은 남기지 않음 — 답이 두 번 보이지 않게
+	ok(c.Post("claude-code_m", "r", PostInput{Type: "result", Body: "네, 최신입니다.", ReplyTo: ptr(q.Seq)}))
+	if r := ok(c.EchoWake("claude-code_m", []string{"네, 맥은 최신 상태입니다. 방에도 답했습니다."}, true, []int{q.Seq})); len(r) != 0 {
+		t.Fatalf("send 뒤 CLI 답이 또 기록됨: %+v", r)
 	}
 	// 내 사람이 웹에서 쓴 말(내 이름)에 대한 답도
 	h := ok(c.Post("claude-code_m", "r", PostInput{Body: "반영해봐", Human: true, To: []string{"claude-code_m"}}))
