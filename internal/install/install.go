@@ -188,7 +188,7 @@ var hookEvents = []struct {
 	{"SessionEnd", "session-end", false, false, ""},
 	{"UserPromptSubmit", "prompt", false, false, ""},
 	{"Notification", "notify", true, false, ""},             // 사람의 확인이 필요함(도구 허가·질문) → 대화방에 알리고 "확인 필요" 표시
-	{"PreToolUse", "ask", true, false, "AskUserQuestion"},   // 사용자에게 묻는 질문 → 대화방에 질문 내용
+	{"PreToolUse", "pre", true, false, ""},   // 사용자에게 묻는 질문 → 대화방에 질문 내용
 	{"PostToolUse", "tool", true, false, ""}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
 }
 
