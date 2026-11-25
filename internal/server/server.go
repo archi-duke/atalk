@@ -492,13 +492,14 @@ func (s *Server) routes() http.Handler {
 	// 사람이 직접 쓴 말 (웹 뷰어 입력창, atalk say, 입력창의 ">> 말")
 	h("POST /rooms/{r}/say", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
-			Agent string `json:"agent"`
-			Text  string `json:"text"`
+			Agent   string `json:"agent"`
+			Text    string `json:"text"`
+			ReplyTo *int   `json:"reply_to"` // 말풍선 답장하기
 		}
 		if err := readActor(r, &b, &b.Agent); err != nil {
 			return nil, err
 		}
-		msg, err := c.Say(b.Agent, r.PathValue("r"), b.Text)
+		msg, err := c.SayReply(b.Agent, r.PathValue("r"), b.Text, b.ReplyTo)
 		return map[string]any{"message": msg}, err
 	})
 	h("GET /rooms/{r}/messages", func(w http.ResponseWriter, r *http.Request) (any, error) {
