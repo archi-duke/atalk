@@ -1665,3 +1665,33 @@ func TestSpawn(t *testing.T) {
 		t.Fatalf("부모 프로세스로 띄운 쪽 찾기 (방에는 넣지 않음): %+v", r.Agent)
 	}
 }
+
+// 전달함 → "received" 자동 기록 (에이전트가 이미 남긴 기록이 있으면 건너뜀, 방 멤버가 아니면 무시).
+func TestLogDelivered(t *testing.T) {
+	c := newEnv(t).core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b))
+	m1 := ok(c.Post(a, "r", PostInput{Type: "task", Body: "1", To: []string{b}}))
+	m2 := ok(c.Post(a, "r", PostInput{Type: "task", Body: "2", To: []string{b}}))
+	ok(c.Log(b, "r", m2.Seq, "working", "직접"))
+	check(t, c.LogDelivered(b, "r", []int{m1.Seq, m2.Seq}))
+	check(t, c.LogDelivered(b, "r", []int{m1.Seq})) // 두 번 와도 한 번만
+	logs := ok(c.ReadLogs("r", b))
+	n1, n2 := 0, 0
+	for _, e := range logs {
+		if e.Seq == m1.Seq {
+			n1++
+			if e.State != "received" {
+				t.Fatalf("자동 기록 상태: %+v", e)
+			}
+		}
+		if e.Seq == m2.Seq {
+			n2++
+		}
+	}
+	if n1 != 1 || n2 != 1 {
+		t.Fatalf("기록 수 m1=%d m2=%d", n1, n2)
+	}
+	check(t, c.LogDelivered("gemini-cli_ccc", "r", []int{m1.Seq})) // 멤버 아님 → 무시
+}

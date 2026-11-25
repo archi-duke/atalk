@@ -276,6 +276,24 @@ func (c *Client) UnreadWait(id string) (u core.Unread, err error) {
 	return
 }
 
+// Delivered 는 메시지들을 이 에이전트에게 전달했다고 알린다 → 데몬이 "received" 처리 기록을 남김 (이미 있으면 건너뜀).
+func (c *Client) Delivered(id, room string, seqs []int) error {
+	if room == "" || len(seqs) == 0 {
+		return nil
+	}
+	return c.call("POST", "/agents/"+esc(id)+"/delivered", map[string]any{"room": room, "seqs": seqs}, nil, 0)
+}
+
+// ForMeSeqs 는 나에게 온 메시지들의 번호.
+func ForMeSeqs(ms []core.InboxMessage) (out []int) {
+	for _, m := range ms {
+		if m.ForMe {
+			out = append(out, m.Seq)
+		}
+	}
+	return
+}
+
 func (c *Client) Ack(id string, seq int) error {
 	return c.call("POST", "/agents/"+esc(id)+"/ack", map[string]int{"seq": seq}, nil, 0)
 }

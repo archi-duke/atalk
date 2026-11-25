@@ -122,6 +122,7 @@ func (w *CodexWaker) Check(c *client.Client, a core.AgentView) (bool, error) {
 	}
 	if len(forMe) > 0 {
 		_ = c.Ack(a.ID, last)
+		_ = c.Delivered(a.ID, room, client.ForMeSeqs(forMe)) // Codex 가 일하는 동안 그 메시지가 "처리 중" 으로 보이게
 	}
 	seen = append(seen, keys...)
 	if len(seen) > 200 {

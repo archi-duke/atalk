@@ -108,6 +108,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 					lines = append(lines, p)
 				}
 				lines = append(lines, client.FormatMessages(forMe, c.Names()))
+				_ = c.Delivered(id, *u.Room, client.ForMeSeqs(forMe)) // 깨우면서 전달 → "received"
 			}
 		}
 		if p, err := c.Pending(id); err == nil {
