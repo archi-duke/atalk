@@ -21,11 +21,13 @@ type SpawnInput struct {
 
 // spawnIntro 는 새 세션의 첫 지시 앞에 붙는 안내 — 누가 띄웠고, 결과를 어디로 보고할지.
 func spawnIntro(byName, by, room string) string {
-	where := ""
+	where, greet := "", ""
 	if room != "" {
-		where = fmt.Sprintf(" ATalk 대화방 %s 에 들어가 있으니,", room)
+		where = fmt.Sprintf(" ATalk 대화방 %s 에 들어가 있습니다.", room)
+		// 방에 처음 들어오면 일보다 인사부터 (사용자 요청)
+		greet = " 작업을 시작하기 전에 먼저 `atalk send` 로 방에 인사하면서 자기소개(이름, 맡은 일)를 한두 줄 올리세요."
 	}
-	return fmt.Sprintf("[ATalk 협업] %s 가 이 세션을 띄웠습니다.%s 아래 작업을 마치면 결과를 `atalk send - --type result --to %s` 로 보고하세요.\n\n", byName, where, by)
+	return fmt.Sprintf("[ATalk 협업] %s 가 이 세션을 띄웠습니다.%s%s 아래 작업을 마치면 결과를 `atalk send - --type result --to %s` 로 보고하세요.\n\n", byName, where, greet, by)
 }
 
 func (s *Server) spawn(in SpawnInput) (any, error) {
