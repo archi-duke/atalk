@@ -1695,3 +1695,32 @@ func TestLogDelivered(t *testing.T) {
 	}
 	check(t, c.LogDelivered("gemini-cli_ccc", "r", []int{m1.Seq})) // 멤버 아님 → 무시
 }
+
+// 사람의 확인 필요: 방에 status 로 한 번 알리고(아무도 깨우지 않음) 표시, 일을 이어 가면(작업 신호) 풀림.
+func TestNeedInput(t *testing.T) {
+	c := newEnv(t).core()
+	a, b, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	ok(c.Invite(a, "r", b))
+	check(t, c.SetNeedInput(a, "Bash 실행 허가: rm -rf build"))
+	check(t, c.SetNeedInput(a, "Bash 실행 허가: rm -rf build")) // 같은 내용은 한 번만
+	if v := ok(c.GetAgent(a)); v.NeedsInput != "Bash 실행 허가: rm -rf build" {
+		t.Fatalf("확인 필요 표시: %q", v.NeedsInput)
+	}
+	n := 0
+	for _, m := range ok(c.ReadMessages("r", 0, 100)) {
+		if m.From == a && m.Type == "status" && strings.Contains(m.Body, "사용자 확인 필요") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("방 알림 %d개", n)
+	}
+	if c.HasWork(b) {
+		t.Fatal("확인 필요 알림이 다른 에이전트를 깨움")
+	}
+	check(t, c.SetActivity(a, true))
+	if ok(c.GetAgent(a)).NeedsInput != "" {
+		t.Fatal("일을 이어 가면 풀려야 함")
+	}
+}

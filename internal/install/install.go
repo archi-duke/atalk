@@ -179,14 +179,17 @@ const waitHookTimeout = 12 * 60 * 60
 var hookEvents = []struct {
 	event, arg    string
 	async, rewake bool
+	matcher       string // 이 도구에만 (PreToolUse 등). 비우면 전부
 }{
-	{"SessionStart", "session-start", false, false},
-	{"SessionStart", "wait", true, true}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
-	{"Stop", "stop", false, false},
-	{"Stop", "wait", true, true}, // 응답을 마칠 때마다 다시 대기: 메시지가 오면 깨움 (Monitor listen 대신 — 기다리는 동안 토큰을 쓰지 않음)
-	{"SessionEnd", "session-end", false, false},
-	{"UserPromptSubmit", "prompt", false, false},
-	{"PostToolUse", "tool", true, false}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
+	{"SessionStart", "session-start", false, false, ""},
+	{"SessionStart", "wait", true, true, ""}, // 이 세션 앞으로 메시지가 오면 입력 없이도 Claude 를 깨운다 (그 뒤로는 atalk listen)
+	{"Stop", "stop", false, false, ""},
+	{"Stop", "wait", true, true, ""}, // 응답을 마칠 때마다 다시 대기: 메시지가 오면 깨움 (Monitor listen 대신 — 기다리는 동안 토큰을 쓰지 않음)
+	{"SessionEnd", "session-end", false, false, ""},
+	{"UserPromptSubmit", "prompt", false, false, ""},
+	{"Notification", "notify", true, false, ""},             // 사람의 확인이 필요함(도구 허가·질문) → 대화방에 알리고 "확인 필요" 표시
+	{"PreToolUse", "ask", true, false, "AskUserQuestion"},   // 사용자에게 묻는 질문 → 대화방에 질문 내용
+	{"PostToolUse", "tool", true, false, ""}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
 }
 
 // isOurs 는 settings.json 의 훅 명령이 atalk 가 넣은 것인지 본다.
@@ -233,8 +236,12 @@ func Claude(p Paths) ([]string, error) {
 				// 쉬고 있는 세션이 그 뒤로 오는 메시지에 깨어나지 못하고, 원격 연결은 하트비트가 끊겨 자리 비움이 됐다
 				entry["timeout"] = waitHookTimeout
 			}
+			group := map[string]any{"hooks": []any{entry}}
+			if h.matcher != "" {
+				group["matcher"] = h.matcher
+			}
 			list, _ := hooks[h.event].([]any)
-			hooks[h.event] = append(list, map[string]any{"hooks": []any{entry}})
+			hooks[h.event] = append(list, group)
 		}
 		s["hooks"] = hooks
 		perms, _ := s["permissions"].(map[string]any)

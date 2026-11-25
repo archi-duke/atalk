@@ -331,6 +331,16 @@ func (s *Server) routes() http.Handler {
 		}
 		return s.spawn(b)
 	})
+	// 사람의 확인이 필요함 (도구 허가·질문): 대화방에 알리고 "확인 필요" 로 표시. text 가 "" 면 풀림
+	h("POST /agents/{id}/need-input", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Text string `json:"text"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, c.SetNeedInput(r.PathValue("id"), b.Text)
+	})
 	// 메시지를 에이전트에게 전달함(훅 알림·Codex 깨우기) → 그 에이전트 이름으로 "received" (이미 기록이 있으면 건너뜀)
 	h("POST /agents/{id}/delivered", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {

@@ -294,6 +294,11 @@ func ForMeSeqs(ms []core.InboxMessage) (out []int) {
 	return
 }
 
+// NeedInput 은 사람의 확인·답이 필요함을 알린다 (text 가 "" 이면 풀림).
+func (c *Client) NeedInput(id, text string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/need-input", map[string]any{"text": text}, nil, 0)
+}
+
 func (c *Client) Ack(id string, seq int) error {
 	return c.call("POST", "/agents/"+esc(id)+"/ack", map[string]int{"seq": seq}, nil, 0)
 }
