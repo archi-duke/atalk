@@ -80,3 +80,24 @@ func TestMarkEvent(t *testing.T) {
 		t.Fatal("같은 eid 는 한 번만, 빈 eid 는 항상")
 	}
 }
+
+// 방 밖에서 시킨 일을 하던 중 방에 들어온 경우: 그 턴의 입력이 기록돼 있지 않으면 지금 기록하고 응답을 붙인다 (한 번만).
+func TestEchoLateJoin(t *testing.T) {
+	_, c, a := echoSetup(t)
+	ms := ok(c.EchoReply(a, []string{"평가를 시작합니다", "평가를 마쳤습니다"}, true, "SATAM 평가 다시 진행 해봐"))
+	if len(ms) != 2 || ms[0].ReplyTo == nil {
+		t.Fatalf("입력을 기록하고 응답을 붙여야 함: %+v", ms)
+	}
+	in := ok(c.ReadMessages("r", *ms[0].ReplyTo-1, 1))[0]
+	if !in.Echo || in.Human == "" || in.Body != "SATAM 평가 다시 진행 해봐" {
+		t.Fatalf("늦게 기록한 입력: %+v", in)
+	}
+	if again := ok(c.EchoReply(a, []string{"평가를 마쳤습니다"}, true, "SATAM 평가 다시 진행 해봐")); len(again) != 0 {
+		t.Fatal("같은 턴을 두 번 기록함")
+	}
+	for _, p := range []string{"/compact", ">> 안녕", "[ATalk] 알림"} {
+		if x := ok(c.EchoReply(a, []string{"x"}, true, p)); len(x) != 0 {
+			t.Fatalf("%q 는 기록하지 않음", p)
+		}
+	}
+}

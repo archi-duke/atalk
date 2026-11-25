@@ -60,3 +60,32 @@ func TestTurnTexts(t *testing.T) {
 		t.Fatal("경로 없음")
 	}
 }
+
+// Codex 대화 기록(rollout): 마지막 입력 이후의 응답 문장, ATalk 알림 입력은 wake.
+func TestCodexTurn(t *testing.T) {
+	dir := t.TempDir()
+	write := func(lines ...string) string {
+		p := filepath.Join(dir, "r.jsonl")
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	meta := `{"type":"session_meta","payload":{"session_id":"x"}}`
+	user := func(s string) string {
+		return `{"type":"event_msg","payload":{"type":"item_completed","item":{"type":"UserMessage","content":[{"type":"text","text":"` + s + `"}]}}}`
+	}
+	sys := `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions"}]}}`
+	say := func(s string) string {
+		return `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + s + `"}]}}`
+	}
+	tool := `{"type":"response_item","payload":{"type":"function_call","name":"exec"}}`
+	got, p, w := turnInfo(write(meta, user("이전 질문"), say("이전 답"), sys, user("SATAM 평가 다시 진행 해봐"), say("시작합니다"), tool, say("완료했습니다")))
+	if p != "SATAM 평가 다시 진행 해봐" || w != nil || strings.Join(got, "|") != "시작합니다|완료했습니다" {
+		t.Fatalf("사람 입력 턴: %q %q %v", got, p, w)
+	}
+	got, p, w = turnInfo(write(meta, user("질문"), say("답"), user(`[ATalk] r 방에서 나에게 온 메시지 1개:\n#42 [chat] 대장@마스터 (사람) → codex\n확인해`), say("확인했습니다")))
+	if p != "" || len(w) != 1 || w[0] != 42 || strings.Join(got, "|") != "확인했습니다" {
+		t.Fatalf("알림 턴: %q %q %v", got, p, w)
+	}
+}
