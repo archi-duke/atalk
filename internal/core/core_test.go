@@ -1520,3 +1520,53 @@ func TestResumeSameProcessIdentity(t *testing.T) {
 		t.Fatal("opencode 는 retire 하면 안 됨")
 	}
 }
+
+// 받는 대상 없이 보낸 답장은 원래 메시지를 보낸 쪽에게만 간다 (방 전체에 퍼져 다른 에이전트가 필요 없는 메시지를 받지 않게).
+func TestReplyGoesToRequesterOnly(t *testing.T) {
+	c := newEnv(t).core()
+	for _, s := range []string{"m", "a", "b"} {
+		ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: s}))
+	}
+	m, a, b := "claude-code_m", "claude-code_a", "claude-code_b"
+	ok(c.CreateRoom(m, "r", "", 0))
+	for _, x := range []string{a, b} {
+		ok(c.Invite(m, "r", x))
+		ok(c.RespondInvite(x, "r", true))
+	}
+	for _, x := range []string{m, a, b} {
+		ok(c.Unread(x, true))
+	}
+
+	// 사람(대장@m)이 m 에게 쓴 말에 m 이 --to 없이 답함 → 사람만 봄 (a·b 도, m 자신도 받지 않음)
+	h := ok(c.Post(m, "r", PostInput{Body: "상태 알려줘", Human: true, To: []string{m}}))
+	ok(c.Unread(m, true))
+	res := ok(c.Post(m, "r", PostInput{Type: "result", Body: "정상", ReplyTo: ptr(h.Seq)}))
+	if !slices.Equal(res.To, []string{m}) {
+		t.Fatalf("사람 말에 대한 답의 받는 대상 = %v", res.To)
+	}
+	for _, x := range []string{m, a, b} {
+		if c.HasWork(x) {
+			t.Fatalf("사람에게 한 답이 %s 에게 전달됨", x)
+		}
+	}
+
+	// a 가 맡긴 일에 b 가 --to 없이 답함 → a 에게만
+	task := ok(c.Post(a, "r", PostInput{Type: "task", Body: "확인해 줘", To: []string{b}}))
+	ok(c.Unread(b, true))
+	ok(c.Post(b, "r", PostInput{Type: "result", Body: "완료", ReplyTo: ptr(task.Seq)}))
+	if !c.HasWork(a) || c.HasWork(m) {
+		t.Fatalf("일의 답: a=%v m=%v (a 에게만 가야 함)", c.HasWork(a), c.HasWork(m))
+	}
+
+	// --to 를 지정하면 그대로, 답장이 아니면 방 전체 그대로
+	ok(c.Unread(a, true))
+	ok(c.Post(b, "r", PostInput{Body: "모두 참고", ReplyTo: ptr(task.Seq), To: []string{m}}))
+	if !c.HasWork(m) || c.HasWork(a) {
+		t.Fatal("--to 지정이 무시됨")
+	}
+	ok(c.Unread(m, true))
+	ok(c.Post(b, "r", PostInput{Body: "공지"}))
+	if !c.HasWork(m) || !c.HasWork(a) {
+		t.Fatal("답장이 아닌 말은 방 전체에 가야 함")
+	}
+}
