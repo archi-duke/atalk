@@ -33,7 +33,8 @@ func SpawnCommand(kind, prompt string) ([]string, error) {
 	case "claude-code":
 		return []string{"claude", prompt}, nil
 	case "opencode":
-		return []string{"opencode", "--prompt", prompt}, nil
+		// --prompt 는 켜지는 순서에 따라 입력·전송되지 않을 때가 있어, 지시 없이 열고 ATalk 플러그인이 세션에 직접 보낸다
+		return []string{"opencode"}, nil
 	case "codex":
 		return []string{"codex", "--no-daemon", prompt}, nil // 이 창에서 직접 (훅이 찾는 PID 가 이 창이 되게)
 	}

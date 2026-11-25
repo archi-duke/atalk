@@ -344,8 +344,30 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       }
     }, 1500)
   }
+  // atalk spawn 으로 연 창: 시작하면 세션 하나를 정해(있으면 그것, 없으면 새로) 표식을 쓰고(띄운 에이전트·이름·방),
+  // 받은 첫 지시를 그 세션에 직접 보낸 뒤 창(TUI)도 그 세션을 보여 주게 한다. (opencode --prompt 는 입력되지 않을 때가 있음)
+  if (SPAWN) {
+    setTimeout(async () => {
+      try {
+        if (spawnUsed) return
+        spawnUsed = true
+        let sid = [...sessions.keys()][0] ?? ""
+        if (!sid) {
+          const r: any = await client.session.create({ body: { title: process.env.ATALK_NAME ?? "ATalk" } })
+          sid = r?.data?.id ?? ""
+          if (!sid) return
+          await track(sid)
+        }
+        const st = sessions.get(sid)
+        if (!st) return
+        const res = await apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN })
+        await client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: sid } } as any }).catch(() => {})
+        if (res?.prompt) await client.session.prompt({ path: { id: sid }, body: { parts: [{ type: "text", text: res.prompt }] } })
+      } catch {}
+    }, 3000)
+  }
   const skipEager = ["run", "serve", "web", "attach", "acp", "mcp", "export", "import", "-c", "--continue", "-s", "--session", "--prompt"]
-  if (!argv.some((a) => skipEager.includes(a) || a.startsWith("--session=") || a.startsWith("--continue"))) {
+  if (!SPAWN && !argv.some((a) => skipEager.includes(a) || a.startsWith("--session=") || a.startsWith("--continue"))) {
     setTimeout(async () => {
       try {
         if (sessions.size || foreignActivity) return
@@ -404,13 +426,6 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             const st = sessions.get(p.sessionID)
             if (st) {
               const busy = p.status?.type !== "idle"
-              // atalk spawn 으로 연 창: 켜질 때 빈 세션이 하나 더 생기므로, 처음 일을 시작한 세션이 표식을 쓴다 (띄운 에이전트·이름·방)
-              if (busy && SPAWN && !spawnUsed) {
-                spawnUsed = true
-                apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN }).catch(() => {})
-                // 창(TUI)도 이 세션을 보여 주게 — opencode 가 켜질 때 만든 다른 세션을 보고 있으면 허가 창·진행이 안 보인다
-                client.tui.publish({ body: { type: "tui.session.select", properties: { sessionID: p.sessionID } } as any }).catch(() => {})
-              }
               if (busy !== st.busy) apiAs(st.id, "POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
               st.busy = busy
             } else await trackById(p.sessionID)

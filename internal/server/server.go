@@ -339,8 +339,8 @@ func (s *Server) routes() http.Handler {
 		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
-		a, err := c.ClaimSpawn(r.PathValue("id"), b.Token)
-		return map[string]any{"agent": a}, err
+		a, prompt, err := c.ClaimSpawn(r.PathValue("id"), b.Token)
+		return map[string]any{"agent": a, "prompt": prompt}, err
 	})
 	// 사람의 확인이 필요함 (도구 허가·질문): 대화방에 알리고 "확인 필요" 로 표시. text 가 "" 면 풀림
 	h("POST /agents/{id}/need-input", func(w http.ResponseWriter, r *http.Request) (any, error) {
