@@ -782,7 +782,21 @@ document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
 
 // ───────── 대화창 ─────────
 let chat = null; // { room, messages, logs }
+// 방마다 입력 상태(받는 대상 @이름·쓰던 글·답장 대상)를 따로 기억한다 — 방을 바꾸면 그 방에서 하던 상태로 (이 브라우저에만)
+let drafts = (() => { try { return JSON.parse(localGet("atalk.drafts") || "{}") || {}; } catch { return {}; } })();
+function saveDraft(room) {
+  if (!room || DATA) return;
+  const text = ta.value, reply = replyTo && replyTo.room === room ? replyTo : null;
+  if (text || reply) drafts[room] = { text, reply }; else delete drafts[room];
+  localSet("atalk.drafts", JSON.stringify(drafts));
+}
+function restoreDraft(room) {
+  const d = drafts[room] || {};
+  ta.value = d.text || ""; replyTo = d.reply || null;
+  grow(); renderReplying();
+}
 function openRoom(r) {
+  if (selected !== r) { saveDraft(selected); restoreDraft(r); }
   selected = r;
   if (!DATA && location.hash !== "#" + encodeURIComponent(r)) history.replaceState(null, "", "#" + encodeURIComponent(r));
   $("#app").classList.add("chatting");
@@ -1199,15 +1213,17 @@ function startReply(m) {
   const mem = chat.room.members.find((x) => x.agent === m.from);
   const tok = mem && !/\s/.test(mem.name) ? mem.name : m.from;
   ta.value = "@" + tok + " " + ta.value.replace(/^(@\S+\s*)+/, "");
-  renderReplying(); renderTargets(); grow(); ta.focus();
+  renderReplying(); renderTargets(); grow(); ta.focus(); saveDraft(selected);
 }
+// 미리 보기용 첫 줄: 마크다운 기호·표 줄을 걷어 낸 첫 글 줄
+const firstLine = (s) => clean(s).split("\n").map((l) => l.replace(/\*\*|__|~~|`/g, "").replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/, "").trim()).find((l) => l && !l.startsWith("|")) || "";
 function renderReplying() {
   const el = $("#replying");
   const q = replyTo && chat && replyTo.room === chat.room.room_id ? (chat.messages || []).find((x) => x.seq === replyTo.seq) : null;
   if (!q) { el.hidden = true; el.innerHTML = ""; if (replyTo && chat && replyTo.room !== chat.room.room_id) replyTo = null; return; }
   el.hidden = $("#compose").hidden;
-  el.innerHTML = "<span>↩ <b>" + esc(nameOf(q.from)) + "</b> 의 #" + q.seq + " 에 답장 (" + esc(nameOf(q.from)) + "에게만) · " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 80)) + '</span><button type="button" title="답장 취소">✕</button>';
-  el.querySelector("button").onclick = () => { replyTo = null; renderReplying(); ta.focus(); };
+  el.innerHTML = "<span>↩ <b>" + esc(nameOf(q.from)) + "</b> 의 #" + q.seq + " 에 답장 (" + esc(nameOf(q.from)) + "에게만) · " + esc(firstLine(q.body).slice(0, 80)) + '</span><button type="button" title="답장 취소">✕</button>';
+  el.querySelector("button").onclick = () => { replyTo = null; renderReplying(); ta.focus(); saveDraft(selected); };
 }
 async function loadAlias() {
   if (DATA) return;
@@ -1215,7 +1231,7 @@ async function loadAlias() {
 }
 const ta = $("#text");
 const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
-ta.addEventListener("input", () => { grow(); renderTargets(); });
+ta.addEventListener("input", () => { grow(); renderTargets(); saveDraft(selected); });
 ta.addEventListener("keydown", (e) => {
   // 한글 입력 조합 중의 Enter 는 글자 확정이므로 보내지 않는다
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $("#compose").requestSubmit(); }
@@ -1239,7 +1255,7 @@ $("#compose").onsubmit = async (e) => {
     if (reply) { replyTo = null; renderReplying(); }
     // 고른 받는 대상(@이름)은 남겨 둔다 — 다음 말도 같은 상대에게 (지우면 방장)
     const keep = (text.match(/^(@\S+\s*)+/) || [""])[0].trim();
-    ta.value = keep ? keep + " " : ""; grow(); renderTargets();
+    ta.value = keep ? keep + " " : ""; grow(); renderTargets(); saveDraft(selected);
     await loadChat(true);
   } catch (err) {
     $("#sendErr").textContent = String(err.message || err);
