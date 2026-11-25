@@ -2533,7 +2533,8 @@ func (c *Atalk) unreadLocked(agent string, ack bool) Unread {
 		// (방 전체에 보낸 말을 빼면 "모두 인사해 봐" 같은 지시가 그 사람의 에이전트에게만 전달되지 않는다)
 		toSelf := x.From == agent && x.Human != "" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 		if x.Seq > cursor && (x.From != agent || toSelf) {
-			forMe := x.Type != "system" && (len(x.To) == 0 || slices.Contains(x.To, agent))
+			// status(진행 상황·자동 수신 확인)는 알리기만 — 받는 에이전트를 깨워 컨텍스트를 쓰게 하지 않는다 (웹 화면·unread 에는 보임)
+			forMe := x.Type != "system" && x.Type != "status" && (len(x.To) == 0 || slices.Contains(x.To, agent))
 			if forMe && x.From != agent && c.replyToMyHuman(m.Room, x, agent) {
 				forMe = false // 사람(대장@나)이 쓴 말에 대한 답은 그 사람에게 — 나를 깨워 내 컨텍스트를 쓰지 않는다
 			}
