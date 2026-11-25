@@ -442,7 +442,7 @@ func main() {
 		check(listen(c, me()))
 
 	case "daemon":
-		runDaemon(c, at)
+		runDaemon(lc, at) // 데몬 관리는 늘 이 PC 의 데몬 (원격 연결된 세션 안에서도)
 
 	case "autostart":
 		switch at.arg(0, "on|off|status") {
