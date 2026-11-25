@@ -302,7 +302,7 @@
   .targets a { color:var(--accent); font-weight:600; }
   .targets button.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .compose { border-top:0; }
-  .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; max-height:160px; outline:none; }
+  .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; min-height:38px; max-height:160px; outline:none; }
   .compose textarea:focus { border-color:var(--accent); }
   .compose button { border:0; border-radius:10px; padding:8px 14px; background:var(--mine); color:var(--mine-fg); font-weight:700; cursor:pointer; flex:none; }
   .compose button:disabled { opacity:.5; cursor:default; }
@@ -1215,6 +1215,7 @@ function renderCompose(room) {
     return;
   }
   if (form.hidden) return;
+  if (!ta.style.height || ta.style.height === "0px") grow(); // 보이게 된 뒤 다시 잰다
   const owner = live.find((m) => m.role === "owner");
   ownerId = owner ? owner.agent : null;
   via = (owner || live[0]).agent;
@@ -1274,7 +1275,12 @@ async function loadAlias() {
   try { alias = (await j("/config")).config?.user || "사용자"; } catch {}
 }
 const ta = $("#text");
-const grow = () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px"; };
+// 입력창 높이를 글에 맞춘다. 숨겨진 동안(방 전환 중 등)에는 scrollHeight 가 0 이라 재면 높이가 0 으로 굳으므로 재지 않는다
+const grow = () => {
+  if (!ta.offsetParent) { ta.style.height = ""; return; }
+  ta.style.height = "auto";
+  ta.style.height = Math.min(Math.max(ta.scrollHeight, 38), 160) + "px";
+};
 ta.addEventListener("input", () => { grow(); renderTargets(); saveDraft(selected); });
 ta.addEventListener("keydown", (e) => {
   // 한글 입력 조합 중의 Enter 는 글자 확정이므로 보내지 않는다
