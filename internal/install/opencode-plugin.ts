@@ -107,6 +107,9 @@ function format(msgs: Msg[], names: Record<string, string>) {
     .join("\n\n")
 }
 
+const SPAWN = process.env.ATALK_SPAWN ?? "" // atalk spawn 으로 연 창이면 연결 표식
+let spawnUsed = false
+
 export const AtalkPlugin: Plugin = async ({ client, directory }) => {
   const sessions = new Map<string, State>()
   const pendingTrack = new Set<string>()
@@ -120,7 +123,6 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       // (시작하자마자 만든 빈 세션이 이전 세션을 밀어내지 않게. 이전 세션이 다시 쓰이면 쓰지 않은 빈 세션 카드는 정리된다)
       const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid, provisional: true }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
-      if (process.env.ATALK_SPAWN) body.spawn = process.env.ATALK_SPAWN // atalk spawn 으로 연 창
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)
       const reg = await apiAs(agentId(sid), "POST", "/agents", body)
@@ -402,6 +404,11 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             const st = sessions.get(p.sessionID)
             if (st) {
               const busy = p.status?.type !== "idle"
+              // atalk spawn 으로 연 창: 켜질 때 빈 세션이 하나 더 생기므로, 처음 일을 시작한 세션이 표식을 쓴다 (띄운 에이전트·이름·방)
+              if (busy && SPAWN && !spawnUsed) {
+                spawnUsed = true
+                apiAs(st.id, "POST", `/agents/${enc(st.id)}/spawn`, { token: SPAWN }).catch(() => {})
+              }
               if (busy !== st.busy) apiAs(st.id, "POST", `/agents/${enc(st.id)}/activity`, { busy }).catch(() => {}) // 작업 중 표시
               st.busy = busy
             } else await trackById(p.sessionID)

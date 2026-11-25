@@ -331,6 +331,17 @@ func (s *Server) routes() http.Handler {
 		}
 		return s.spawn(b)
 	})
+	// 이미 등록된 세션이 spawn 표식을 씀 (opencode: 처음 일을 시작한 세션)
+	h("POST /agents/{id}/spawn", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Token string `json:"token"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		a, err := c.ClaimSpawn(r.PathValue("id"), b.Token)
+		return map[string]any{"agent": a}, err
+	})
 	// 사람의 확인이 필요함 (도구 허가·질문): 대화방에 알리고 "확인 필요" 로 표시. text 가 "" 면 풀림
 	h("POST /agents/{id}/need-input", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
