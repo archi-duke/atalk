@@ -482,7 +482,7 @@ func (s *Server) remoteHandler() http.Handler {
 		return map[string]any{}, c.RevokeRemote(remoteAgentOf(r))
 	})
 	pass("PATCH /agents/{id}", rule{self: true})
-	for _, p := range []string{"echo", "activate", "activity", "away", "leave", "ack"} {
+	for _, p := range []string{"echo", "activate", "activity", "away", "leave", "ack", "delivered", "need-input"} {
 		pass("POST /agents/{id}/"+p, rule{self: true})
 	}
 	pass("GET /agents/{id}/unread", rule{self: true})
