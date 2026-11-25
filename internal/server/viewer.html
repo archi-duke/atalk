@@ -1215,12 +1215,14 @@ function startReply(m) {
   ta.value = "@" + tok + " " + ta.value.replace(/^(@\S+\s*)+/, "");
   renderReplying(); renderTargets(); grow(); ta.focus(); saveDraft(selected);
 }
+// 미리 보기용 첫 줄: 마크다운 기호·표 줄을 걷어 낸 첫 글 줄
+const firstLine = (s) => clean(s).split("\n").map((l) => l.replace(/\*\*|__|~~|`/g, "").replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/, "").trim()).find((l) => l && !l.startsWith("|")) || "";
 function renderReplying() {
   const el = $("#replying");
   const q = replyTo && chat && replyTo.room === chat.room.room_id ? (chat.messages || []).find((x) => x.seq === replyTo.seq) : null;
   if (!q) { el.hidden = true; el.innerHTML = ""; if (replyTo && chat && replyTo.room !== chat.room.room_id) replyTo = null; return; }
   el.hidden = $("#compose").hidden;
-  el.innerHTML = "<span>↩ <b>" + esc(nameOf(q.from)) + "</b> 의 #" + q.seq + " 에 답장 (" + esc(nameOf(q.from)) + "에게만) · " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 80)) + '</span><button type="button" title="답장 취소">✕</button>';
+  el.innerHTML = "<span>↩ <b>" + esc(nameOf(q.from)) + "</b> 의 #" + q.seq + " 에 답장 (" + esc(nameOf(q.from)) + "에게만) · " + esc(firstLine(q.body).slice(0, 80)) + '</span><button type="button" title="답장 취소">✕</button>';
   el.querySelector("button").onclick = () => { replyTo = null; renderReplying(); ta.focus(); saveDraft(selected); };
 }
 async function loadAlias() {
