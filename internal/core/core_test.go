@@ -409,6 +409,29 @@ func TestHumanMessage(t *testing.T) {
 	}
 }
 
+// 사람이 (방장 이름으로) 쓴 말에 대한 답은 사람에게 가는 것 — 방장 에이전트를 깨우지 않는다. 방장 자신이 보낸 일의 답은 그대로 깨운다.
+func TestReplyToHumanNotForAgent(t *testing.T) {
+	c := newEnv(t).core()
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "m"}))
+	ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "o"}))
+	ok(c.CreateRoom("claude-code_m", "r", "", 0))
+	ok(c.Invite("claude-code_m", "r", "opencode_o"))
+	ok(c.RespondInvite("opencode_o", "r", true))
+	ok(c.Unread("claude-code_m", true))
+
+	h := ok(c.Post("claude-code_m", "r", PostInput{Body: "남은 작업?", Human: true, To: []string{"opencode_o"}}))
+	ok(c.Post("opencode_o", "r", PostInput{Type: "result", Body: "없음", To: []string{"claude-code_m"}, ReplyTo: ptr(h.Seq)}))
+	if c.HasWork("claude-code_m") {
+		t.Fatal("사람 말에 대한 답이 방장 에이전트를 깨움")
+	}
+	ok(c.Unread("claude-code_m", true))
+	task := ok(c.Post("claude-code_m", "r", PostInput{Type: "task", Body: "확인해 줘", To: []string{"opencode_o"}}))
+	ok(c.Post("opencode_o", "r", PostInput{Type: "result", Body: "완료", To: []string{"claude-code_m"}, ReplyTo: ptr(task.Seq)}))
+	if !c.HasWork("claude-code_m") {
+		t.Fatal("방장이 보낸 일의 답은 방장에게 가야 함")
+	}
+}
+
 func TestResumePrevious(t *testing.T) {
 	e := newEnv(t)
 	c := e.core()
