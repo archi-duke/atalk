@@ -420,6 +420,30 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
             } else await trackById(p.sessionID)
             break
           }
+          // 사람의 확인이 필요함 (도구 허가·질문): 대화방에 알리고 "확인 필요" 표시. 답하면 풀림
+          case "permission.asked": {
+            const st = sessions.get(p.sessionID)
+            if (st) {
+              const what = Array.isArray(p.patterns) && p.patterns.length ? ": " + p.patterns.join(", ") : ""
+              apiAs(st.id, "POST", `/agents/${enc(st.id)}/need-input`, { text: `${p.permission ?? "도구"} 실행 허가${what}` }).catch(() => {})
+            }
+            break
+          }
+          case "question.asked": {
+            const st = sessions.get(p.sessionID)
+            if (st) {
+              const text = (p.questions ?? []).map((q: any) => (q.question ?? "") + (q.options?.length ? " (" + q.options.map((o: any) => o.label).join(" / ") + ")" : "")).join("\n")
+              if (text.trim()) apiAs(st.id, "POST", `/agents/${enc(st.id)}/need-input`, { text }).catch(() => {})
+            }
+            break
+          }
+          case "permission.replied":
+          case "question.replied":
+          case "question.rejected": {
+            const st = sessions.get(p.sessionID)
+            if (st) apiAs(st.id, "POST", `/agents/${enc(st.id)}/need-input`, { text: "" }).catch(() => {})
+            break
+          }
           case "session.deleted": {
             const st = sessions.get(p.info?.id)
             if (st) {
