@@ -2353,6 +2353,21 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 			return nil
 		}
 		seq, idx := c.echoTarget(m, prompt)
+		if seq == 0 && c.lateInput(m, agent, prompt) {
+			// 이 턴의 입력이 기록되지 않음: 입력한 뒤에 방에 들어왔다 (방 밖에서 시킨 일을 하던 중 초대받음 등).
+			// 지금 그 입력을 기록하고 응답을 붙인다 — 이미 기록한 입력이면(앞서 닫힌 턴) 다시 만들지 않는다.
+			if room, err := c.requireRoom(m.Room, true); err == nil && c.lastSeq[m.Room] < room.Policy.MaxMessages {
+				text := strings.TrimSpace(prompt)
+				if r := []rune(text); len(r) > EchoMax {
+					text = string(r[:EchoMax]) + "\n…(길어서 생략)"
+				}
+				in := c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{agent}, Body: text, Human: c.humanOf(agent), Echo: true})
+				m.normalizeEcho()
+				m.EchoQueue = append(m.EchoQueue, in.Seq)
+				c.saveMemberships()
+				seq, idx = in.Seq, len(m.EchoQueue)-1
+			}
+		}
 		if seq == 0 {
 			return nil // 기다리는 입력이 없거나, 다른(앞선) 턴의 응답 — 기록하지 않고 큐도 건드리지 않는다
 		}
@@ -2478,6 +2493,25 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 		return nil
 	})
 	return
+}
+
+// lateInput: 이 턴의 입력이 방에 들어오기 전에 들어와 기록되지 않았나 — 방에 들어온 뒤 이 에이전트의 CLI 입력 기록이 하나도 없을 때만.
+// (들어온 뒤 기록된 입력이 있으면, 기다리는 입력과 다른 말은 앞선 턴의 것이므로 붙이지 않는다)
+func (c *Atalk) lateInput(m *Membership, agent, prompt string) bool {
+	p := strings.TrimSpace(prompt)
+	if p == "" || IsSystemPrompt(p) || strings.HasPrefix(p, "/") || strings.HasPrefix(p, ">>") {
+		return false
+	}
+	if cfg := c.readConfig(); cfg.EchoPrompts != nil && !*cfg.EchoPrompts {
+		return false
+	}
+	after := max(0, c.lastSeq[m.Room]-1000)
+	for _, x := range c.st.Messages(m.Room, after, 0) {
+		if x.TS >= m.JoinedAt && x.Echo && x.From == agent && x.Human != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // SamePrompt 는 samePrompt 를 훅에서 쓰게 내보낸 것.

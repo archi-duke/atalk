@@ -387,6 +387,9 @@ func turnInfo(path string) (texts []string, prompt string, wake []int) {
 		return nil, "", nil
 	}
 	lines := strings.Split(string(b), "\n")
+	if isCodexRollout(lines) {
+		return codexTurn(lines)
+	}
 	// texts 는 뒤에서부터 모은다
 	done := func() ([]string, string, []int) {
 		slices.Reverse(texts)
