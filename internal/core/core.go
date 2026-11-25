@@ -541,6 +541,42 @@ func (c *Atalk) NewSpawn(by, room, name string) (token string, err error) {
 	return
 }
 
+// ClaimSpawn 은 이미 등록된 세션이 spawn 표식을 쓴다 — 띄운 에이전트로 기록하고 이름을 주고 그 방에 들인다.
+// opencode 는 켜질 때 빈 세션을 하나 더 만들어, 등록 순서가 아니라 처음 일을 시작한 세션이 표식을 써야 한다.
+func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, err error) {
+	var room, by string
+	err = c.guard(func() error {
+		cur, err := c.requireAgent(agent)
+		if err != nil {
+			return err
+		}
+		p, ok := c.spawns[token]
+		if token == "" || !ok || c.now().Sub(p.At) > spawnTTL {
+			return conflict("spawn_expired", "띄우기 표식이 없거나 지났음")
+		}
+		delete(c.spawns, token)
+		cur.SpawnedBy, room, by = p.By, p.Room, p.By
+		if p.Name != "" {
+			cur.Name = p.Name
+		}
+		cur.UpdatedAt = c.ts()
+		c.saveCard(cur)
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "update"}})
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	if room != "" {
+		owner := ""
+		if r, e := c.GetRoom(room); e == nil && r.Owner != nil && *r.Owner == by {
+			owner = by
+		}
+		_, _ = c.Invite(owner, room, agent)
+	}
+	return c.GetAgent(agent)
+}
+
 func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 	var spawnRoom, spawnBy string
 	defer func() {

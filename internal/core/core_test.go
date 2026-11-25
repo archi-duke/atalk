@@ -1724,3 +1724,25 @@ func TestNeedInput(t *testing.T) {
 		t.Fatal("일을 이어 가면 풀려야 함")
 	}
 }
+
+// 등록 뒤 표식 쓰기 (opencode: 처음 일을 시작한 세션): 띄운 쪽·이름·방, 한 번만.
+func TestClaimSpawn(t *testing.T) {
+	e := newEnv(t)
+	e.alive[501], e.alive[502] = true, true
+	c := e.core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	tok := ok(c.NewSpawn(a, "r", "오픈코드시험"))
+	empty := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "empty", Pid: i(501), Provisional: true})).Agent.ID
+	work := ok(c.Register(RegisterInput{Kind: "opencode", SessionID: "work", Pid: i(501), Provisional: true})).Agent.ID
+	v := ok(c.ClaimSpawn(work, tok))
+	if v.SpawnedBy != a || v.Name != "오픈코드시험" || v.Room == nil || *v.Room != "r" {
+		t.Fatalf("일한 세션이 표식을 씀: %+v", v)
+	}
+	if _, err := c.ClaimSpawn(empty, tok); err == nil {
+		t.Fatal("표식은 한 번만")
+	}
+	if ok(c.GetAgent(empty)).Room != nil {
+		t.Fatal("빈 세션은 방에 들어가지 않음")
+	}
+}
