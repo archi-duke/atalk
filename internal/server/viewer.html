@@ -80,6 +80,17 @@
   .rbadge { position:absolute; top:-6px; right:-7px; z-index:1; min-width:18px; padding:0 5px; border-radius:9px; background:var(--unread); color:#fff; font-size:11px; font-weight:700; line-height:18px; text-align:center; box-shadow:0 0 0 2px var(--panel); }
   .rbadge.done { background:var(--result); }
   .rbadge.ask, .ask-t { background:tomato; }
+  /* 사용자 확인 필요 카드: 질문·선택지 또는 허가할 도구·명령. 아직 기다리는 중이면 tomato 테두리 */
+  .askcard { border:2px solid var(--line); border-radius:12px; padding:8px 10px; background:var(--bg); min-width:220px; }
+  .askcard.live { border-color:tomato; }
+  .askcard .ah { font-weight:700; font-size:12px; color:tomato; margin-bottom:4px; }
+  .askcard:not(.live) .ah { color:var(--muted); }
+  .askcard .aq { margin:4px 0 2px; }
+  .askcard .ao { display:flex; flex-wrap:wrap; gap:5px; margin:4px 0; }
+  .askcard .ao span { border:1px solid var(--line); border-radius:12px; padding:1px 9px; font-size:12px; background:var(--panel); }
+  .askcard pre { margin:4px 0; white-space:pre-wrap; word-break:break-all; font-size:12px; }
+  .askcard .af { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); margin-top:4px; }
+  .askcard .af button { border:1px solid var(--line); background:var(--panel); border-radius:8px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--fg); }
   .ask-t { color:#fff; border-radius:8px; padding:0 6px; font-weight:600; }
   .room-ico { width:44px; height:44px; border-radius:16px; background:var(--chat); display:grid; place-items:center; font-weight:700; color:var(--sys); flex:none; }
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
@@ -834,6 +845,31 @@ async function loadChat(scroll) {
   if (!DATA && !document.hidden && chat.room.room_id === selected) { const before = seenSeq[selected] || 0; markSeen(selected, chat.room.last_seq); if ((seenSeq[selected] || 0) !== before) renderSide(); }
 }
 
+// ───────── 사용자 확인 필요 카드 ─────────
+// 데몬이 남긴 status "🙋 사용자 확인 필요 — 내용" 을 카드로. 줄마다 "질문 (선택1 / 선택2)" 또는 "도구 실행 허가: 명령".
+// 그 에이전트가 아직 기다리는 중이고 이것이 마지막 확인 요청이면 "답 기다리는 중" (tomato), 아니면 "지나감".
+const ASK_PREFIX = "🙋 사용자 확인 필요 — ";
+function askCard(m, msgs) {
+  const body = m.body.slice(ASK_PREFIX.length);
+  const a = agents[m.from];
+  const lastAsk = [...msgs].reverse().find((x) => x.from === m.from && x.type === "status" && x.body.startsWith(ASK_PREFIX));
+  const live = !!a?.needs_input && lastAsk?.seq === m.seq;
+  let html = "";
+  const perm = body.match(/^(\S+) 실행 허가(?:: ([\s\S]*))?$/);
+  if (perm) {
+    html += '<div class="aq"><b>' + esc(perm[1]) + "</b> 실행을 허가할까요?</div>" + (perm[2] ? "<pre>" + esc(perm[2]) + "</pre>" : "");
+  } else {
+    for (const line of body.split("\n")) {
+      const q = line.match(/^([\s\S]*?) \(([^()]*)\)$/);
+      if (q && q[2].includes(" / ")) html += '<div class="aq">' + esc(q[1]) + '</div><div class="ao">' + q[2].split(" / ").map((o) => "<span>" + esc(o) + "</span>").join("") + "</div>";
+      else html += '<div class="aq">' + esc(line) + "</div>";
+    }
+  }
+  const canFocus = live && a?.local && !a?.shared;
+  return '<div class="askcard' + (live ? " live" : "") + '"><div class="ah">🙋 ' + (live ? "사용자 확인 필요" : "확인 요청 (지나감)") + "</div>" + html +
+    '<div class="af">' + (live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") +
+    (canFocus ? '<button type="button" data-focus-agent="' + esc(m.from) + '">CLI 창 열기</button>' : "") + "</div></div>";
+}
 function renderChat(scroll) {
   const box = $("#msgs");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -883,7 +919,7 @@ function renderChat(scroll) {
     }
     const q = m.reply_to ? bySeq[m.reply_to] : null;
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
-    inner += '<div class="md">' + fmt(m.body) + "</div>";
+    inner += m.type === "status" && m.body.startsWith(ASK_PREFIX) ? askCard(m, msgs) : '<div class="md">' + fmt(m.body) + "</div>";
 
     const lg = Object.values(logs[m.seq] || {}).map((e) =>
       '<span class="' + e.state + '">' + esc(nameOf(e.agent)) + " " + (STATE_KO[e.state] || e.state) + (e.state === "failed" && e.note ? " (" + esc(e.note) + ")" : "") + "</span>").join(" · ");
@@ -907,6 +943,7 @@ function renderChat(scroll) {
     if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); const b = t.querySelector(".bubble"); b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
   }));
   box.querySelectorAll(".rp").forEach((el) => (el.onclick = () => startReply(bySeq[el.dataset.reply])));
+  box.querySelectorAll("[data-focus-agent]").forEach((el) => (el.onclick = () => focusAgent(el.dataset.focusAgent)));
   renderReplying();
   if (scroll || atBottom) box.scrollTop = box.scrollHeight;
 }
