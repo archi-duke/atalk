@@ -1007,7 +1007,9 @@ $("#compose").onsubmit = async (e) => {
     }).then((r) => r.json());
     if (!res.ok) throw new Error(res.error?.message || "보내지 못함");
     lastSentAt = Date.now();
-    ta.value = ""; grow(); renderTargets();
+    // 고른 받는 대상(@이름)은 남겨 둔다 — 다음 말도 같은 상대에게 (지우면 방장)
+    const keep = (text.match(/^(@\S+\s*)+/) || [""])[0].trim();
+    ta.value = keep ? keep + " " : ""; grow(); renderTargets();
     await loadChat(true);
   } catch (err) {
     $("#sendErr").textContent = String(err.message || err);
