@@ -424,6 +424,11 @@ func TestReplyToHumanNotForAgent(t *testing.T) {
 	if c.HasWork("claude-code_m") {
 		t.Fatal("사람 말에 대한 답이 방장 에이전트를 깨움")
 	}
+	// 진행 상황(status)은 reply_to 없이 방장에게 보내도 깨우지 않음
+	ok(c.Post("opencode_o", "r", PostInput{Type: "status", Body: "#63 진행 중", To: []string{"claude-code_m"}}))
+	if c.HasWork("claude-code_m") {
+		t.Fatal("status 가 에이전트를 깨움")
+	}
 	ok(c.Unread("claude-code_m", true))
 	task := ok(c.Post("claude-code_m", "r", PostInput{Type: "task", Body: "확인해 줘", To: []string{"opencode_o"}}))
 	ok(c.Post("opencode_o", "r", PostInput{Type: "result", Body: "완료", To: []string{"claude-code_m"}, ReplyTo: ptr(task.Seq)}))
