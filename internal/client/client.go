@@ -270,6 +270,12 @@ func (c *Client) Unread(id string, ack bool) (u core.Unread, err error) {
 	return
 }
 
+// UnreadWait 는 메시지 대기 훅이 쓰는 Unread — 데몬이 "대기 훅이 살아 있음" 으로 기록한다.
+func (c *Client) UnreadWait(id string) (u core.Unread, err error) {
+	err = c.call("GET", "/agents/"+esc(id)+"/unread?wait=1", nil, &u, 0)
+	return
+}
+
 func (c *Client) Ack(id string, seq int) error {
 	return c.call("POST", "/agents/"+esc(id)+"/ack", map[string]int{"seq": seq}, nil, 0)
 }

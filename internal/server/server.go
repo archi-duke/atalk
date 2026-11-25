@@ -372,6 +372,9 @@ func (s *Server) routes() http.Handler {
 		return map[string]any{"recovery": rec}, err
 	})
 	h("GET /agents/{id}/unread", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if boolQ(r, "wait") { // 메시지 대기 훅이 확인함 → 알림 켜짐
+			c.MarkListening(r.PathValue("id"))
+		}
 		return c.Unread(r.PathValue("id"), boolQ(r, "ack"))
 	})
 	h("POST /agents/{id}/ack", func(w http.ResponseWriter, r *http.Request) (any, error) {

@@ -1584,3 +1584,31 @@ func TestReplyGoesToRequesterOnly(t *testing.T) {
 		t.Fatal("답장이 아닌 말은 방 전체에 가야 함")
 	}
 }
+
+// 알림 켜짐(대기 훅이 확인 중) / 꺼짐: 확인이 10초 끊기면 꺼짐, 일을 막 마친 직후는 켜짐으로 본다.
+func TestListening(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	a, _, _ := setup(t, c)
+	if ok(c.GetAgent(a)).Listening {
+		t.Fatal("처음엔 대기 훅 소식 없음")
+	}
+	c.MarkListening(a)
+	if !ok(c.GetAgent(a)).Listening {
+		t.Fatal("확인했으면 켜짐")
+	}
+	e.clock = e.clock.Add(11 * time.Second)
+	if ok(c.GetAgent(a)).Listening {
+		t.Fatal("10초 넘게 소식 없으면 꺼짐")
+	}
+	check(t, c.SetActivity(a, true))
+	check(t, c.SetActivity(a, false))
+	if !ok(c.GetAgent(a)).Listening {
+		t.Fatal("일을 막 마친 직후(대기 훅이 다시 걸리는 중)는 켜짐")
+	}
+	e.clock = e.clock.Add(11 * time.Second)
+	c.SweepListening()
+	if ok(c.GetAgent(a)).Listening {
+		t.Fatal("마친 뒤 대기가 다시 걸리지 않으면 꺼짐")
+	}
+}
