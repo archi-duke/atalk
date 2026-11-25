@@ -119,6 +119,13 @@ func TestRemoteFlow(t *testing.T) {
 		t.Fatalf("방장이 원격 메시지를 받아야 함: %+v", u.Messages)
 	}
 
+	// 훅이 쓰는 자기 경로: 확인 필요(need-input), 자동 수신 기록(delivered) — 원격에서도 막히지 않아야 함
+	must(rcl.NeedInput(G, "Bash 실행 허가 필요"))
+	must(rcl.Delivered(G, "r", []int{m.Seq}))
+	if err := rcl.NeedInput(L, "사칭"); err == nil {
+		t.Fatal("다른 에이전트의 need-input 은 막아야 함")
+	}
+
 	raw := func(method, path, body, token string) int {
 		req, _ := http.NewRequest(method, url+path, strings.NewReader(body))
 		if token != "" {
