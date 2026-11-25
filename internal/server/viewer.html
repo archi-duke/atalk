@@ -224,7 +224,7 @@
   @keyframes flash { 0%,40% { box-shadow:0 0 0 3px var(--accent); } 100% { box-shadow:none; } }
   /* 이 메시지를 처리 중인 에이전트: 말풍선 옆 작은 아이콘 + 테두리를 따라 도는 선 (작업이 끝나면 사라짐) */
   .wk { display:inline-flex; gap:3px; margin-top:2px; }
-  .ava.mini { width:18px; height:18px; border-radius:7px; font-size:10px; position:relative; }
+  .ava.mini, .m.mine .ava.mini { display:grid; width:18px; height:18px; border-radius:7px; font-size:10px; position:relative; } /* 내 말풍선은 아바타를 숨기지만 처리 중 아이콘은 보여야 함 */
   .ava.mini::before { content:""; position:absolute; inset:-3px; border-radius:9px; padding:2px;
     background:conic-gradient(from var(--wk-a), transparent 0 65%, var(--task) 100%);
     -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite:xor; mask-composite:exclude;
