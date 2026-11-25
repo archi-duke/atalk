@@ -161,7 +161,9 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	if pid := procs.FindAgentPID(); pid > 0 {
 		reg.Pid = &pid
 		reg.Shared = kind == "codex" && procs.IsCodexServer(pid)
+		reg.Ancestors = procs.Ancestors(pid) // 다른 에이전트가 이 세션을 실행했으면 그 에이전트를 띄운 쪽으로
 	}
+	reg.Spawn = os.Getenv("ATALK_SPAWN") // atalk spawn 으로 연 창
 	if caps := os.Getenv("ATALK_CAPABILITIES"); caps != "" {
 		list := []string{}
 		for _, s := range strings.Split(caps, ",") {

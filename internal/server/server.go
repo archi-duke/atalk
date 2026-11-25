@@ -323,6 +323,14 @@ func (s *Server) routes() http.Handler {
 	})
 	// 깨우기: 꺼진(창을 닫은) 이 PC 에이전트를 그 작업 폴더에서 새 터미널로 다시 띄우고(이전 세션 이어서) 창을 앞으로.
 	// 이미 떠 있으면 창만 앞으로. 이어서 열린 세션은 복귀 원칙대로 그때 있던 방으로 돌아간다. wake.go
+	// 협업할 새 세션을 새 터미널 창에서 열기 (atalk spawn): 띄운 에이전트로 기록되고 그 방에 들어간다 (spawn.go)
+	h("POST /spawn", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b SpawnInput
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		return s.spawn(b)
+	})
 	h("POST /agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.wake(r.PathValue("id"))
 	})

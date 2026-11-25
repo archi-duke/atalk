@@ -1640,3 +1640,28 @@ func TestIcons(t *testing.T) {
 		t.Fatal("방 아이콘 URL 거절")
 	}
 }
+
+// 협업 세션 띄우기: spawn 표식으로 등록하면 띄운 에이전트로 기록되고 이름을 받고 그 방에 들어간다 (표식은 한 번만).
+// 표식이 없어도 부모 프로세스가 등록된 에이전트면 그 에이전트를 띄운 쪽으로 기록한다 (백그라운드 실행).
+func TestSpawn(t *testing.T) {
+	e := newEnv(t)
+	e.alive[401], e.alive[402], e.alive[403] = true, true, true
+	c := e.core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	tok := ok(c.NewSpawn(a, "r", "설계봇"))
+	res := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "kid", Pid: i(401), Spawn: tok, Provisional: true}))
+	if res.Agent.SpawnedBy != a || res.Agent.Name != "설계봇" {
+		t.Fatalf("띄운 쪽·이름: %+v", res.Agent.AgentCard)
+	}
+	if res.Agent.Room == nil || *res.Agent.Room != "r" {
+		t.Fatalf("띄운 에이전트의 방에 들어가야 함: %v", res.Agent.Room)
+	}
+	if r := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "kid2", Pid: i(402), Spawn: tok})); r.Agent.SpawnedBy != "" {
+		t.Fatal("표식은 한 번만")
+	}
+	// 백그라운드 실행: 부모 체인에 A 의 PID(100)
+	if r := ok(c.Register(RegisterInput{Kind: "codex", SessionID: "bg", Pid: i(403), Ancestors: []int{999, 100, 1}})); r.Agent.SpawnedBy != a || r.Agent.Room != nil {
+		t.Fatalf("부모 프로세스로 띄운 쪽 찾기 (방에는 넣지 않음): %+v", r.Agent)
+	}
+}

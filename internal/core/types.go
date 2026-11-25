@@ -31,6 +31,8 @@ type AgentCard struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	// Shared 는 Codex 처럼 창이 아니라 공유 백그라운드 서버에서 실행 중인 세션 (Pid 는 그 서버라 창을 찾을 수 없음).
 	Shared       bool     `json:"shared,omitempty"`
+	// SpawnedBy 는 이 세션을 띄운 에이전트 (atalk spawn, 또는 그 에이전트의 프로세스 아래에서 실행됨)
+	SpawnedBy string `json:"spawned_by,omitempty"`
 	// Avatar 는 화면의 아이콘: "emoji:🦊" 또는 작은 이미지 data URL (png·jpeg·webp). 없으면 이름 첫 글자
 	Avatar string `json:"avatar,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
@@ -267,6 +269,10 @@ type RegisterInput struct {
 	Provisional bool `json:"provisional,omitempty"`
 	// Shared: Pid 가 창이 아니라 공유 백그라운드 서버 (Codex app-server). Pid 와 함께 보낼 때만 반영.
 	Shared bool `json:"shared,omitempty"`
+	// Spawn 은 atalk spawn 이 새 창에 넘긴 표식 (ATALK_SPAWN). 띄운 에이전트·들어갈 방·이름을 찾는다.
+	Spawn string `json:"spawn,omitempty"`
+	// Ancestors 는 이 세션 프로세스의 부모 체인 PID — 다른 에이전트가 백그라운드로 실행한 세션이면 그 에이전트를 띄운 쪽으로 기록
+	Ancestors []int `json:"ancestors,omitempty"`
 }
 
 type RegisterResult struct {

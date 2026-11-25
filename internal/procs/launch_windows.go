@@ -12,12 +12,16 @@ import (
 
 // psScript 는 argv 를 실행하는 PowerShell 스크립트. 인자는 작은따옴표로 감싸 공백·특수 문자가 있어도 그대로 전달하고,
 // 정상 종료하면 창이 닫히며 오류로 끝나면 내용을 볼 수 있게 Enter 를 기다린다 (꺼진 세션의 빈 창이 남지 않게).
-func psScript(argv []string) string {
+func psScript(argv []string, env map[string]string) string {
 	q := make([]string, len(argv))
 	for i, a := range argv {
 		q[i] = "'" + strings.ReplaceAll(a, "'", "''") + "'"
 	}
-	return "& " + strings.Join(q, " ") + "\nif ($LASTEXITCODE) { Read-Host \"종료 코드 $LASTEXITCODE - Enter 를 누르면 창을 닫습니다\" }"
+	pre := ""
+	for k, v := range env { // wt 는 데몬의 환경 변수를 넘겨주지 않으므로 스크립트 안에서 정한다
+		pre += "$env:" + k + " = '" + strings.ReplaceAll(v, "'", "''") + "'\n"
+	}
+	return pre + "& " + strings.Join(q, " ") + "\nif ($LASTEXITCODE) { Read-Host \"종료 코드 $LASTEXITCODE - Enter 를 누르면 창을 닫습니다\" }"
 }
 
 // encodePS 는 -EncodedCommand 값 (UTF-16LE base64). wt·cmd 를 거쳐도 따옴표가 풀리거나 ; 로 나뉘지 않는다.
@@ -32,8 +36,11 @@ func encodePS(script string) string {
 
 // LaunchTerminal 은 cwd 에서 새 터미널 창을 열어 argv 를 실행한다.
 // Windows Terminal(wt)이 있으면 새 창으로, 없으면 새 콘솔 창의 PowerShell 로.
-func LaunchTerminal(cwd string, argv []string) error {
-	ps := []string{"powershell.exe", "-NoLogo", "-EncodedCommand", encodePS(psScript(argv))}
+func LaunchTerminal(cwd string, argv []string) error { return LaunchTerminalEnv(cwd, argv, nil) }
+
+// LaunchTerminalEnv 는 LaunchTerminal 에 더해 새 창의 프로세스에 환경 변수를 준다 (atalk spawn 의 연결 표식).
+func LaunchTerminalEnv(cwd string, argv []string, env map[string]string) error {
+	ps := []string{"powershell.exe", "-NoLogo", "-EncodedCommand", encodePS(psScript(argv, env))}
 	var cmd *exec.Cmd
 	if wt, err := exec.LookPath("wt.exe"); err == nil {
 		cmd = exec.Command(wt, append([]string{"-w", "new", "-d", cwd}, ps...)...)

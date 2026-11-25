@@ -27,5 +27,18 @@ func ResumeCommand(kind, sessionID string) ([]string, error) {
 	return nil, errors.New(kind + " 는 아직 깨우기를 지원하지 않음 (Claude Code·opencode·Codex 만)")
 }
 
+// SpawnCommand 는 새 세션을 첫 지시와 함께 여는 명령 (atalk spawn). 지시는 따옴표로 감싸 그대로 전달된다.
+func SpawnCommand(kind, prompt string) ([]string, error) {
+	switch kind {
+	case "claude-code":
+		return []string{"claude", prompt}, nil
+	case "opencode":
+		return []string{"opencode", "--prompt", prompt}, nil
+	case "codex":
+		return []string{"codex", "--no-daemon", prompt}, nil // 이 창에서 직접 (훅이 찾는 PID 가 이 창이 되게)
+	}
+	return nil, errors.New(kind + " 는 띄우기를 지원하지 않음 (claude-code·opencode·codex 만)")
+}
+
 // CodexWakePrompt 는 깨우기로 다시 연 Codex 세션의 첫 입력. "[ATalk" 로 시작해 CLI 입력 기록에서 빠진다.
 const CodexWakePrompt = "[ATalk] 이 세션을 다시 열었습니다. 대화방 알림이 오면 처리하고, 없으면 대기 중 이라고만 답하세요."
