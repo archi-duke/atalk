@@ -643,7 +643,7 @@ function renderSide() {
     const row = (x) => {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
       return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + esc([...x.name][0] || "?") + '</div><div class="txt">' +
-        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : x.shared ? '<span title="Codex 공유 백그라운드 서버에서 실행 중: 창을 찾을 수 없음 (codex --no-daemon 으로 열면 됨)">창 없음 · ' + (x.busy ? "작업 중" : STATUS_KO[x.status] || x.status) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
+        '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : deaf(x) ? '<span title="' + DEAF_HINT + '">🔕 알림 꺼짐 · ' + (STATUS_KO[x.status] || x.status) + "</span>" : x.shared ? '<span title="Codex 공유 백그라운드 서버에서 실행 중: 창을 찾을 수 없음 (codex --no-daemon 으로 열면 됨)">창 없음 · ' + (x.busy ? "작업 중" : STATUS_KO[x.status] || x.status) + "</span>" : x.busy ? "작업 중" + (x.room ? " · " + (STATUS_KO[x.status] || "") : "") : STATUS_KO[x.status] || x.status) + "</span></div>" +
         '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         (canWake(x) ? '<button class="wake" data-wake="' + esc(x.id) + '" title="' + (x.status === "offline" || x.status === "away" ? "이 세션을 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서) 창을 앞으로" : "이 에이전트의 CLI 창을 앞으로") + '">깨우기</button>' : "") +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
@@ -956,11 +956,15 @@ $("#mDelete").onclick = async () => {
 // 작업중/대기는 에이전트 목록과 같이 세션 상태(busy: 훅·플러그인이 알림)로 판단한다.
 // 처리 기록(received/working 이 마지막인 메시지)은 작업중일 때 "#N" 표시에만 쓴다 — 기록을 안 닫고 쉬러 가도 작업중으로 남지 않게.
 // 비활성: 자리 비움(에이전트가 꺼짐)
+// 알림 꺼짐: 쉬고 있는 Claude Code 인데 메시지 대기 훅이 없음 (CLI 에서 Esc 로 중지한 뒤 등) → 메시지가 와도 못 깨어남
+const DEAF_HINT = "메시지 대기가 꺼져 있어 메시지가 와도 깨어나지 못합니다 (CLI 에서 작업을 중지(Esc)한 뒤 등). 에이전트 창(CLI)에 아무거나 입력하면 다시 켜집니다";
+const deaf = (x) => !!x && x.kind === "claude-code" && !x.busy && !x.listening && !x.lobby && (x.status === "in_room" || x.status === "waiting");
 function presenceRows(room, logs) {
   const last = {}; // agent → seq → 마지막 상태
   for (const e of logs) (last[e.agent] ||= {})[e.seq] = e.state;
   return room.members.map((m) => {
     if (m.state === "away") return { m, cls: "off", text: "비활성", title: "자리 비움: 에이전트가 꺼져 있음" };
+    if (!m.busy && deaf(agents[m.agent])) return { m, cls: "off", text: "🔕 알림 꺼짐", title: DEAF_HINT };
     if (!m.busy) return { m, cls: "idle", text: "대기", title: "방에 있고 쉬는 중" };
     const open = Object.entries(last[m.agent] || {}).filter(([, st]) => st === "received" || st === "working").map(([seq]) => Number(seq));
     if (open.length) return { m, cls: "busy", text: "작업중 #" + Math.max(...open) + (open.length > 1 ? " 외 " + (open.length - 1) : ""), title: "처리 중인 메시지: #" + open.join(", #") };

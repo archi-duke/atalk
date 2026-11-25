@@ -170,6 +170,8 @@ type Host struct {
 type AgentView struct {
 	AgentCard
 	Busy   bool   `json:"busy,omitempty"` // 지금 일하는 중 (CLI 에서 받은 일 포함, 훅·플러그인이 알림)
+	// Listening: 메시지 대기 훅(Claude Code)이 살아 있음. 쉬는 Claude 인데 false 면 메시지가 와도 못 깨어남 (Esc 로 중지한 뒤 등)
+	Listening bool `json:"listening,omitempty"`
 	Local  bool   `json:"local"`  // 이 데몬과 같은 PC 에서 실행 중
 	Status string  `json:"status"` // waiting | in_room | away | offline
 	Room   *string `json:"room"`

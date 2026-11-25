@@ -92,7 +92,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 				}
 			}
 		}
-		if u, err := c.Unread(id, false); err == nil {
+		if u, err := c.UnreadWait(id); err == nil {
 			var forMe []core.InboxMessage
 			for _, m := range u.Messages {
 				if k := fmt.Sprintf("msg:%s:%d", m.Room, m.Seq); m.ForMe && !seen[k] {

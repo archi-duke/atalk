@@ -55,6 +55,8 @@ type Atalk struct {
 	isAlive   func(int) bool
 	machineID string
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
+	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
+	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
 	now       func() time.Time
 
@@ -475,6 +477,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Capabilities = slices.Clone(card.Capabilities)
 	v.Local = c.isLocal(card)
 	v.Busy = c.isBusy(card.ID)
+	v.Listening = c.isListening(card.ID)
 	h := Host{ID: c.machineID, OS: LocalOS()}
 	if card.Host != nil {
 		h = *card.Host
@@ -1673,6 +1676,10 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 			c.busy[agent] = c.now()
 		} else {
 			delete(c.busy, agent)
+			if c.idleAt == nil {
+				c.idleAt = map[string]time.Time{}
+			}
+			c.idleAt[agent] = c.now()
 		}
 		if busy != was { // 작업 중 구간이 시작·끝남 → 자동 수신 확인을 다시 보낼 수 있게
 			delete(c.busyAcked, agent)
@@ -1682,6 +1689,58 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		}
 		return nil
 	})
+}
+
+// listenFresh: 대기 훅은 2초마다 확인하므로 이만큼 소식이 없으면 대기가 없는 것.
+const listenFresh = 10 * time.Second
+
+// MarkListening 은 메시지 대기 훅이 확인했음을 기록한다 (unread?wait=1). 꺼짐 → 켜짐이면 화면에 알린다.
+func (c *Atalk) MarkListening(agent string) {
+	_ = c.guard(func() error {
+		if c.listenAt == nil {
+			c.listenAt = map[string]time.Time{}
+		}
+		was := c.isListening(agent)
+		c.listenAt[agent] = c.now()
+		if !was {
+			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "listening"}})
+		}
+		return nil
+	})
+}
+
+// SweepListening 은 대기 훅 소식이 끊긴(켜짐 → 꺼짐) 에이전트를 화면에 알린다. 데몬이 몇 초마다 부른다.
+func (c *Atalk) SweepListening() {
+	_ = c.guard(func() error {
+		for id := range c.listenAt {
+			if !c.isListening(id) {
+				delete(c.listenAt, id)
+				if _, ok := c.agents[id]; ok {
+					c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "listening", "off": true}})
+				}
+			}
+		}
+		for id, t := range c.idleAt {
+			if c.now().Sub(t) >= listenFresh {
+				delete(c.idleAt, id)
+				if _, ok := c.listenAt[id]; !ok {
+					if _, ok := c.agents[id]; ok { // 일을 마쳤는데 대기가 다시 걸리지 않음
+						c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "listening", "off": true}})
+					}
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// isListening: 대기 훅이 살아 있음 (최근 확인), 또는 일을 막 마쳐 대기가 다시 걸리는 중.
+func (c *Atalk) isListening(agent string) bool {
+	if t, ok := c.listenAt[agent]; ok && c.now().Sub(t) < listenFresh {
+		return true
+	}
+	t, ok := c.idleAt[agent]
+	return ok && c.now().Sub(t) < listenFresh
 }
 
 func (c *Atalk) MarkAway(agent, reason string) error {

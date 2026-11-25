@@ -37,6 +37,7 @@ func (s *Server) watchLobbies(stop <-chan struct{}) {
 			}
 		}
 		s.wakeCodex()
+		s.Core.SweepListening() // 대기 훅이 끊긴 Claude 를 화면에 "알림 꺼짐" 으로
 		if time.Since(lastBeat) >= heartbeatEvery {
 			lastBeat = time.Now()
 			s.beatRemotes()
