@@ -85,10 +85,10 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 		return nil, err
 	}
 	if in.Headless {
-		if in.Kind != "claude-code" {
-			return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "헤드리스는 아직 Claude Code 만 지원함"}
+		if in.Kind == "opencode" { // opencode 는 창(TUI)이 켜질 때 플러그인이 세션을 정해 표식을 쓴다 — 창 없이 띄우는 길은 아직 없음
+			return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "opencode 는 숨김으로 띄우기를 아직 지원하지 않음 (띄운 뒤 숨기기는 됨)"}
 		}
-		s.spawnHeadless(cwd, prompt, token)
+		s.spawnHeadless(in.Kind, cwd, prompt, token)
 		return map[string]any{"launched": true, "headless": true, "kind": in.Kind, "cwd": cwd, "room": introRoom}, nil
 	}
 	if err := procs.LaunchTerminalEnv(cwd, argv, map[string]string{"ATALK_SPAWN": token}); err != nil {

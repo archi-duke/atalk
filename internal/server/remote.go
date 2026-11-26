@@ -497,7 +497,7 @@ func (s *Server) remoteHandler() http.Handler {
 		return map[string]any{}, c.RevokeRemote(remoteAgentOf(r))
 	})
 	pass("PATCH /agents/{id}", rule{self: true})
-	for _, p := range []string{"echo", "activate", "activity", "away", "leave", "ack", "delivered", "need-input"} {
+	for _, p := range []string{"echo", "activate", "activity", "away", "leave", "ack", "delivered", "need-input", "ask"} {
 		pass("POST /agents/{id}/"+p, rule{self: true})
 	}
 	pass("POST /approval", rule{actor: true, open: true}) // 허가 창·질문을 호스트 화면 카드에서 답하게 (답할 때까지 기다림)

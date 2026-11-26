@@ -62,6 +62,7 @@ const help = `atalk — 에이전트 대화방
   atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
   atalk invite AGENT [--room ROOM]                    (방장) 내 방으로 초대 / --room 이면 사람으로 그 방에 초대
   atalk spawn claude|codex|opencode [--cwd DIR] [--name N] [--room ROOM|-] [--headless] TEXT|-   협업할 새 세션을 새 창에서 열기 (내가 띄운 것으로 기록, 내 방에 들어옴. --headless: 창 없이, Claude Code 만)
+  atalk ask "질문" [--options "A|B|C"]   사람에게 판단을 묻기 (대화방 질문 카드, 답은 사람 메시지로 옴)
   atalk headless AGENT on|off        이 PC 의 Claude Code 를 헤드리스로 (창을 닫고 메시지마다 데몬이 한 턴씩) / off: CLI 창으로 다시 열기
   atalk wake AGENT                                    이 PC 의 에이전트 깨우기 (꺼져 있으면 새 터미널로 이전 세션 열기, 떠 있으면 창 앞으로)
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
@@ -358,6 +359,20 @@ func main() {
 			lines = append(lines, l)
 		}
 		out(agents, orText(strings.Join(lines, "\n"), "(등록된 에이전트 없음)"))
+
+	case "ask": // 사람에게 판단을 묻는다: 대화방에 질문 카드 (선택지는 --options "A|B"). 답은 사람 메시지로 온다 — 묻고 나면 턴을 끝낼 것
+		q := strings.Join(rest, " ")
+		if q == "" || q == "-" {
+			b, err := io.ReadAll(os.Stdin)
+			check(err)
+			q = strings.TrimSpace(strings.TrimPrefix(string(b), string(rune(0xFEFF))))
+		}
+		var opts []string
+		if o := a.str("options"); o != "" {
+			opts = strings.Split(o, "|")
+		}
+		check(c.Ask(me(), q, opts))
+		out(map[string]any{"ok": true}, "질문 카드를 올렸습니다. 답은 사람 메시지로 옵니다 — 이 턴은 여기서 끝내세요.")
 
 	case "spawn": // 협업할 새 세션을 새 터미널 창에서 열기: 내가 띄운 것으로 기록되고 내 방에 들어감
 		kind := at.arg(0, "KIND (claude | codex | opencode)")

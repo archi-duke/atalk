@@ -60,6 +60,7 @@ type Atalk struct {
 	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
 	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
 	askSeq    map[string][2]any // 에이전트 → 마지막 확인 카드의 방·번호 (답을 카드에 남길 때)
+	asking    map[string]bool   // atalk ask 로 질문하고 답을 기다리는 에이전트 (일을 이어 가도 확인 필요 표시를 풀지 않음)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -1850,7 +1851,7 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		if c.busy == nil {
 			c.busy = map[string]time.Time{}
 		}
-		if _, ok := c.needInput[agent]; ok { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침)
+		if _, ok := c.needInput[agent]; ok && !c.asking[agent] { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침). atalk ask 질문은 답이 올 때까지 둔다
 			delete(c.needInput, agent)
 			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "need_input", "text": ""}})
 		}
@@ -2251,6 +2252,11 @@ func (c *Atalk) appendMessage(r string, msg Message) Message {
 	}
 	c.st.AppendMessage(msg)
 	c.lastSeq[r] = msg.Seq
+	if msg.Human != "" { // 사람이 그 에이전트에게 말함 → atalk ask 질문은 답을 받은 것으로
+		for _, a := range msg.To {
+			c.endAsk(a)
+		}
+	}
 	// 메시지 한도: 넘으면 가장 오래된 메시지부터 지워 늘 한도 개수만 남긴다 (선입선출)
 	if room, ok := c.rooms[r]; ok && room.Policy.MaxMessages > 0 && msg.Seq > room.Policy.MaxMessages {
 		c.st.PruneMessages(r, msg.Seq-room.Policy.MaxMessages)
@@ -3112,4 +3118,83 @@ func (c *Atalk) SetHeadlessMode(id, mode string) (v AgentView, err error) {
 		v, err = c.GetAgent(id)
 	}
 	return
+}
+
+// Ask 는 atalk ask: 에이전트가 사람에게 판단을 묻는다. 대화방에 질문 카드("🙋 사용자 확인 필요 — 질문 (A / B)")를 올리고
+// 답이 올 때까지 확인 필요로 둔다 (일을 이어 가도 풀리지 않음). 웹 카드의 선택지나 채팅으로 답하면 그 답이 사람 메시지로 에이전트에게 간다.
+func (c *Atalk) Ask(agent, question string, options []string) error {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return bad("missing_question", "질문이 필요함")
+	}
+	var opts []string
+	for _, o := range options {
+		if o = strings.TrimSpace(strings.NewReplacer("/", "／", "(", "（", ")", "）").Replace(o)); o != "" {
+			opts = append(opts, o)
+		}
+	}
+	text := strings.ReplaceAll(question, "\n", " ")
+	if len(opts) > 0 {
+		text += " (" + strings.Join(opts, " / ") + ")"
+	}
+	_ = c.guard(func() error {
+		if c.asking == nil {
+			c.asking = map[string]bool{}
+		}
+		c.asking[agent] = true
+		delete(c.needInput, agent) // 같은 글이어도 카드를 새로 올리게
+		return nil
+	})
+	if err := c.SetNeedInput(agent, text); err != nil {
+		return err
+	}
+	c.SetApproval(agent, true)
+	return nil
+}
+
+// Asking 은 그 에이전트가 atalk ask 로 답을 기다리는지.
+func (c *Atalk) Asking(agent string) (on bool) {
+	_ = c.guard(func() error { on = c.asking[agent]; return nil })
+	return
+}
+
+// AnswerAsk 는 웹 카드에서 고른 답을 그 에이전트의 사람 메시지로 보낸다 (질문 카드에 대한 답장). 에이전트는 이 메시지로 깨어나 이어 간다.
+func (c *Atalk) AnswerAsk(agent, answer string) error {
+	var room string
+	var seq int
+	err := c.guard(func() error {
+		m, ok := c.memberships[agent]
+		if !ok {
+			return conflict("not_in_room", "방에 있어야 답을 보낼 수 있음")
+		}
+		room = m.Room
+		if v, ok := c.askSeq[agent]; ok && v[0] == m.Room {
+			seq, _ = v[1].(int)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	c.NoteAskAnswer(agent, answer+" (웹)")
+	return c.guard(func() error {
+		msg := Message{From: agent, Type: "chat", To: []string{agent}, Body: "답: " + answer, Human: c.humanOf(agent)}
+		if seq > 0 {
+			s := seq
+			msg.ReplyTo = &s
+		}
+		c.appendMessage(room, msg)
+		return nil
+	})
+}
+
+// endAsk 는 질문을 끝낸다 (답을 받음). guard 안에서 부른다.
+func (c *Atalk) endAsk(agent string) {
+	if !c.asking[agent] {
+		return
+	}
+	delete(c.asking, agent)
+	delete(c.needInput, agent)
+	delete(c.approvals, agent)
+	c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "need_input", "text": ""}})
 }

@@ -55,22 +55,82 @@ func headlessLog(id string) string {
 	return filepath.Join(os.TempDir(), "atalk-headless", strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(id)+".log")
 }
 
-// runClaudeTurn 은 cwd 에서 claude -p 한 턴을 숨김 실행하고 끝날 때까지 기다린다. sid 가 있으면 그 세션을 이어서.
-func runClaudeTurn(cwd, sid, prompt, logID, mode string, env map[string]string) error {
-	exe, err := exec.LookPath("claude")
+// HeadlessKinds 는 숨김(헤드리스)으로 돌릴 수 있는 에이전트 종류.
+var HeadlessKinds = []string{"claude-code", "codex", "opencode"}
+
+// headlessCmd 는 종류별로 창 없이 한 턴을 실행하는 명령. sid 가 있으면 그 세션을 이어서, 지시는 표준 입력(또는 인자)으로.
+// mode 는 권한 모드 (Claude: --permission-mode 그대로 / Codex: 샌드박스 범위로 / opencode: 모두 허용이면 --auto).
+func headlessCmd(kind, sid, prompt, mode string) (*exec.Cmd, error) {
+	switch kind {
+	case "claude-code":
+		exe, err := exec.LookPath("claude")
+		if err != nil {
+			return nil, errors.New("claude 를 찾을 수 없음: " + err.Error())
+		}
+		args := []string{"-p"}
+		if mode != "" { // 창이 없어 허가를 물을 수 없음 — 설정한 권한 모드로
+			args = append(args, "--permission-mode", mode)
+		}
+		if sid != "" {
+			args = append(args, "--resume", sid)
+		}
+		cmd := exec.Command(exe, args...)
+		cmd.Stdin = strings.NewReader(prompt)
+		return cmd, nil
+	case "codex":
+		// codex exec 은 실행 중에 사람에게 묻지 않는다 → 정한 범위(샌드박스) 안에서만. 막히면 에이전트가 방에 묻고(atalk ask) 턴을 끝낸다
+		args := []string{"exec"}
+		switch mode {
+		case "bypassPermissions":
+			args = append(args, "--dangerously-bypass-approvals-and-sandbox")
+		case "plan":
+			args = append(args, "-s", "read-only")
+		default:
+			args = append(args, "-s", "workspace-write")
+		}
+		if sid != "" {
+			args = append(args, "resume", sid)
+		}
+		args = append(args, "-") // 지시는 표준 입력으로
+		cmd, err := procs.CodexCommand(args...)
+		if err != nil {
+			return nil, errors.New("codex 를 찾을 수 없음: " + err.Error())
+		}
+		cmd.Stdin = strings.NewReader(prompt)
+		return cmd, nil
+	case "opencode":
+		exe, err := exec.LookPath("opencode")
+		if err != nil {
+			return nil, errors.New("opencode 를 찾을 수 없음: " + err.Error())
+		}
+		// npm 의 opencode.cmd 를 거치면 지시문이 cmd.exe 로 해석된다 → 같은 폴더의 실제 실행 파일을 직접
+		if ext := strings.ToLower(filepath.Ext(exe)); ext == ".cmd" || ext == ".bat" {
+			real := filepath.Join(filepath.Dir(exe), "node_modules", "opencode-ai", "bin", "opencode.exe")
+			if _, err := os.Stat(real); err != nil {
+				return nil, errors.New("opencode 실행 파일을 찾지 못함 (" + real + ")")
+			}
+			exe = real
+		}
+		args := []string{"run"}
+		if sid != "" {
+			args = append(args, "--session", sid)
+		}
+		if mode == "bypassPermissions" {
+			args = append(args, "--auto")
+		}
+		return exec.Command(exe, append(args, prompt)...), nil
+	}
+	return nil, errors.New(kind + " 는 숨김(헤드리스)을 지원하지 않음")
+}
+
+// runTurn 은 cwd 에서 그 종류의 한 턴을 숨김 실행하고 끝날 때까지 기다린다. sid 가 있으면 그 세션을 이어서.
+func runTurn(kind, cwd, sid, prompt, logID, mode string, env map[string]string) error {
+	cmd, err := headlessCmd(kind, sid, prompt, mode)
 	if err != nil {
-		return errors.New("claude 를 찾을 수 없음: " + err.Error())
+		return err
 	}
-	args := []string{"-p"}
-	if mode != "" { // 창이 없어 허가를 물을 수 없음 — 설정한 권한 모드로
-		args = append(args, "--permission-mode", mode)
-	}
-	if sid != "" {
-		args = append(args, "--resume", sid)
-	}
-	cmd := exec.Command(exe, args...)
+	args := cmd.Args[1:]
 	cmd.Dir = cwd
-	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Env = append(os.Environ(), "ATALK_HEADLESS=1")
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -91,12 +151,12 @@ func runClaudeTurn(cwd, sid, prompt, logID, mode string, env map[string]string) 
 
 // runHeadless 는 이 PC 의 헤드리스 에이전트에 새로 온 메시지가 있으면 한 턴을 돌린다 (watchLobbies 가 3초마다 부름).
 func (s *Server) runHeadless() {
-	list, err := s.Core.ListAgents("", "claude-code")
+	list, err := s.Core.ListAgents("", "")
 	if err != nil {
 		return
 	}
 	for _, v := range list {
-		if !v.Local || !v.Headless || v.Cwd == nil || !procs.SafeSession(v.SessionID) {
+		if !slices.Contains(HeadlessKinds, v.Kind) || !v.Local || !v.Headless || v.Cwd == nil || !procs.SafeSession(v.SessionID) {
 			continue
 		}
 		if v.Pid != nil && core.DefaultIsAlive(*v.Pid) { // CLI 창이 떠 있으면 그 창이 받는다 (같은 세션이 두 곳에서 돌지 않게)
@@ -159,8 +219,8 @@ func (s *Server) runHeadless() {
 		_ = c.Ack(v.ID, read)
 		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
 		mode := s.modeFor(v)
-		go func(id, cwd, sid string) {
-			if err := runClaudeTurn(cwd, sid, text, id, mode, nil); err != nil {
+		go func(kind, id, cwd, sid string) {
+			if err := runTurn(kind, cwd, sid, text, id, mode, nil); err != nil {
 				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
 			}
 			s.headless.mu.Lock()
@@ -173,18 +233,18 @@ func (s *Server) runHeadless() {
 					log.Printf("헤드리스 → CLI 실패 (%s): %v", id, err)
 				}
 			}
-		}(v.ID, *v.Cwd, v.SessionID)
+		}(v.Kind, v.ID, *v.Cwd, v.SessionID)
 	}
 }
 
 // spawnHeadless 는 atalk spawn --headless: 창 없이 새 세션의 첫 턴을 실행한다 (등록·방 입장은 표식을 보고 훅이).
-func (s *Server) spawnHeadless(cwd, prompt, token string) {
+func (s *Server) spawnHeadless(kind, cwd, prompt, token string) {
 	s.headless.mu.Lock()
 	s.headless.init()
 	s.headless.spawning[cwd]++
 	s.headless.mu.Unlock()
 	go func() {
-		if err := runClaudeTurn(cwd, "", prompt, "spawn-"+token, s.headlessMode(), map[string]string{"ATALK_SPAWN": token}); err != nil {
+		if err := runTurn(kind, cwd, "", prompt, "spawn-"+token, s.headlessMode(), map[string]string{"ATALK_SPAWN": token}); err != nil {
 			log.Printf("헤드리스 띄우기 실패 (%s): %v", cwd, err)
 		}
 		s.headless.mu.Lock()
@@ -209,8 +269,8 @@ func (s *Server) setHeadless(r *http.Request) (any, error) {
 	if !v.Local {
 		return nil, &core.Error{Status: 409, Code: "not_here", Message: "이 PC 의 에이전트만 바꿀 수 있음 (다른 PC 는 그 PC 에서)"}
 	}
-	if v.Kind != "claude-code" {
-		return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "헤드리스는 아직 Claude Code 만 지원함"}
+	if !slices.Contains(HeadlessKinds, v.Kind) {
+		return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "숨기기는 Claude Code · Codex · opencode 만 지원함"}
 	}
 	if v.Cwd == nil || !procs.SafeSession(v.SessionID) {
 		return nil, &core.Error{Status: 409, Code: "no_cwd", Message: "작업 폴더·세션을 몰라 바꿀 수 없음"}
@@ -226,7 +286,7 @@ func (s *Server) setHeadless(r *http.Request) (any, error) {
 			_ = procs.CloseAgentWindow(*v.Pid)
 		}
 		killWaitHook(id)
-		if v.HeadlessMode == "" { // CLI 에서 쓰던 권한 모드를 그대로 이어받는다 (에이전트 목록에서 바꿀 수 있음)
+		if v.HeadlessMode == "" && v.Kind == "claude-code" { // CLI 에서 쓰던 권한 모드를 그대로 이어받는다 (에이전트 목록에서 바꿀 수 있음)
 			if m := lastPermissionMode(v.SessionID); m != "" {
 				_, _ = s.Core.SetHeadlessMode(id, m)
 			}
@@ -268,7 +328,7 @@ func (s *Server) openCLI(id string) error {
 	if _, err := s.Core.SetHeadless(id, false); err != nil {
 		return err
 	}
-	argv, _ := procs.ResumeCommand("claude-code", v.SessionID)
+	argv, _ := procs.ResumeCommand(v.Kind, v.SessionID)
 	if err := procs.LaunchTerminal(*v.Cwd, argv); err != nil {
 		_, _ = s.Core.SetHeadless(id, true)
 		return &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
@@ -303,8 +363,10 @@ func (s *Server) modeFor(v core.AgentView) string {
 	if v.HeadlessMode != "" {
 		return v.HeadlessMode
 	}
-	if m := lastPermissionMode(v.SessionID); m != "" {
-		return m
+	if v.Kind == "claude-code" {
+		if m := lastPermissionMode(v.SessionID); m != "" {
+			return m
+		}
 	}
 	return s.headlessMode()
 }

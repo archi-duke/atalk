@@ -680,3 +680,8 @@ func (c *Client) Approval(agent, text string, question bool) (r ApprovalResult, 
 	err = c.call("POST", "/approval", map[string]any{"agent": agent, "text": text, "question": question}, &r, 31*time.Minute)
 	return
 }
+
+// Ask 는 atalk ask: 사람에게 판단을 묻는 질문 카드를 올린다 (답은 사람 메시지로 온다).
+func (c *Client) Ask(id, question string, options []string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/ask", map[string]any{"question": question, "options": options}, nil, 0)
+}
