@@ -1377,6 +1377,9 @@ func (c *Atalk) SetRoomLimit(r string, n int) (v RoomView, err error) {
 		if room.Policy.MaxMessages != n {
 			room.Policy.MaxMessages = n
 			c.saveRoom(room)
+			if last := c.lastSeq[r]; last > n {
+				c.st.PruneMessages(r, last-n)
+			}
 			c.systemMessage(r, fmt.Sprintf("메시지 한도 변경: %d", n), false)
 			c.emit(Event{Type: "room", Data: map[string]any{"room": r, "action": "limit", "max_messages": n}})
 		}
@@ -1892,7 +1895,7 @@ func (c *Atalk) SetNeedInput(agent, text string) error {
 		} else {
 			c.needInput[agent] = text
 			if m, ok := c.memberships[agent]; ok {
-				if room, err := c.requireRoom(m.Room, true); err == nil && c.lastSeq[m.Room] < room.Policy.MaxMessages {
+				if _, err := c.requireRoom(m.Room, true); err == nil {
 					msg := c.appendMessage(m.Room, Message{From: agent, Type: "status", To: []string{}, Body: "🙋 사용자 확인 필요 — " + text})
 					if c.askSeq == nil {
 						c.askSeq = map[string][2]any{}
@@ -2248,6 +2251,10 @@ func (c *Atalk) appendMessage(r string, msg Message) Message {
 	}
 	c.st.AppendMessage(msg)
 	c.lastSeq[r] = msg.Seq
+	// 메시지 한도: 넘으면 가장 오래된 메시지부터 지워 늘 한도 개수만 남긴다 (선입선출)
+	if room, ok := c.rooms[r]; ok && room.Policy.MaxMessages > 0 && msg.Seq > room.Policy.MaxMessages {
+		c.st.PruneMessages(r, msg.Seq-room.Policy.MaxMessages)
+	}
 	to := c.memberIDs(r, msg.From)
 	if msg.Human != "" && slices.Contains(msg.To, msg.From) {
 		to = append(to, msg.From)
@@ -2269,7 +2276,7 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 		if _, err := c.requireAgent(agent); err != nil {
 			return err
 		}
-		room, err := c.requireRoom(r, true)
+		_, err := c.requireRoom(r, true)
 		if err != nil {
 			return err
 		}
@@ -2291,9 +2298,6 @@ func (c *Atalk) Post(agent, r string, in PostInput) (msg Message, err error) {
 			if tm, ok := c.memberships[t]; !ok || tm.Room != r {
 				return bad("invalid_to", "받는 대상 %s 는 이 방 멤버가 아님", t)
 			}
-		}
-		if c.lastSeq[r] >= room.Policy.MaxMessages {
-			return &Error{429, "room_limit", fmt.Sprintf("방 메시지 한도(%d) 초과. 방장이 한도를 올리거나 새 방을 만들어야 함", room.Policy.MaxMessages)}
 		}
 		m.LastSeen = c.ts()
 		if !in.Human {
@@ -2330,7 +2334,7 @@ func (c *Atalk) busyAckLocked(r string, msg Message) {
 	if msg.Type != "chat" && msg.Type != "task" {
 		return
 	}
-	room, ok := c.rooms[r]
+	_, ok := c.rooms[r]
 	if !ok {
 		return
 	}
@@ -2345,7 +2349,7 @@ func (c *Atalk) busyAckLocked(r string, msg Message) {
 		if m, ok := c.memberships[t]; !ok || m.Room != r || !c.isBusy(t) {
 			continue
 		}
-		if c.busyAcked[t][msg.From] || c.lastSeq[r] >= room.Policy.MaxMessages {
+		if c.busyAcked[t][msg.From] {
 			continue
 		}
 		if c.busyAcked == nil {
@@ -2400,8 +2404,8 @@ func (c *Atalk) EchoPrompt(agent, text string) (msg *Message, err error) {
 		if !ok {
 			return nil
 		}
-		room, err := c.requireRoom(m.Room, true)
-		if err != nil || c.lastSeq[m.Room] >= room.Policy.MaxMessages {
+		_, err := c.requireRoom(m.Room, true)
+		if err != nil {
 			return nil
 		}
 		text = strings.TrimSpace(text)
@@ -2449,7 +2453,7 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 		if seq == 0 && c.lateInput(m, agent, prompt) {
 			// 이 턴의 입력이 기록되지 않음: 입력한 뒤에 방에 들어왔다 (방 밖에서 시킨 일을 하던 중 초대받음 등).
 			// 지금 그 입력을 기록하고 응답을 붙인다 — 이미 기록한 입력이면(앞서 닫힌 턴) 다시 만들지 않는다.
-			if room, err := c.requireRoom(m.Room, true); err == nil && c.lastSeq[m.Room] < room.Policy.MaxMessages {
+			if _, err := c.requireRoom(m.Room, true); err == nil {
 				text := strings.TrimSpace(prompt)
 				if r := []rune(text); len(r) > EchoMax {
 					text = string(r[:EchoMax]) + "\n…(길어서 생략)"
@@ -2468,7 +2472,7 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 			m.EchoQueue = slices.Clone(m.EchoQueue[idx+1:])
 			c.saveMemberships()
 		}
-		room, err := c.requireRoom(m.Room, true)
+		_, err := c.requireRoom(m.Room, true)
 		if err != nil {
 			return nil
 		}
@@ -2504,9 +2508,6 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 			if have[text] {
 				continue
 			}
-			if c.lastSeq[m.Room] >= room.Policy.MaxMessages {
-				break
-			}
 			s := seq
 			out = append(out, c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &s, Body: text, Echo: true}))
 			have[text] = true
@@ -2526,7 +2527,7 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 		if !ok {
 			return nil
 		}
-		room, err := c.requireRoom(m.Room, true)
+		_, err := c.requireRoom(m.Room, true)
 		if err != nil {
 			return nil
 		}
@@ -2575,9 +2576,6 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 			}
 			if have[text] {
 				continue
-			}
-			if c.lastSeq[m.Room] >= room.Policy.MaxMessages {
-				break
 			}
 			s := target
 			out = append(out, c.appendMessage(m.Room, Message{From: agent, Type: "chat", To: []string{}, ReplyTo: &s, Body: text, Echo: true}))

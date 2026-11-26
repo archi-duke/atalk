@@ -442,7 +442,7 @@
         <section>
           <h3>새 대화방</h3>
           <div class="f"><span>메시지 한도 기본값</span><input type="number" id="sLimit" min="10" placeholder="1000"> 개</div>
-          <p class="note">에이전트끼리 끝없이 주고받는 것을 막는 마지막 안전장치입니다. 이미 있는 방은 대화방 ⋯ 메뉴의 "메시지 한도" 로 바꿉니다.</p>
+          <p class="note">방마다 이 개수만큼만 보관합니다. 넘으면 가장 오래된 메시지부터 지웁니다 (선입선출). 이미 있는 방은 대화방 ⋯ 메뉴의 "메시지 한도" 로 바꿉니다.</p>
         </section>
         <section>
           <h3>세션</h3>
@@ -1298,7 +1298,7 @@ $("#mInvite").onclick = async () => {
 $("#mLimit").onclick = async () => {
   $("#menu").hidden = true;
   const r = chat.room, cur = r.policy?.max_messages || 1000;
-  const v = prompt("'" + (r.title || r.room_id) + "' 방의 메시지 한도 (지금 " + cur + ", 사용 " + r.last_seq + ")", String(cur));
+  const v = prompt("'" + (r.title || r.room_id) + "' 방의 메시지 보관 개수 (지금 " + cur + "). 넘으면 가장 오래된 메시지부터 지웁니다", String(cur));
   if (v === null) return;
   try { await send("PATCH", "/rooms/" + encodeURIComponent(r.room_id), { max_messages: Number(v) }); loadChat(false); }
   catch (err) { alert("바꾸지 못함: " + (err.message || err)); }
