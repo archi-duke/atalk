@@ -34,11 +34,12 @@ type headlessRunner struct {
 	running  map[string]bool // 에이전트 id → 턴 실행 중
 	spawning map[string]int  // 작업 폴더 → 헤드리스로 띄우는 중 (등록 전이라 id 를 모름)
 	lastSeq  map[string]int  // 에이전트 id → 마지막으로 넘긴 메시지 번호 (처리하지 못해도 같은 메시지로 다시 돌지 않게)
+	toCLI    map[string]bool // 턴이 도는 중에 [CLI로 열기]를 누름 → 턴이 끝나면 연다
 }
 
 func (h *headlessRunner) init() {
 	if h.running == nil {
-		h.running, h.spawning, h.lastSeq = map[string]bool{}, map[string]int{}, map[string]int{}
+		h.running, h.spawning, h.lastSeq, h.toCLI = map[string]bool{}, map[string]int{}, map[string]int{}, map[string]bool{}
 	}
 }
 
@@ -147,6 +148,12 @@ func (s *Server) runHeadless() {
 		s.headless.running[v.ID], s.headless.lastSeq[v.ID] = true, top
 		s.headless.mu.Unlock()
 		_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
+		// 넘긴 메시지는 읽은 것으로 (턴 안에서 읽음 처리를 빠뜨리면 턴 끝 훅이 같은 메시지를 다시 알림)
+		read := 0
+		for _, m := range u.Messages {
+			read = max(read, m.Seq)
+		}
+		_ = c.Ack(v.ID, read)
 		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
 		mode := s.modeFor(v)
 		go func(id, cwd, sid string) {
@@ -155,7 +162,14 @@ func (s *Server) runHeadless() {
 			}
 			s.headless.mu.Lock()
 			delete(s.headless.running, id)
+			open := s.headless.toCLI[id]
+			delete(s.headless.toCLI, id)
 			s.headless.mu.Unlock()
+			if open { // 턴이 도는 동안 [CLI로 열기]를 눌렀음
+				if err := s.openCLI(id); err != nil {
+					log.Printf("헤드리스 → CLI 실패 (%s): %v", id, err)
+				}
+			}
 		}(v.ID, *v.Cwd, v.SessionID)
 	}
 }
@@ -220,18 +234,43 @@ func (s *Server) setHeadless(r *http.Request) (any, error) {
 	if !v.Headless {
 		return map[string]any{"agent": v, "launched": false}, nil
 	}
-	if s.headless.isRunning(id) || v.Busy {
+	s.headless.mu.Lock()
+	s.headless.init()
+	running := s.headless.running[id]
+	if running { // 턴이 도는 중 → 그 턴이 끝나면 연다 (같은 세션이 두 곳에서 돌지 않게)
+		s.headless.toCLI[id] = true
+	}
+	s.headless.mu.Unlock()
+	if running {
+		return map[string]any{"launched": false, "queued": true}, nil
+	}
+	if v.Busy {
 		return nil, &core.Error{Status: 409, Code: "busy", Message: "헤드리스 턴이 도는 중 — 끝난 뒤에 다시 하세요"}
 	}
-	if _, err := s.Core.SetHeadless(id, false); err != nil {
+	if err := s.openCLI(id); err != nil {
 		return nil, err
+	}
+	return map[string]any{"launched": true}, nil
+}
+
+// openCLI 는 헤드리스 에이전트를 CLI 창으로 다시 연다 (claude --resume <세션>).
+func (s *Server) openCLI(id string) error {
+	v, err := s.Core.GetAgent(id)
+	if err != nil {
+		return err
+	}
+	if v.Cwd == nil || !procs.SafeSession(v.SessionID) {
+		return &core.Error{Status: 409, Code: "no_cwd", Message: "작업 폴더·세션을 몰라 열 수 없음"}
+	}
+	if _, err := s.Core.SetHeadless(id, false); err != nil {
+		return err
 	}
 	argv, _ := procs.ResumeCommand("claude-code", v.SessionID)
 	if err := procs.LaunchTerminal(*v.Cwd, argv); err != nil {
 		_, _ = s.Core.SetHeadless(id, true)
-		return nil, &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
+		return &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
 	}
-	return map[string]any{"launched": true}, nil
+	return nil
 }
 
 // killWaitHook 은 창을 닫은 세션의 메시지 대기 훅을 끝낸다 (헤드리스로 바꾸면 그 대기는 쓸모가 없음).
