@@ -1882,3 +1882,24 @@ func TestAskCard(t *testing.T) {
 		t.Fatalf("답 메시지: %+v", last)
 	}
 }
+
+func TestSetDoing(t *testing.T) {
+	c := newEnv(t).core()
+	a, _, _ := setup(t, c)
+	check(t, c.SetDoing(a, "메시지 확인 중"))
+	v := ok(c.GetAgent(a))
+	if !v.Busy || v.Doing != "메시지 확인 중" || v.BusySince == "" {
+		t.Fatalf("작업 시작: %+v", v)
+	}
+	since := v.BusySince
+	check(t, c.SetDoing(a, "Bash: go test\n./..."))
+	v = ok(c.GetAgent(a))
+	if v.Doing != "Bash: go test ./..." || v.BusySince != since {
+		t.Fatalf("하는 일 바뀜 (시작 시각은 그대로): %+v", v)
+	}
+	check(t, c.SetActivity(a, false))
+	v = ok(c.GetAgent(a))
+	if v.Busy || v.Doing != "" || v.BusySince != "" {
+		t.Fatalf("작업 끝: %+v", v)
+	}
+}

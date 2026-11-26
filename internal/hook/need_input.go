@@ -56,13 +56,40 @@ func askText(raw json.RawMessage) string {
 
 // permissionText: 도구 허가 요청(Codex PermissionRequest)을 사람이 읽을 한 줄로 — 도구 이름과 명령(있으면).
 func permissionText(in Input) string {
+	name, what := toolTarget(in)
+	text := name + " 실행 허가"
+	if what != "" {
+		text += ": " + what
+	}
+	if m := strings.TrimSpace(in.Message); m != "" {
+		text += " — " + m
+	}
+	return text
+}
+
+// toolDoing: 곧 쓸 도구를 "지금 하는 일" 한 줄로 ("Bash: go test ./...").
+func toolDoing(in Input) string {
+	name, what := toolTarget(in)
+	if what == "" {
+		return name
+	}
+	if r := []rune(what); len(r) > 100 {
+		what = string(r[:100]) + "…"
+	}
+	return name + ": " + what
+}
+
+// toolTarget: 도구 이름과 대상(명령·경로·패턴 등, 없으면 입력 JSON).
+func toolTarget(in Input) (name, what string) {
 	var ti struct {
-		Command  any    `json:"command"`
-		Path     string `json:"path"`
-		FilePath string `json:"file_path"`
+		Command     any    `json:"command"`
+		Path        string `json:"path"`
+		FilePath    string `json:"file_path"`
+		Pattern     string `json:"pattern"`
+		URL         string `json:"url"`
+		Description string `json:"description"`
 	}
 	_ = json.Unmarshal(in.ToolInput, &ti)
-	what := ""
 	switch v := ti.Command.(type) {
 	case string:
 		what = v
@@ -81,24 +108,22 @@ func permissionText(in Input) string {
 	if what == "" {
 		what = ti.FilePath
 	}
+	for _, v := range []string{ti.Pattern, ti.URL, ti.Description} {
+		if what == "" {
+			what = v
+		}
+	}
 	if what == "" && len(in.ToolInput) > 0 && string(in.ToolInput) != "null" {
 		what = string(in.ToolInput)
 	}
 	if r := []rune(what); len(r) > 300 {
 		what = string(r[:300]) + "…"
 	}
-	name := in.ToolName
+	name = in.ToolName
 	if name == "" {
 		name = "도구"
 	}
-	text := name + " 실행 허가"
-	if what != "" {
-		text += ": " + what
-	}
-	if m := strings.TrimSpace(in.Message); m != "" {
-		text += " — " + m
-	}
-	return text
+	return name, strings.TrimSpace(what)
 }
 
 // 곧 쓸 도구 기억 (PreToolUse → Notification): Claude Code 의 허가 알림 문구에는 어떤 도구·명령인지가 없어서.

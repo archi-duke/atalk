@@ -188,6 +188,9 @@ type Host struct {
 type AgentView struct {
 	AgentCard
 	Busy   bool   `json:"busy,omitempty"` // 지금 일하는 중 (CLI 에서 받은 일 포함, 훅·플러그인이 알림)
+	// BusySince: 이번 작업을 시작한 시각 (RFC3339). Doing: 지금 하는 일 한 줄 ("Bash: go test ./...")
+	BusySince string `json:"busy_since,omitempty"`
+	Doing     string `json:"doing,omitempty"`
 	// NeedsInput: 사람의 확인·답을 기다리는 중 (도구 허가, 질문). 그 내용
 	NeedsInput string `json:"needs_input,omitempty"`
 	// Approval: NeedsInput 을 웹 카드에서 답할 수 있음 ([허용]/[거부] 또는 선택지). CLI 창에서 먼저 답하면 풀림
