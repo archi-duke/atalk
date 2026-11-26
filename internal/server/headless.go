@@ -223,6 +223,7 @@ func (s *Server) runHeadless() {
 			if err := runTurn(kind, cwd, sid, text, id, mode, nil); err != nil {
 				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
 			}
+			_ = c.Activity(id, false) // 턴이 끝남 (실행이 바로 실패해 끝 훅이 오지 않은 경우에도 작업 중 표시가 남지 않게)
 			s.headless.mu.Lock()
 			delete(s.headless.running, id)
 			open := s.headless.toCLI[id]

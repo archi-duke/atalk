@@ -85,6 +85,9 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		}
 	case "pre": // PreToolUse(모든 도구): 곧 쓸 도구를 기억 — 허가 창이 뜨면 그 내용으로 알림. 질문 도구면 바로 질문을 대화방에
 		rememberTool(id, in)
+		if healthy && in.ToolName != "AskUserQuestion" {
+			_ = c.Doing(id, toolDoing(in)) // 화면의 "작업 중 · 지금 하는 일" (백그라운드 훅이라 기다리지 않음)
+		}
 		if healthy && in.ToolName == "AskUserQuestion" {
 			if text := askText(in.ToolInput); text != "" {
 				_ = c.NeedInput(id, text)
