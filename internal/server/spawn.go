@@ -18,7 +18,8 @@ type SpawnInput struct {
 	Cwd    string `json:"cwd,omitempty"`    // 작업 폴더 (없으면 띄우는 에이전트의 폴더)
 	Prompt string `json:"prompt"`           // 첫 지시
 	Name   string `json:"name,omitempty"`   // 새 세션 이름 (없으면 기본)
-	Room   string `json:"room,omitempty"`   // 들어갈 방 (없으면 띄우는 에이전트의 방, "-" 이면 방에 넣지 않음)
+	Room   string `json:"room,omitempty"`
+	Headless bool `json:"headless,omitempty"` // 창 없이 (메시지마다 데몬이 한 턴씩) — 지금은 Claude Code 만   // 들어갈 방 (없으면 띄우는 에이전트의 방, "-" 이면 방에 넣지 않음)
 }
 
 // spawnIntro 는 새 세션의 첫 지시 앞에 붙는 안내 — 누가 띄웠고, 결과를 어디로 보고할지.
@@ -82,6 +83,13 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 	token, err := c.NewSpawn(by.ID, room, strings.TrimSpace(in.Name), prompt) // opencode 는 플러그인이 이 지시를 세션에 직접 보낸다
 	if err != nil {
 		return nil, err
+	}
+	if in.Headless {
+		if in.Kind != "claude-code" {
+			return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "헤드리스는 아직 Claude Code 만 지원함"}
+		}
+		s.spawnHeadless(cwd, prompt, token)
+		return map[string]any{"launched": true, "headless": true, "kind": in.Kind, "cwd": cwd, "room": introRoom}, nil
 	}
 	if err := procs.LaunchTerminalEnv(cwd, argv, map[string]string{"ATALK_SPAWN": token}); err != nil {
 		return nil, &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}

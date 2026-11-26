@@ -33,6 +33,8 @@ type AgentCard struct {
 	Shared       bool     `json:"shared,omitempty"`
 	// SpawnedBy 는 이 세션을 띄운 에이전트 (atalk spawn, 또는 그 에이전트의 프로세스 아래에서 실행됨)
 	SpawnedBy string `json:"spawned_by,omitempty"`
+	// Headless 는 창 없이 도는 세션: 메시지가 오면 데몬이 한 턴씩 실행한다 (claude -p --resume). 턴 사이에는 프로세스가 없어 PID 를 두지 않는다
+	Headless bool `json:"headless,omitempty"`
 	// Avatar 는 화면의 아이콘: "emoji:🦊" 또는 작은 이미지 data URL (png·jpeg·webp). 없으면 이름 첫 글자
 	Avatar string `json:"avatar,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
@@ -155,6 +157,9 @@ type Config struct {
 	EchoFinalOnly bool `json:"echo_final_only,omitempty"`
 	// MachineName 은 이 PC 의 이름 (에이전트 목록에 보임). 없으면 "PC-" + PC ID 앞 4자리. 호스트 이름은 쓰지 않는다.
 	MachineName string `json:"machine_name,omitempty"`
+	// HeadlessPermissionMode 는 헤드리스 턴(claude -p)의 권한 모드 (--permission-mode). 창이 없어 허가를 물을 수 없으므로
+	// 허용 목록에 없는 도구는 거부된다. "" 이면 Claude Code 설정을 따름. acceptEdits | bypassPermissions | plan | default
+	HeadlessPermissionMode string `json:"headless_permission_mode,omitempty"`
 }
 
 var LogStates = []string{"received", "working", "done", "skipped", "failed"}
@@ -182,6 +187,8 @@ type AgentView struct {
 	Busy   bool   `json:"busy,omitempty"` // 지금 일하는 중 (CLI 에서 받은 일 포함, 훅·플러그인이 알림)
 	// NeedsInput: 사람의 확인·답을 기다리는 중 (도구 허가, 질문). 그 내용
 	NeedsInput string `json:"needs_input,omitempty"`
+	// Approval: NeedsInput 을 웹 카드에서 답할 수 있음 ([허용]/[거부] 또는 선택지). CLI 창에서 먼저 답하면 풀림
+	Approval bool `json:"approval,omitempty"`
 	// Listening: 메시지 대기 훅(Claude Code)이 살아 있음. 쉬는 Claude 인데 false 면 메시지가 와도 못 깨어남 (Esc 로 중지한 뒤 등)
 	Listening bool `json:"listening,omitempty"`
 	Local  bool   `json:"local"`  // 이 데몬과 같은 PC 에서 실행 중
@@ -279,6 +286,8 @@ type RegisterInput struct {
 	Spawn string `json:"spawn,omitempty"`
 	// Ancestors 는 이 세션 프로세스의 부모 체인 PID — 다른 에이전트가 백그라운드로 실행한 세션이면 그 에이전트를 띄운 쪽으로 기록
 	Ancestors []int `json:"ancestors,omitempty"`
+	// Headless: 데몬이 창 없이 실행한 턴에서 등록함 (ATALK_HEADLESS). PID 는 보내지 않는다
+	Headless bool `json:"headless,omitempty"`
 }
 
 type RegisterResult struct {

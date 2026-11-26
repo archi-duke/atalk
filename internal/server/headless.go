@@ -1,0 +1,248 @@
+package server
+
+// 헤드리스 (창 없이 도는 에이전트, 지금은 Claude Code): 카드에 Headless 가 표시된 세션에 나에게 온 메시지가 오면
+// 데몬이 그 세션으로 한 턴을 숨김 실행한다 (claude -p --resume <세션>, 지시는 표준 입력으로). 그 턴 안에서 훅이 그대로 돌아
+// 처리 기록·CLI 출력 기록·결과 보고가 창이 있을 때와 같다. 한 세션은 한 곳에서만 돈다: 헤드리스 턴이 도는 동안에는
+// CLI 로 열지 않고(409), CLI 창이 떠 있는 세션은 헤드리스가 아니다(창이 등록하면 Headless 가 풀림).
+
+import (
+	"errors"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"atalk/internal/client"
+	"atalk/internal/core"
+	"atalk/internal/daemon"
+	"atalk/internal/procs"
+)
+
+const headlessMaxText = 20000
+
+type headlessRunner struct {
+	mu       sync.Mutex
+	running  map[string]bool // 에이전트 id → 턴 실행 중
+	spawning map[string]int  // 작업 폴더 → 헤드리스로 띄우는 중 (등록 전이라 id 를 모름)
+	lastSeq  map[string]int  // 에이전트 id → 마지막으로 넘긴 메시지 번호 (처리하지 못해도 같은 메시지로 다시 돌지 않게)
+}
+
+func (h *headlessRunner) init() {
+	if h.running == nil {
+		h.running, h.spawning, h.lastSeq = map[string]bool{}, map[string]int{}, map[string]int{}
+	}
+}
+
+func (h *headlessRunner) isRunning(id string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.init()
+	return h.running[id]
+}
+
+// headlessLog 는 헤드리스 턴의 출력이 쌓이는 파일 (작업 보기·문제 확인용).
+func headlessLog(id string) string {
+	return filepath.Join(os.TempDir(), "atalk-headless", strings.NewReplacer("/", "-", `\`, "-", ":", "-").Replace(id)+".log")
+}
+
+// runClaudeTurn 은 cwd 에서 claude -p 한 턴을 숨김 실행하고 끝날 때까지 기다린다. sid 가 있으면 그 세션을 이어서.
+func runClaudeTurn(cwd, sid, prompt, logID, mode string, env map[string]string) error {
+	exe, err := exec.LookPath("claude")
+	if err != nil {
+		return errors.New("claude 를 찾을 수 없음: " + err.Error())
+	}
+	args := []string{"-p"}
+	if mode != "" { // 창이 없어 허가를 물을 수 없음 — 설정한 권한 모드로
+		args = append(args, "--permission-mode", mode)
+	}
+	if sid != "" {
+		args = append(args, "--resume", sid)
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = cwd
+	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Env = append(os.Environ(), "ATALK_HEADLESS=1")
+	for k, v := range env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	daemon.HideCmd(cmd)
+	_ = os.MkdirAll(filepath.Dir(headlessLog(logID)), 0o755)
+	f, err := os.OpenFile(headlessLog(logID), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n===== %s 턴 시작 (%s)\n", time.Now().Format(time.RFC3339), strings.Join(args, " "))
+	cmd.Stdout, cmd.Stderr = f, f
+	err = cmd.Run()
+	fmt.Fprintf(f, "===== %s 턴 끝 (%v)\n", time.Now().Format(time.RFC3339), err)
+	return err
+}
+
+// runHeadless 는 이 PC 의 헤드리스 에이전트에 새로 온 메시지가 있으면 한 턴을 돌린다 (watchLobbies 가 3초마다 부름).
+func (s *Server) runHeadless() {
+	list, err := s.Core.ListAgents("", "claude-code")
+	if err != nil {
+		return
+	}
+	for _, v := range list {
+		if !v.Local || !v.Headless || v.Cwd == nil || !procs.SafeSession(v.SessionID) {
+			continue
+		}
+		var c *client.Client
+		if rc := client.LoadConn(v.ID); rc != nil {
+			c = s.relayClients.get(rc)
+			a, err := c.Agent(v.ID)
+			if err != nil {
+				continue
+			}
+			v.Busy, v.Room = a.Busy, a.Room
+		} else {
+			c = client.New("")
+		}
+		if v.Busy || v.Room == nil {
+			continue
+		}
+		s.headless.mu.Lock()
+		s.headless.init()
+		skip := s.headless.running[v.ID] || s.headless.spawning[*v.Cwd] > 0
+		last := s.headless.lastSeq[v.ID]
+		s.headless.mu.Unlock()
+		if skip {
+			continue
+		}
+		u, err := c.Unread(v.ID, false)
+		if err != nil {
+			continue
+		}
+		var forMe []core.InboxMessage
+		top := last
+		for _, m := range u.Messages {
+			if m.ForMe && m.Seq > last {
+				forMe = append(forMe, m)
+				top = max(top, m.Seq)
+			}
+		}
+		if len(forMe) == 0 {
+			continue
+		}
+		room := *v.Room
+		if u.Room != nil {
+			room = *u.Room
+		}
+		text := c.Notice(room, forMe, nil, false)
+		if r := []rune(text); len(r) > headlessMaxText {
+			text = string(r[:headlessMaxText]) + "\n… (길어서 줄임: atalk unread 로 전체를 보세요)"
+		}
+		s.headless.mu.Lock()
+		s.headless.running[v.ID], s.headless.lastSeq[v.ID] = true, top
+		s.headless.mu.Unlock()
+		_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
+		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
+		go func(id, cwd, sid string) {
+			if err := runClaudeTurn(cwd, sid, text, id, s.headlessMode(), nil); err != nil {
+				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
+			}
+			s.headless.mu.Lock()
+			delete(s.headless.running, id)
+			s.headless.mu.Unlock()
+		}(v.ID, *v.Cwd, v.SessionID)
+	}
+}
+
+// spawnHeadless 는 atalk spawn --headless: 창 없이 새 세션의 첫 턴을 실행한다 (등록·방 입장은 표식을 보고 훅이).
+func (s *Server) spawnHeadless(cwd, prompt, token string) {
+	s.headless.mu.Lock()
+	s.headless.init()
+	s.headless.spawning[cwd]++
+	s.headless.mu.Unlock()
+	go func() {
+		if err := runClaudeTurn(cwd, "", prompt, "spawn-"+token, s.headlessMode(), map[string]string{"ATALK_SPAWN": token}); err != nil {
+			log.Printf("헤드리스 띄우기 실패 (%s): %v", cwd, err)
+		}
+		s.headless.mu.Lock()
+		s.headless.spawning[cwd]--
+		s.headless.mu.Unlock()
+	}()
+}
+
+// setHeadless 는 POST /agents/{id}/headless {on}: 켜면 CLI 창을 닫고 헤드리스로, 끄면 CLI 창으로 다시 연다.
+func (s *Server) setHeadless(r *http.Request) (any, error) {
+	var b struct {
+		On bool `json:"on"`
+	}
+	if err := readBody(r, &b); err != nil {
+		return nil, err
+	}
+	id := r.PathValue("id")
+	v, err := s.Core.GetAgent(id)
+	if err != nil {
+		return nil, err
+	}
+	if !v.Local {
+		return nil, &core.Error{Status: 409, Code: "not_here", Message: "이 PC 의 에이전트만 바꿀 수 있음 (다른 PC 는 그 PC 에서)"}
+	}
+	if v.Kind != "claude-code" {
+		return nil, &core.Error{Status: 409, Code: "headless_unsupported", Message: "헤드리스는 아직 Claude Code 만 지원함"}
+	}
+	if v.Cwd == nil || !procs.SafeSession(v.SessionID) {
+		return nil, &core.Error{Status: 409, Code: "no_cwd", Message: "작업 폴더·세션을 몰라 바꿀 수 없음"}
+	}
+	if b.On {
+		if v.Headless {
+			return map[string]any{"agent": v}, nil
+		}
+		if v.Busy {
+			return nil, &core.Error{Status: 409, Code: "busy", Message: "일하는 중 — 끝난 뒤에 바꾸세요"}
+		}
+		if v.Pid != nil && core.DefaultIsAlive(*v.Pid) {
+			_ = procs.CloseAgentWindow(*v.Pid)
+		}
+		killWaitHook(id)
+		a, err := s.Core.SetHeadless(id, true)
+		return map[string]any{"agent": a}, err
+	}
+	if !v.Headless {
+		return map[string]any{"agent": v, "launched": false}, nil
+	}
+	if s.headless.isRunning(id) || v.Busy {
+		return nil, &core.Error{Status: 409, Code: "busy", Message: "헤드리스 턴이 도는 중 — 끝난 뒤에 다시 하세요"}
+	}
+	if _, err := s.Core.SetHeadless(id, false); err != nil {
+		return nil, err
+	}
+	argv, _ := procs.ResumeCommand("claude-code", v.SessionID)
+	if err := procs.LaunchTerminal(*v.Cwd, argv); err != nil {
+		_, _ = s.Core.SetHeadless(id, true)
+		return nil, &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
+	}
+	return map[string]any{"launched": true}, nil
+}
+
+// killWaitHook 은 창을 닫은 세션의 메시지 대기 훅을 끝낸다 (헤드리스로 바꾸면 그 대기는 쓸모가 없음).
+func killWaitHook(id string) {
+	f := filepath.Join(os.TempDir(), "atalk-wait-"+id+".gen")
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return
+	}
+	str := strings.TrimSpace(string(b))
+	if pid, err := strconv.Atoi(str[strings.LastIndex(str, "-")+1:]); err == nil && pid > 0 && core.DefaultIsAlive(pid) {
+		if p, err := os.FindProcess(pid); err == nil {
+			_ = p.Kill()
+		}
+	}
+	_ = os.WriteFile(f, []byte("headless-0"), 0o644)
+}
+
+// headlessMode 는 설정의 헤드리스 권한 모드 ("" 이면 Claude Code 설정을 따름).
+func (s *Server) headlessMode() string {
+	cfg, _ := s.Core.GetConfig()
+	return cfg.HeadlessPermissionMode
+}

@@ -32,7 +32,7 @@ func Wait(kind string, stdin io.Reader, stderr io.Writer, maxWait time.Duration)
 		}
 	}()
 	raw, err := io.ReadAll(stdin)
-	if err != nil {
+	if err != nil || Headless() { // 헤드리스 턴은 끝나면 프로세스가 끝난다 — 메시지는 데몬이 다음 턴으로 넘긴다
 		return 0
 	}
 	var in Input

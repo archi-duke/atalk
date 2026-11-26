@@ -623,8 +623,14 @@ func (c *Client) SendHuman(agent, text string) (core.Message, error) {
 
 // Wake 는 이 PC 의 에이전트를 깨운다: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고(launched), 떠 있으면 창을 앞으로.
 // Spawn 은 이 PC 의 새 터미널 창에서 협업할 새 세션을 연다 (by = 띄우는 에이전트). room 이 "" 이면 by 의 방, "-" 면 방에 넣지 않음.
-func (c *Client) Spawn(by, kind, cwd, prompt, name, room string) (out map[string]any, err error) {
-	err = c.call("POST", "/spawn", map[string]any{"by": by, "kind": kind, "cwd": cwd, "prompt": prompt, "name": name, "room": room}, &out, 0)
+func (c *Client) Spawn(by, kind, cwd, prompt, name, room string, headless bool) (out map[string]any, err error) {
+	err = c.call("POST", "/spawn", map[string]any{"by": by, "kind": kind, "cwd": cwd, "prompt": prompt, "name": name, "room": room, "headless": headless}, &out, 0)
+	return
+}
+
+// SetHeadless 는 이 PC 의 에이전트를 헤드리스로 바꾸거나(창을 닫음) CLI 창으로 다시 연다.
+func (c *Client) SetHeadless(id string, on bool) (out map[string]any, err error) {
+	err = c.call("POST", "/agents/"+esc(id)+"/headless", map[string]any{"on": on}, &out, 0)
 	return
 }
 
@@ -658,4 +664,19 @@ func (c *Client) Notice(room string, msgs []core.InboxMessage, extra []string, s
 	}
 	parts = append(parts, ProcessRule)
 	return strings.Join(parts, "\n\n")
+}
+
+// ApprovalResult 는 웹 카드에서 받은 답. Decided 가 false 면 웹에서 답하지 않음 (CLI 창에서 답했거나 시간이 지남).
+type ApprovalResult struct {
+	Decided bool   `json:"decided"`
+	Allow   bool   `json:"allow"`
+	Answer  string `json:"answer,omitempty"` // 질문이면 고른 답
+	Message string `json:"message,omitempty"`
+}
+
+// Approval 은 허가 요청·질문을 대화방 확인 카드로 올리고 웹에서 답할 때까지 기다린다 (PermissionRequest 훅).
+// CLI 창에서 먼저 답하면(에이전트가 일을 이어 가면) Decided=false 로 끝난다.
+func (c *Client) Approval(agent, text string, question bool) (r ApprovalResult, err error) {
+	err = c.call("POST", "/approval", map[string]any{"agent": agent, "text": text, "question": question}, &r, 31*time.Minute)
+	return
 }

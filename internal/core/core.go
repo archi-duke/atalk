@@ -58,6 +58,7 @@ type Atalk struct {
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
 	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
 	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
+	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -482,6 +483,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Busy = c.isBusy(card.ID)
 	v.Listening = c.isListening(card.ID)
 	v.NeedsInput = c.needInput[card.ID]
+	v.Approval = c.approvals[card.ID]
 	h := Host{ID: c.machineID, OS: LocalOS()}
 	if card.Host != nil {
 		h = *card.Host
@@ -653,6 +655,13 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		}
 		if card.Capabilities == nil {
 			card.Capabilities = []string{}
+		}
+		switch { // 창 없이 도는 세션(헤드리스)은 PID 없이. 창(프로세스)이 다시 등록하면 헤드리스가 아님
+		case in.Headless:
+			card.Headless, card.Pid, card.Shared = true, nil, false
+			in.Provisional = false
+		case in.Pid != nil && *in.Pid > 0 && card.Headless:
+			card.Headless, card.Pid, card.Shared = false, in.Pid, in.Shared
 		}
 		if err := c.applyHost(&card, in); err != nil {
 			return err
@@ -2797,6 +2806,11 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		if in.TrashRetentionDays != nil && (*in.TrashRetentionDays < 0 || *in.TrashRetentionDays > 3650) {
 			return bad("invalid_trash", "trash_retention_days 는 0(비우지 않음) ~ 3650 일")
 		}
+		switch in.HeadlessPermissionMode {
+		case "", "default", "acceptEdits", "bypassPermissions", "plan":
+		default:
+			return bad("invalid_mode", "headless_permission_mode 는 default | acceptEdits | bypassPermissions | plan (비우면 Claude Code 설정)")
+		}
 		in.MachineName = strings.TrimSpace(in.MachineName)
 		if len([]rune(in.MachineName)) > 40 || strings.ContainsAny(in.MachineName, "\r\n") {
 			return bad("invalid_machine_name", "PC 이름은 한 줄, 40자 이하")
@@ -3005,4 +3019,46 @@ func (c *Atalk) HasWork(agent string) bool {
 		return nil
 	})
 	return has
+}
+
+// SetHeadless 는 이 PC 의 에이전트를 헤드리스(창 없이, 메시지마다 데몬이 한 턴씩 실행)로 바꾸거나 되돌린다.
+// 켜면 PID 를 지운다 (창은 호출한 쪽이 닫는다). 끄면 창이 다시 등록할 때 PID 가 정해진다.
+func (c *Atalk) SetHeadless(id string, on bool) (v AgentView, err error) {
+	err = c.guard(func() error {
+		card, err := c.requireAgent(id)
+		if err != nil {
+			return err
+		}
+		if !c.isLocal(card) {
+			return conflict("not_here", "이 PC 의 에이전트만 바꿀 수 있음")
+		}
+		card.Headless = on
+		if on {
+			card.Pid, card.Shared = nil, false
+		}
+		card.UpdatedAt = c.ts()
+		c.saveCard(card)
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "update"}})
+		return nil
+	})
+	if err == nil {
+		v, err = c.GetAgent(id)
+	}
+	return
+}
+
+// SetApproval 은 에이전트에 웹에서 답할 수 있는 허가 요청이 있는지 표시한다 (화면의 확인 카드에 [허용]/[거부]).
+func (c *Atalk) SetApproval(agent string, on bool) {
+	_ = c.guard(func() error {
+		if c.approvals == nil {
+			c.approvals = map[string]bool{}
+		}
+		if on {
+			c.approvals[agent] = true
+		} else {
+			delete(c.approvals, agent)
+		}
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "approval"}})
+		return nil
+	})
 }
