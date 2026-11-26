@@ -1790,6 +1790,20 @@ func TestHeadlessRegister(t *testing.T) {
 	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "h1", Pid: i(200)})).Agent; v.Headless || v.Pid == nil || *v.Pid != 200 {
 		t.Fatalf("창이 다시 등록하면 헤드리스가 풀려야 함: %+v", v)
 	}
+
+	// 다른 PC 의 세션: PID 가 오지 않으므로 Window 표시로 헤드리스가 풀린다
+	mac := &Host{ID: "mac-1", Name: "mac", OS: "darwin"}
+	rid := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "r1", Host: mac, Headless: true})).Agent.ID
+	if v := ok(c.GetAgent(rid)); !v.Headless {
+		t.Fatalf("원격 헤드리스 턴 등록: %+v", v)
+	}
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "r1", Host: mac}))
+	if v := ok(c.GetAgent(rid)); !v.Headless {
+		t.Fatalf("창 표시 없는 원격 등록(MCP 등)은 헤드리스를 그대로 둠: %+v", v)
+	}
+	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "r1", Host: mac, Window: true})).Agent; v.Headless || v.Pid != nil {
+		t.Fatalf("원격 창이 다시 등록하면 헤드리스가 풀려야 함: %+v", v)
+	}
 }
 
 // 띄운 세션 카드: 보관 기간을 따로 정하고(spawn_ttl_hours), 보관하지 않으면(spawn_keep=false) 꺼지는 대로 지운다.

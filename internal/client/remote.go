@@ -155,6 +155,9 @@ func (rc *RemoteConn) RemoteCard(in core.RegisterInput) core.RegisterInput {
 	if in.Workspace == nil {
 		in.Workspace = rc.Workspace
 	}
+	if in.Pid != nil && *in.Pid > 0 && !in.Headless {
+		in.Window = true // PID 는 보내지 않지만 창이 등록했다는 것만 알린다 (호스트가 헤드리스 표시를 풀 수 있게)
+	}
 	in.Cwd, in.Pid, in.Provisional = nil, nil, false
 	return in
 }
