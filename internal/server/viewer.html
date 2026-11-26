@@ -1337,7 +1337,7 @@ function agentStatus(a, m) {
   const noRoom = status === "waiting" ? " · 방 없음" : "";
   if (deaf(a)) return { cls: "off", text: "🔕 알림 꺼짐" + noRoom, title: DEAF_HINT };
   if (status === "waiting") return { cls: "idle", text: "방 없음", title: "켜져 있지만 들어간 방이 없음" };
-  return { cls: "idle", text: "쉬는 중", title: "방에 있고 쉬는 중 (메시지가 오면 깨어남)" };
+  return { cls: "idle", text: "대기", title: "방에 있고 대기 중 (메시지가 오면 깨어남)" };
 }
 function presenceRows(room, logs) {
   const last = {}; // agent → seq → 마지막 상태
