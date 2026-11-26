@@ -936,6 +936,12 @@ func (c *Atalk) inheritCard(card *AgentCard) (from, room string) {
 	if len(card.Capabilities) == 0 {
 		card.Capabilities = slices.Clone(best.Capabilities)
 	}
+	if len(card.Skills) == 0 {
+		card.Skills = slices.Clone(best.Skills)
+	}
+	if len(card.Cautions) == 0 {
+		card.Cautions = slices.Clone(best.Cautions)
+	}
 	if card.Human == nil {
 		card.Human = best.Human
 	}
@@ -1170,6 +1176,16 @@ func (c *Atalk) UpdateCard(id string, p CardPatch) (v AgentView, err error) {
 		}
 		if p.Capabilities != nil {
 			card.Capabilities = slices.Clone(*p.Capabilities)
+		}
+		if p.Skills != nil {
+			sk, err := checkSkills(*p.Skills)
+			if err != nil {
+				return err
+			}
+			card.Skills = sk
+		}
+		if p.Cautions != nil {
+			card.Cautions = cleanList(*p.Cautions, 20, 500)
 		}
 		if p.Workspace != nil {
 			w, err := checkWorkspace(*p.Workspace)
@@ -2194,6 +2210,12 @@ func (c *Atalk) takeoverLocked(newID, oldID string) (rec *Recovery, err error) {
 		}
 		if len(nu.Capabilities) == 0 && len(old.Capabilities) > 0 {
 			nu.Capabilities = slices.Clone(old.Capabilities)
+		}
+		if len(nu.Skills) == 0 {
+			nu.Skills = slices.Clone(old.Skills)
+		}
+		if len(nu.Cautions) == 0 {
+			nu.Cautions = slices.Clone(old.Cautions)
 		}
 		if nu.Human == nil {
 			nu.Human = old.Human

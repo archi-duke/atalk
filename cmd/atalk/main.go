@@ -48,6 +48,8 @@ const help = `atalk — 에이전트 대화방
   atalk agents [--status waiting|in_room|away|offline] [--kind KIND]
   atalk whoami
   atalk card [--name N] [--desc D] [--cap a,b] [--human 별칭] [--workspace 작업이름]   내 네임카드 수정 (--workspace "" 이면 작업 이름 숨김)
+  atalk card --file FILE|-                  자기소개·할 수 있는 일·주의사항을 JSON 으로 ({description, skills, cautions})
+  atalk card --a2a [--agent ID]             A2A 1.0 AgentCard 로 보기
   atalk config [user 별칭 | machine PC이름 | echo-final on|off | grace 분|off|default | offline 시간|off|default]
                                                       설정: 사용자 별칭 / 자리 비움 후 자동 퇴장(분) / 오프라인 카드 자동 삭제(시간, 기본 24)
   atalk prune --yes                                   오프라인 네임카드 지금 모두 삭제
@@ -97,7 +99,7 @@ const help = `atalk — 에이전트 대화방
 // ───────────────────────── 인자 파싱 ─────────────────────────
 // 표준 flag 패키지는 첫 위치 인자에서 멈추므로, 옵션이 어디에 와도 되게 직접 파싱한다.
 
-var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true, "headless": true}
+var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true, "headless": true, "a2a": true}
 
 type args struct {
 	pos   []string
@@ -552,7 +554,44 @@ func main() {
 		out(done, strings.Join(done, "\n"))
 
 	case "card":
-		v, err := c.UpdateCard(me(), core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap"), Human: a.ptr("human"), Workspace: a.ptr("workspace")})
+		if a.has("a2a") { // A2A 1.0 AgentCard 로 보기 (--agent 로 다른 에이전트)
+			id := a.str("agent")
+			if id == "" {
+				id = me()
+			}
+			v, err := c.Agent(id)
+			check(err)
+			card := core.ToA2A(v, c.Base)
+			b, _ := json.MarshalIndent(card, "", "  ")
+			out(card, string(b))
+			return
+		}
+		p := core.CardPatch{Name: a.ptr("name"), Description: a.ptr("desc"), Capabilities: a.list("cap"), Human: a.ptr("human"), Workspace: a.ptr("workspace")}
+		if f := a.str("file"); f != "" { // 자기소개·할 수 있는 일·주의사항을 JSON 으로 한 번에 ({description, skills:[{id,name,description,tags,examples}], cautions:[...]})
+			var b []byte
+			var err error
+			if f == "-" {
+				b, err = io.ReadAll(os.Stdin)
+			} else {
+				b, err = os.ReadFile(f)
+			}
+			check(err)
+			var fp core.CardPatch
+			if err := json.Unmarshal(b, &fp); err != nil {
+				fail("bad_json", "카드 JSON 을 읽을 수 없음: "+err.Error())
+			}
+			if fp.Description != nil {
+				p.Description = fp.Description
+			}
+			if fp.Name != nil {
+				p.Name = fp.Name
+			}
+			if fp.Capabilities != nil {
+				p.Capabilities = fp.Capabilities
+			}
+			p.Skills, p.Cautions = fp.Skills, fp.Cautions
+		}
+		v, err := c.UpdateCard(me(), p)
 		check(err)
 		out(v, "")
 

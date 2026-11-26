@@ -40,6 +40,10 @@ type AgentCard struct {
 	HeadlessMode string `json:"headless_mode,omitempty"`
 	// Avatar 는 화면의 아이콘: "emoji:🦊" 또는 작은 이미지 data URL (png·jpeg·webp). 없으면 이름 첫 글자
 	Avatar string `json:"avatar,omitempty"`
+	// Skills 는 이 에이전트가 할 수 있는 일 (A2A AgentSkill 과 같은 모양). 에이전트가 해 온 일을 바탕으로 스스로 적는다 (atalk card --file)
+	Skills []Skill `json:"skills,omitempty"`
+	// Cautions 는 이 에이전트에게 일을 맡길 때의 주의사항 (A2A 카드에서는 ATalk 확장 params.cautions)
+	Cautions []string `json:"cautions,omitempty"`
 	RegisteredAt string   `json:"registered_at"`
 	UpdatedAt    string   `json:"updated_at"`
 }
@@ -306,6 +310,15 @@ type RegisterResult struct {
 	PreviousRoom  string `json:"previous_room,omitempty"`
 }
 
+// Skill 은 에이전트가 할 수 있는 일 하나 — A2A AgentSkill (id·name·description·tags 필수, examples 선택).
+type Skill struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	Examples    []string `json:"examples,omitempty"`
+}
+
 type CardPatch struct {
 	Name         *string   `json:"name,omitempty"`
 	Description  *string   `json:"description,omitempty"`
@@ -313,6 +326,8 @@ type CardPatch struct {
 	Human        *string   `json:"human,omitempty"` // 빈 문자열이면 지움 (config.json 의 user 를 따름)
 	Workspace    *string   `json:"workspace,omitempty"` // 작업 이름. 빈 문자열이면 숨김
 	Avatar       *string   `json:"avatar,omitempty"`    // 아이콘 (CheckIcon 형식). 빈 문자열이면 기본(이름 첫 글자)
+	Skills       *[]Skill  `json:"skills,omitempty"`    // 할 수 있는 일 (통째로 바꿈, 빈 목록이면 지움)
+	Cautions     *[]string `json:"cautions,omitempty"`  // 주의사항 (통째로 바꿈)
 }
 
 type PostInput struct {

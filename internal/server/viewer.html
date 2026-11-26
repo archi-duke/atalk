@@ -113,6 +113,10 @@
   .agent-detail div { display:flex; gap:8px; padding:2px 0; min-width:0; }
   .agent-detail b { flex:none; width:64px; color:var(--muted); font-weight:500; }
   .agent-detail span { min-width:0; overflow-wrap:anywhere; }
+  .agent-detail ul { margin:0; padding-left:16px; }
+  .agent-detail li { margin:1px 0; }
+  .agent-detail li i { font-style:normal; color:var(--muted); }
+  .agent-detail .tags { color:var(--muted); font-size:11px; }
   .agent-detail code { font:11.5px ui-monospace,Consolas,monospace; }
   .agent-detail button { border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:6px; padding:0 6px; font-size:11px; cursor:pointer; margin-left:4px; }
   /* 바로가기 모드 (Ctrl/⌘ 누름): 커서와 테두리로 "에이전트를 클릭하면 그 CLI 창으로" 를 알린다 */
@@ -928,6 +932,10 @@ function agentDetail(x) {
     kv("폴더", x.local && x.cwd ? "<code>" + esc(x.cwd) + '</code><button data-copy="' + esc(x.cwd) + '">복사</button>' : x.local ? "" : "(다른 PC — 표시 안 함)") +
     kv("종류", esc(x.kind)) + kv("ID", "<code>" + esc(x.id) + "</code>") + kv("상위 에이전트", x.spawned_by ? esc(nameOf(x.spawned_by)) : "") +
     kv("사람", x.human ? esc(x.human) : "") + kv("능력", (x.capabilities || []).map(esc).join(", ")) +
+    kv("할 수 있는 일", (x.skills || []).length ? "<ul>" + x.skills.map((k) => "<li><b style=\"width:auto;color:var(--fg)\">" + esc(k.name) + "</b> <i>— " + esc(k.description) + "</i>" +
+      ((k.tags || []).length ? ' <span class="tags">#' + k.tags.map(esc).join(" #") + "</span>" : "") + "</li>").join("") + "</ul>" : "") +
+    kv("주의사항", (x.cautions || []).length ? "<ul>" + x.cautions.map((c) => "<li>⚠ " + esc(c) + "</li>").join("") + "</ul>" : "") +
+    (DATA ? "" : kv("A2A 카드", '<a href="/agents/' + encodeURIComponent(x.id) + '/agent-card.json" target="_blank" rel="noopener">agent-card.json</a>')) +
     kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") + headlessDetail(x) +
     (DATA ? "" : '<div><b>아이콘</b><span><button data-icon-agent="' + esc(x.id) + '">아이콘 변경…</button></span></div>') + "</div>";
 }
