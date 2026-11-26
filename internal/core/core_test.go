@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1834,4 +1835,24 @@ func TestHeadlessNoFlipLiveCLI(t *testing.T) {
 		t.Fatalf("창이 꺼졌으면 숨김으로: %+v", v)
 	}
 	_ = id
+}
+
+// 메시지 한도: 넘으면 가장 오래된 메시지부터 지워 늘 한도 개수만 남는다 (선입선출). 보내기는 막지 않는다.
+func TestMessageLimitFIFO(t *testing.T) {
+	c := newEnv(t).core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "f", "", 0))
+	ok(c.SetRoomLimit("f", 10))
+	for i := 0; i < 25; i++ {
+		ok(c.Post(a, "f", PostInput{Body: "m" + strconv.Itoa(i)}))
+	}
+	msgs := ok(c.ReadMessages("f", 0, 1000))
+	if len(msgs) != 10 || msgs[len(msgs)-1].Body != "m24" {
+		t.Fatalf("한도만큼 최신 것만 남아야 함: %d개, 마지막 %q", len(msgs), msgs[len(msgs)-1].Body)
+	}
+	// 한도를 줄이면 바로 정리
+	ok(c.SetRoomLimit("f", 10))
+	if r := ok(c.SetRoomLimit("f", 10)); r.Policy.MaxMessages != 10 {
+		t.Fatal("한도")
+	}
 }

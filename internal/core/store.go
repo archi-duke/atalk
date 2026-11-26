@@ -31,6 +31,7 @@ type Store interface {
 	PutRemoteTokens(t map[string]RemoteToken)
 
 	AppendMessage(m Message)
+	PruneMessages(room string, upTo int) // 방의 seq <= upTo 메시지와 그 처리 기록을 지운다 (메시지 한도, 선입선출)
 	Messages(room string, after, limit int) []Message // limit <= 0 이면 전부
 	MessagesBySeq(room string, seqs []int) map[int]Message
 
@@ -268,6 +269,11 @@ func (s *sqliteStore) PutName(id, name string) {
 }
 func (s *sqliteStore) PutConfig(cfg Config)                     { s.setMeta("config", js(cfg)) }
 func (s *sqliteStore) PutRemoteTokens(t map[string]RemoteToken) { s.setMeta("remote_tokens", js(t)) }
+
+func (s *sqliteStore) PruneMessages(room string, upTo int) {
+	s.exec("DELETE FROM messages WHERE trash_id = 0 AND room = ? AND seq <= ?", room, upTo)
+	s.exec("DELETE FROM logs WHERE trash_id = 0 AND room = ? AND seq <= ?", room, upTo)
+}
 
 func (s *sqliteStore) AppendMessage(m Message) {
 	s.exec("INSERT INTO messages(trash_id, room, seq, data) VALUES(0, ?, ?, ?)", m.Room, m.Seq, js(m))

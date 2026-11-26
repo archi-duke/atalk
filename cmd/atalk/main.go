@@ -687,7 +687,7 @@ func main() {
 		for _, m := range r.Members {
 			ms = append(ms, fmt.Sprintf("%s(%s, %s)", m.Name, m.Role, m.State))
 		}
-		out(r, fmt.Sprintf("%s  %q\n목적: %s\n방장: %s\n멤버: %s\n메시지: %d / 한도 %d",
+		out(r, fmt.Sprintf("%s  %q\n목적: %s\n방장: %s\n멤버: %s\n메시지: %d번까지 / 보관 %d개 (넘으면 오래된 것부터 지움)",
 			r.RoomID, r.Title, orText(r.Description, "(없음)"), owner, orText(strings.Join(ms, ", "), "(없음)"), r.LastSeq, r.Policy.MaxMessages))
 
 	case "create":
