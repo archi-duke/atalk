@@ -99,6 +99,9 @@ func (s *Server) runHeadless() {
 		if !v.Local || !v.Headless || v.Cwd == nil || !procs.SafeSession(v.SessionID) {
 			continue
 		}
+		if v.Pid != nil && core.DefaultIsAlive(*v.Pid) { // CLI 창이 떠 있으면 그 창이 받는다 (같은 세션이 두 곳에서 돌지 않게)
+			continue
+		}
 		var c *client.Client
 		if rc := client.LoadConn(v.ID); rc != nil {
 			c = s.relayClients.get(rc)

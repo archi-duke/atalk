@@ -658,6 +658,9 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 			card.Capabilities = []string{}
 		}
 		switch { // 창 없이 도는 세션(헤드리스)은 PID 없이. 창(프로세스)이 다시 등록하면 헤드리스가 아님
+		case in.Headless && !card.Headless && card.Pid != nil && c.isAlive(*card.Pid):
+			// CLI 창이 떠 있음 ([보이기]로 연 창) → 헤드리스 턴이 등록해도 숨김으로 되돌리지 않는다 (메시지는 그 창으로)
+			in.Provisional = false
 		case in.Headless:
 			card.Headless, card.Pid, card.Shared = true, nil, false
 			in.Provisional = false
