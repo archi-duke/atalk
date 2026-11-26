@@ -97,6 +97,17 @@ func (s *Server) approvalRoutes(h func(string, handler)) {
 			}
 		}
 	})
+	// atalk ask: 에이전트가 사람에게 판단을 묻는다 (질문 카드, 답이 올 때까지)
+	h("POST /agents/{id}/ask", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Question string   `json:"question"`
+			Options  []string `json:"options"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		return map[string]any{}, c.Ask(r.PathValue("id"), b.Question, b.Options)
+	})
 	// 사람의 답 (웹 카드의 [허용]/[거부] 또는 선택지)
 	h("POST /agents/{id}/approval", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
@@ -110,6 +121,13 @@ func (s *Server) approvalRoutes(h func(string, handler)) {
 		ch, ok := s.approvals.m[r.PathValue("id")]
 		s.approvals.mu.Unlock()
 		if !ok {
+			if c.Asking(r.PathValue("id")) { // atalk ask 질문: 답을 사람 메시지로 보내 에이전트를 깨운다
+				ans := b.Answer
+				if ans == "" {
+					ans = map[bool]string{true: "허용", false: "거부"}[b.Allow]
+				}
+				return map[string]any{}, c.AnswerAsk(r.PathValue("id"), ans)
+			}
 			return nil, &core.Error{Status: 409, Code: "no_approval", Message: "기다리는 확인 요청이 없음 (이미 답했거나 CLI 에서 답함)"}
 		}
 		select {

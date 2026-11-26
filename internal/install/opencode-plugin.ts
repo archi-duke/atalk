@@ -122,6 +122,11 @@ export const AtalkPlugin: Plugin = async ({ client, directory }) => {
       // 임시 등록: 사람이 이 세션에 입력하거나 방에 들어갈 때 확정되어 그때 이전 세션의 이름표·자리를 넘겨받는다.
       // (시작하자마자 만든 빈 세션이 이전 세션을 밀어내지 않게. 이전 세션이 다시 쓰이면 쓰지 않은 빈 세션 카드는 정리된다)
       const body: any = { kind: "opencode", session_id: sid, cwd: directory, pid: process.pid, provisional: true }
+      if (process.env.ATALK_HEADLESS === "1") { // 데몬이 창 없이 실행한 턴 (opencode run): 턴이 끝나면 프로세스가 없으므로 PID 없이
+        delete body.pid
+        body.headless = true
+        body.provisional = false
+      }
       if (process.env.ATALK_NAME) body.name = process.env.ATALK_NAME
       if (process.env.ATALK_DESCRIPTION) body.description = process.env.ATALK_DESCRIPTION
       if (process.env.ATALK_CAPABILITIES) body.capabilities = process.env.ATALK_CAPABILITIES.split(",").map((s) => s.trim()).filter(Boolean)

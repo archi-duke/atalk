@@ -1856,3 +1856,28 @@ func TestMessageLimitFIFO(t *testing.T) {
 		t.Fatal("한도")
 	}
 }
+
+// atalk ask: 질문 카드 → 일을 이어 가도 풀리지 않음 → 웹 답은 사람 메시지로 에이전트에게 (질문 카드에 대한 답장)
+func TestAskCard(t *testing.T) {
+	c := newEnv(t).core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "q", "", 0))
+	check(t, c.Ask(a, "몇 번 재시도?", []string{"3회", "5회"}))
+	v := ok(c.GetAgent(a))
+	if !c.Asking(a) || !v.Approval || v.NeedsInput != "몇 번 재시도? (3회 / 5회)" {
+		t.Fatalf("질문 카드: %+v", v)
+	}
+	check(t, c.SetActivity(a, true))
+	if ok(c.GetAgent(a)).NeedsInput == "" {
+		t.Fatal("일을 이어 가도 질문은 남아야 함")
+	}
+	check(t, c.AnswerAsk(a, "5회"))
+	if c.Asking(a) || ok(c.GetAgent(a)).NeedsInput != "" {
+		t.Fatal("답하면 질문이 끝나야 함")
+	}
+	msgs := ok(c.ReadMessages("q", 0, 1000))
+	last := msgs[len(msgs)-1]
+	if last.Body != "답: 5회" || last.Human == "" || last.ReplyTo == nil || len(last.To) != 1 || last.To[0] != a {
+		t.Fatalf("답 메시지: %+v", last)
+	}
+}
