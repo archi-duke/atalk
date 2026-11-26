@@ -675,6 +675,8 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 			in.Provisional = false
 		case in.Pid != nil && *in.Pid > 0 && card.Headless:
 			card.Headless, card.Pid, card.Shared = false, in.Pid, in.Shared
+		case in.Window && card.Headless: // 다른 PC 의 창이 다시 등록 (PID 는 오지 않음)
+			card.Headless = false
 		}
 		if err := c.applyHost(&card, in); err != nil {
 			return err

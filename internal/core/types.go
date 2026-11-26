@@ -298,6 +298,8 @@ type RegisterInput struct {
 	Ancestors []int `json:"ancestors,omitempty"`
 	// Headless: 데몬이 창 없이 실행한 턴에서 등록함 (ATALK_HEADLESS). PID 는 보내지 않는다
 	Headless bool `json:"headless,omitempty"`
+	// Window: 다른 PC 의 창(프로세스)이 등록함 — 원격 연결은 PID 를 보내지 않으므로, 헤드리스 표시를 풀 근거로 이것만 보낸다
+	Window bool `json:"window,omitempty"`
 }
 
 type RegisterResult struct {
