@@ -3084,3 +3084,31 @@ func (c *Atalk) NoteAskAnswer(agent, answer string) {
 	}
 	_, _ = c.Log(agent, room, seq, "done", "답: "+answer)
 }
+
+// HeadlessModes 는 헤드리스 턴에 쓸 수 있는 권한 모드 ("" 은 이어받기).
+var HeadlessModes = []string{"", "default", "acceptEdits", "bypassPermissions", "plan"}
+
+// SetHeadlessMode 는 이 PC 의 에이전트가 헤드리스로 돌 때 쓸 권한 모드를 정한다.
+func (c *Atalk) SetHeadlessMode(id, mode string) (v AgentView, err error) {
+	if !slices.Contains(HeadlessModes, mode) {
+		return v, bad("invalid_mode", "권한 모드는 default | acceptEdits | bypassPermissions | plan (비우면 이어받기)")
+	}
+	err = c.guard(func() error {
+		card, err := c.requireAgent(id)
+		if err != nil {
+			return err
+		}
+		if !c.isLocal(card) {
+			return conflict("not_here", "이 PC 의 에이전트만 바꿀 수 있음")
+		}
+		card.HeadlessMode = mode
+		card.UpdatedAt = c.ts()
+		c.saveCard(card)
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "update"}})
+		return nil
+	})
+	if err == nil {
+		v, err = c.GetAgent(id)
+	}
+	return
+}

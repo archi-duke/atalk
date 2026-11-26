@@ -1803,3 +1803,19 @@ func TestSpawnedCardRetention(t *testing.T) {
 	_, err = c.GetAgent(k2.ID)
 	nok(t, err, k2.ID) // 보관하지 않음: 꺼지는 대로
 }
+
+// 헤드리스 권한 모드: 정해진 값만, 비우면 이어받기
+func TestHeadlessMode(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	e.alive[100] = true
+	id := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "hm", Cwd: s("D:/h"), Pid: i(100)})).Agent.ID
+	if v := ok(c.SetHeadlessMode(id, "acceptEdits")); v.HeadlessMode != "acceptEdits" {
+		t.Fatalf("모드: %+v", v)
+	}
+	_, err := c.SetHeadlessMode(id, "yolo")
+	nok(t, err, "권한 모드")
+	if v := ok(c.SetHeadlessMode(id, "")); v.HeadlessMode != "" {
+		t.Fatal("비우면 이어받기")
+	}
+}
