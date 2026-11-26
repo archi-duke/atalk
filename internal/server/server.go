@@ -371,6 +371,7 @@ func (s *Server) routes() http.Handler {
 		return map[string]any{}, c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs)
 	})
 	h("POST /agents/{id}/headless", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.setHeadless(r) })
+	h("POST /agents/{id}/stop", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.stopHeadless(r) }) // 도는 숨김 턴 중단
 	// 헤드리스 턴의 권한 모드 {mode}: "" 이어받기 | default | acceptEdits | bypassPermissions | plan
 	h("POST /agents/{id}/headless-mode", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
