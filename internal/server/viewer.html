@@ -648,6 +648,7 @@ async function setHeadless(id, on, btn) {
   try {
     const r = await fetch("/agents/" + encodeURIComponent(id) + "/headless", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).then((x) => x.json());
     if (!r.ok) alert(r.error?.message || "바꾸지 못함");
+    else if (r.queued) alert("'" + nameOf(id) + "' 이(가) 지금 일하는 중입니다. 이번 턴이 끝나면 CLI 창으로 엽니다.");
   } catch (e) { alert(String(e)); }
   if (btn) btn.disabled = false;
   loadSide();
