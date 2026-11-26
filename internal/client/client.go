@@ -242,6 +242,11 @@ func (c *Client) Activity(id string, busy bool) error {
 	return c.call("POST", "/agents/"+esc(id)+"/activity", map[string]any{"busy": busy}, nil, 0)
 }
 
+// Doing 은 지금 하는 일 한 줄을 알린다 (작업 중으로도 표시).
+func (c *Client) Doing(id, text string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/activity", map[string]any{"busy": true, "doing": text}, nil, 0)
+}
+
 // Activate 는 임시 세션을 확정한다 (사람이 처음 입력함).
 func (c *Client) Activate(id string) error {
 	return c.call("POST", "/agents/"+esc(id)+"/activate", map[string]any{}, nil, 0)

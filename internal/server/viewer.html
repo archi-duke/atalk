@@ -243,6 +243,11 @@
   .bubble { background:var(--bubble); padding:8px 11px; border-radius:4px 14px 14px 14px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; min-width:0; }
   .m.mine .bubble { background:var(--mine); color:var(--mine-fg); border-radius:14px 4px 14px 14px; }
   .m:not(.first) .bubble { border-radius:14px; }
+  /* 작업 메모: send 로 답한 턴에서 에이전트가 작업 중간에 쓴 문장 (CLI 의 흰색 ●). 세 줄까지만, 누르면 펼침 */
+  .bubble.note { background:transparent; border:1px dashed #9aa0a8; color:var(--muted); font-size:12.5px; cursor:pointer; }
+  .bubble.note .md { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .bubble.note.open .md { display:block; }
+  .bubble.note .note-t { display:block; font-size:10.5px; margin-bottom:2px; }
   .bubble code { font:12.5px ui-monospace,Consolas,monospace; background:var(--quote); padding:0 4px; border-radius:4px; }
   /* 마크다운 본문 */
   .md { white-space:normal; }
@@ -301,6 +306,19 @@
   @media (min-width: 761px) { .presence { display:none !important; } }
   .presence { display:flex; flex-wrap:wrap; gap:4px 12px; padding:5px 14px; font-size:11.5px; color:var(--muted); background:var(--chat); border-top:1px solid var(--line); }
   .presence:empty { display:none; }
+  /* 작업 중 줄: 대화창 아래, 일하는 에이전트마다 지난 시간과 지금 하는 일 (보낸 말이 아직 전달 전이면 전달 대기) */
+  .typing { display:flex; flex-direction:column; gap:3px; padding:5px 14px; font-size:12px; color:var(--muted); background:var(--chat); border-top:1px solid var(--line); }
+  .typing:empty { display:none; }
+  .typing .t { display:flex; align-items:center; gap:6px; min-width:0; }
+  .typing .t b { color:var(--fg); font-weight:600; white-space:nowrap; }
+  .typing .t .el { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .typing .t .what { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; color:var(--fg); opacity:.8; }
+  .typing .t.wait .what { opacity:.6; }
+  .typing .t.stall .el { color:var(--fail); }
+  .typing .dots { display:inline-flex; gap:2px; flex:none; }
+  .typing .dots i { width:4px; height:4px; border-radius:50%; background:var(--task); animation:pulse 1.2s ease-in-out infinite; }
+  .typing .dots i:nth-child(2) { animation-delay:.2s; } .typing .dots i:nth-child(3) { animation-delay:.4s; }
+  .typing .t.wait .dots i { background:#9aa0a8; }
   .presence .p { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
   .presence .p b { font-weight:600; color:var(--fg); }
   .pd { width:7px; height:7px; border-radius:50%; flex:none; }
@@ -371,6 +389,7 @@
     </div>
     <div class="members" id="members"></div>
     <div id="msgs"><div class="empty">왼쪽에서 대화방을 고르세요.</div></div>
+    <div class="typing" id="typing" aria-live="polite"></div>
     <div class="presence" id="presence"></div>
     <div class="targets" id="targets" hidden></div>
     <div class="replying" id="replying" hidden></div>
@@ -1024,7 +1043,15 @@ function scrollBottom(box, n = 0, tok = userScroll) {
 }
 let lastChat = { room: null, keys: [], htmls: [], bySeq: {} }; // 지난번에 그린 목록 (바뀐 항목만 다시 그리기)
 // 목록 안 클릭은 목록 하나에서 받는다 (항목을 바꿔 끼워도 다시 걸 필요 없음)
+const noteOpen = new Set(); // 펼친 작업 메모
 $("#msgs").addEventListener("click", (e) => {
+  const nt = e.target.closest(".bubble.note");
+  if (nt && !e.target.closest("a") && !String(getSelection())) {
+    const seq = Number(nt.dataset.note);
+    noteOpen.has(seq) ? noteOpen.delete(seq) : noteOpen.add(seq);
+    renderChat(false);
+    return;
+  }
   const qt = e.target.closest(".quote");
   if (qt) {
     const t = document.getElementById("s" + qt.dataset.seq);
@@ -1057,6 +1084,7 @@ function renderChat(scroll) {
   $("#members").innerHTML = room.members.map((m) => '<span data-agent="' + esc(m.agent) + '" title="' + FOCUS_HINT + '"><span class="dot st-' + m.state + '"></span>' + esc(m.name) + (m.role === "owner" ? " (방장)" : "") + "</span>").join("");
   renderCompose(room);
   renderPresence(room, chat.logs || []);
+  renderTyping();
   if (DATA) $("#menuWrap").style.display = "none";
   else $("#export").href = "/rooms/" + encodeURIComponent(room.room_id) + "/export?download=1";
 
@@ -1067,6 +1095,8 @@ function renderChat(scroll) {
   $("#view").innerHTML = opts.map(([v, t]) => '<option value="' + esc(v) + '"' + (v === viewer ? " selected" : "") + ">" + esc(t) + "</option>").join("");
 
   const bySeq = Object.fromEntries(msgs.map((m) => [m.seq, m]));
+  // send 로 답한 메시지 (보낸 이|답한 메시지) — 같은 메시지에 대한 그 에이전트의 CLI 기록은 작업 메모로 작게
+  const sentTo = new Set(msgs.filter((x) => !x.echo && !x.human && x.reply_to).map((x) => x.from + "|" + x.reply_to));
   const logs = {};
   for (const e of chat.logs || []) (logs[e.seq] ||= {})[e.agent] = e; // 에이전트별 마지막 상태
   const cursors = room.members.map((m) => [m.agent, m.cursor || 0]);
@@ -1095,7 +1125,9 @@ function renderChat(scroll) {
     } else if ((m.to || []).length) {
       inner += '<span class="chip status"><span class="to" style="margin:0">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span></span>";
     }
-    const q = m.reply_to ? bySeq[m.reply_to] : null;
+    const note = !!(m.echo && !m.human && m.reply_to && sentTo.has(m.from + "|" + m.reply_to));
+    const q = m.reply_to && !note ? bySeq[m.reply_to] : null;
+    if (note) inner += '<span class="note-t" title="에이전트가 작업 중간에 쓴 말 (CLI 기록). 누르면 펼치거나 접습니다">📝 작업 메모</span>';
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
     inner += m.type === "status" && m.body.startsWith(ASK_PREFIX) ? askCard(m, msgs) : '<div class="md">' + fmt(m.body) + "</div>";
 
@@ -1112,7 +1144,7 @@ function renderChat(scroll) {
     push("m" + m.seq, '<div class="m' + (mine ? " mine" : "") + (first ? " first" : "") + '" id="s' + m.seq + '" title="#' + m.seq + '">' +
       (first ? avatar(m) : '<div class="ava blank"></div>') + '<div class="col">' +
       (first && !mine ? '<div class="who" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + senderLabel(m) + "</div>" : "") +
-      '<div class="line"><div class="bubble">' + inner + "</div>" + meta + "</div>" +
+      '<div class="line"><div class="bubble' + (note ? " note" + (noteOpen.has(m.seq) ? " open" : "") : "") + (note ? '" data-note="' + m.seq : "") + '">' + inner + "</div>" + meta + "</div>" +
       (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>");
   });
   const prev = lastChat.room === room.room_id && box.children.length === lastChat.keys.length ? lastChat : null;
@@ -1390,6 +1422,58 @@ function renderPresence(room, logs) {
   $("#presence").innerHTML = DATA ? "" : rows.map((r) =>
     '<span class="p' + (r.cls === "off" ? " off-txt" : "") + '" title="' + esc(r.text + " — " + r.title) + '"><span class="pd ' + r.cls + '"></span><b>' + esc(r.m.name) + "</b>" + owner(r.m) + "</span>").join("");
 }
+
+// 작업 중 줄: 방 멤버 중 일하는 에이전트 (지난 시간 · 지금 하는 일), 그리고 사람이 보낸 말이 아직 전달 전인 에이전트 (전달 대기).
+// 지금 하는 일은 훅이 도구를 쓰기 직전에 알린다 ("doing" 이벤트 — 목록 전체를 다시 읽지 않고 이 줄만 고친다).
+const STALL_SEC = 180; // 이만큼 지나도록 하는 일이 그대로면 시간을 붉게
+const doingAt = {}; // 에이전트 → 지금 하는 일이 마지막으로 바뀐 시각 (이 화면 기준)
+function noteDoing(id, text) {
+  if (!agents[id]) return;
+  if (agents[id].doing !== text) doingAt[id] = Date.now();
+  agents[id].doing = text;
+  agents[id].busy = true;
+  renderTyping();
+}
+function renderTyping() {
+  const el = $("#typing");
+  if (!el) return;
+  if (DATA || !chat || chat.room.closed_at) { el.innerHTML = ""; return; }
+  const room = chat.room, msgs = chat.messages || [];
+  const dots = '<span class="dots"><i></i><i></i><i></i></span>';
+  const rows = [];
+  for (const m of room.members) {
+    if (m.state === "away") continue;
+    const a = agents[m.agent];
+    if (a?.busy && !a.needs_input) {
+      if (a.doing && !doingAt[m.agent]) doingAt[m.agent] = Date.now();
+      const since = Date.parse(a.busy_since || "") || 0;
+      rows.push('<div class="t" data-agent="' + esc(m.agent) + '"' + (since ? ' data-since="' + since + '"' : "") + ">" + dots + "<b>" + esc(m.name) + '</b><span class="el"></span>' +
+        (a.doing ? '<span class="what" title="' + esc(a.doing) + '">' + esc(a.doing) + "</span>" : "") + "</div>");
+      continue;
+    }
+    // 사람이 이 에이전트에게 보낸 말을 아직 받지 않음 (깨어나는 중이거나 알림이 꺼져 있음)
+    const pend = msgs.filter((x) => x.human && x.seq > (m.cursor || 0) && (x.to || []).includes(m.agent) && Date.now() - Date.parse(x.ts) < 30 * 60000);
+    if (pend.length && !a?.needs_input) {
+      const t = Date.parse(pend[0].ts) || 0;
+      rows.push('<div class="t wait"' + (t ? ' data-since="' + t + '"' : "") + ">" + dots + "<b>" + esc(m.name) + '</b><span class="el"></span><span class="what">' +
+        (deaf(a) ? "전달 대기 — 알림이 꺼져 있음 (🔕)" : "전달 대기 중") + "</span></div>");
+    }
+  }
+  const html = rows.join("");
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  tickTyping();
+}
+function tickTyping() {
+  const now = Date.now();
+  for (const r of document.querySelectorAll("#typing .t[data-since]")) {
+    const sec = Math.max(0, Math.floor((now - Number(r.dataset.since)) / 1000));
+    const h = Math.floor(sec / 3600), mm = Math.floor(sec / 60) % 60, ss = String(sec % 60).padStart(2, "0");
+    r.querySelector(".el").textContent = (h ? h + ":" + String(mm).padStart(2, "0") : mm) + ":" + ss;
+    const at = doingAt[r.dataset.agent];
+    r.classList.toggle("stall", !!at && now - at > STALL_SEC * 1000);
+  }
+}
+setInterval(tickTyping, 1000);
 
 // ───────── 입력 (사람 메시지) ─────────
 // 웹에서 쓴 말은 "별칭@방장" 사람 메시지로 보낸다 (방장이 없으면 방에 있는 첫 멤버를 통해).
@@ -1800,6 +1884,7 @@ if (DATA) {
   const es = new EventSource("/events");
   ["message", "invite", "request", "membership", "log", "agent", "room", "config"].forEach((e) => es.addEventListener(e, refresh));
   es.addEventListener("config", () => loadAlias());
+  es.addEventListener("doing", (e) => { try { const d = JSON.parse(e.data); noteDoing(d.agent, d.doing); } catch {} });
   es.addEventListener("message", (e) => { try { onNewMessage(JSON.parse(e.data)); } catch {} });
   loadAlias();
   loadSide();

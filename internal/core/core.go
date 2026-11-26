@@ -56,6 +56,8 @@ type Atalk struct {
 	isAlive   func(int) bool
 	machineID string
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
+	busyFrom  map[string]time.Time // 이번 작업을 시작한 시각 (화면의 "작업 중 0:42")
+	doing     map[string]string    // 지금 하는 일 한 줄 ("Bash: go test ./..."), 훅이 도구를 쓰기 직전에 알림
 	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
 	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
 	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
@@ -483,6 +485,12 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Capabilities = slices.Clone(card.Capabilities)
 	v.Local = c.isLocal(card)
 	v.Busy = c.isBusy(card.ID)
+	if v.Busy {
+		v.Doing = c.doing[card.ID]
+		if t, ok := c.busyFrom[card.ID]; ok {
+			v.BusySince = t.UTC().Format(time.RFC3339)
+		}
+	}
 	v.Listening = c.isListening(card.ID)
 	v.NeedsInput = c.needInput[card.ID]
 	v.Approval = c.approvals[card.ID]
@@ -1843,6 +1851,20 @@ func (c *Atalk) isBusy(agent string) bool {
 // SetActivity 는 에이전트가 일을 시작했는지(busy)·끝냈는지 기록한다. 훅(Claude: 입력·도구·응답 끝)과 플러그인(opencode: 세션 상태)이 부른다.
 // 방 메시지를 처리하는 일이든 CLI 에서 사람이 시킨 일이든 "작업 중" 으로 보인다.
 func (c *Atalk) SetActivity(agent string, busy bool) error {
+	return c.setActivity(agent, busy, nil)
+}
+
+// SetDoing 은 지금 하는 일 한 줄을 알린다 (작업 중으로도 표시). 도구를 쓰기 직전(훅)·메시지를 넘겨받았을 때 부른다.
+// 자주 불리므로 화면에는 가벼운 "doing" 이벤트만 보낸다 (목록 전체를 다시 읽지 않게).
+func (c *Atalk) SetDoing(agent, text string) error {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\n", " "))
+	if r := []rune(text); len(r) > 120 {
+		text = string(r[:120]) + "…"
+	}
+	return c.setActivity(agent, true, &text)
+}
+
+func (c *Atalk) setActivity(agent string, busy bool, doing *string) error {
 	return c.guard(func() error {
 		if _, err := c.requireAgent(agent); err != nil {
 			return err
@@ -1850,6 +1872,23 @@ func (c *Atalk) SetActivity(agent string, busy bool) error {
 		was := c.isBusy(agent)
 		if c.busy == nil {
 			c.busy = map[string]time.Time{}
+		}
+		if c.busyFrom == nil {
+			c.busyFrom, c.doing = map[string]time.Time{}, map[string]string{}
+		}
+		if busy && !was {
+			c.busyFrom[agent] = c.now()
+			delete(c.doing, agent)
+		}
+		if !busy {
+			delete(c.busyFrom, agent)
+			delete(c.doing, agent)
+		}
+		if doing != nil && c.doing[agent] != *doing {
+			c.doing[agent] = *doing
+			if was { // 막 시작했으면 아래 activity 이벤트가 목록을 다시 읽게 한다
+				c.emit(Event{Type: "doing", Data: map[string]any{"agent": agent, "doing": *doing}})
+			}
 		}
 		if _, ok := c.needInput[agent]; ok && !c.asking[agent] { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침). atalk ask 질문은 답이 올 때까지 둔다
 			delete(c.needInput, agent)
@@ -2526,6 +2565,8 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 // EchoWake 는 사람 입력 없이 ATalk 알림으로 깨어난 턴의 응답 문장(CLI 의 흰색 ●)을 그 알림 메시지의 답으로 기록한다 (알림 없음).
 // wake 는 그 알림에 담긴 메시지 번호들 — 이 에이전트에게 온 것 중 가장 마지막 메시지에 붙인다.
 // 받은 메시지를 옮겨 적은 "📨" 줄은 빼고, 에이전트가 이미 send 로 그 메시지에 답한 글과 같은 문장은 다시 남기지 않는다.
+// send 로 답한 턴이라도 작업 중간에 쓴 문장(중간 보고)은 남긴다 — 처음(수신 확인)과 마지막(결과)만 보이고 중간이 빠지던 문제.
+// 다만 턴이 끝날 때 마지막 send 뒤에 쓴 맺음말은 남기지 않는다.
 // CLI 입력 큐(EchoQueue)는 건드리지 않는다.
 func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (out []Message, err error) {
 	err = c.guard(func() error {
@@ -2567,20 +2608,26 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 			texts = texts[len(texts)-1:]
 		}
 		have := map[string]bool{}
+		var sent []string // 이 메시지에 send 로 답한 글
+		lastSend := false // 이 메시지에 대한 내 마지막 글이 send (그 뒤로 남긴 기록 없음)
 		for _, x := range c.st.Messages(m.Room, target, 0) {
 			if x.From == agent && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == target {
+				lastSend = !x.Echo
 				if !x.Echo {
-					// 이미 send 로 이 메시지에 답했음 → 그 뒤 CLI 응답(보통 같은 내용을 다르게 쓴 것)은 남기지 않는다 (답이 두 번 보이지 않게)
-					return nil
+					sent = append(sent, squash(x.Body))
+					continue
 				}
 				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록
 			}
+		}
+		if final && lastSend {
+			return nil // 마지막 send 뒤의 맺음말 (보통 send 를 다르게 쓴 것 — 답이 두 번 보이지 않게)
 		}
 		for _, text := range texts {
 			if r := []rune(text); len(r) > EchoMax {
 				text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
 			}
-			if have[text] {
+			if have[text] || sameAsSent(text, sent) {
 				continue
 			}
 			s := target
@@ -2590,6 +2637,20 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 		return nil
 	})
 	return
+}
+
+// squash: 비교용 — 공백을 모두 뺀다.
+func squash(s string) string { return strings.Join(strings.Fields(s), "") }
+
+// sameAsSent: send 로 보낸 글과 사실상 같은 문장 (한쪽이 다른 쪽을 품음).
+func sameAsSent(text string, sent []string) bool {
+	t := squash(text)
+	for _, s := range sent {
+		if t != "" && s != "" && (strings.Contains(s, t) || strings.Contains(t, s)) {
+			return true
+		}
+	}
+	return false
 }
 
 // lateInput: 이 턴의 입력이 방에 들어오기 전에 들어와 기록되지 않았나 — 방에 들어온 뒤 이 에이전트의 CLI 입력 기록이 하나도 없을 때만.

@@ -368,7 +368,11 @@ func (s *Server) routes() http.Handler {
 		if err := readBody(r, &b); err != nil {
 			return nil, err
 		}
-		return map[string]any{}, c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs)
+		if err := c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs); err != nil {
+			return nil, err
+		}
+		_ = c.SetDoing(r.PathValue("id"), "메시지 확인 중") // 받자마자 작업 중으로 (첫 도구를 쓰기 전까지 아무 표시가 없지 않게)
+		return map[string]any{}, nil
 	})
 	h("POST /agents/{id}/headless", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.setHeadless(r) })
 	h("POST /agents/{id}/stop", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.stopHeadless(r) }) // 도는 숨김 턴 중단
@@ -393,10 +397,14 @@ func (s *Server) routes() http.Handler {
 	// 작업 중 표시: {busy} — 훅(Claude)·플러그인(opencode)이 일을 시작·끝낼 때
 	h("POST /agents/{id}/activity", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
-			Busy bool `json:"busy"`
+			Busy  bool   `json:"busy"`
+			Doing string `json:"doing"` // 지금 하는 일 한 줄 (있으면 작업 중)
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
+		}
+		if b.Doing != "" {
+			return map[string]any{}, c.SetDoing(r.PathValue("id"), b.Doing)
 		}
 		return map[string]any{}, c.SetActivity(r.PathValue("id"), b.Busy)
 	})

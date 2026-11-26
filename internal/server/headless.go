@@ -248,10 +248,10 @@ func (s *Server) runHeadless() {
 			if err != nil && !stopped {
 				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
 			}
-			if stopped { // 사람이 중단함: 끝 훅이 오지 않으므로 작업 중 표시를 여기서 푼다
+			if stopped {
 				log.Printf("헤드리스: %s 의 턴을 사람이 중단함", id)
-				_ = c.Activity(id, false)
 			}
+			_ = c.Activity(id, false) // 턴이 끝남 (중단했거나 실행이 바로 실패해 끝 훅이 오지 않은 경우에도 작업 중 표시가 남지 않게)
 			if open { // 턴이 도는 동안 [CLI로 열기]를 눌렀음
 				if err := s.openCLI(id, resume); err != nil {
 					log.Printf("헤드리스 → CLI 실패 (%s): %v", id, err)
