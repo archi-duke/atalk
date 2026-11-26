@@ -543,6 +543,25 @@ func main() {
 					}
 					cfg.OfflineTTLHours = &n
 				}
+			case "spawn-keep": // 에이전트가 띄운 세션 카드를 꺼진 뒤에도 보관 (on) / 꺼지는 대로 지움 (off)
+				if at.arg(1, "on | off") == "off" {
+					cfg.SpawnKeep = new(bool)
+				} else {
+					cfg.SpawnKeep = nil
+				}
+			case "spawn-ttl":
+				switch v := at.arg(1, "시간 | off | default"); v {
+				case "off", "never", "0":
+					cfg.SpawnTTLHours = new(int)
+				case "default":
+					cfg.SpawnTTLHours = nil
+				default:
+					n, err := strconv.Atoi(v)
+					if err != nil || n < 0 {
+						fail("bad_arg", "spawn-ttl 은 시간(숫자), off(지우지 않음), default(24시간)")
+					}
+					cfg.SpawnTTLHours = &n
+				}
 			case "grace":
 				switch v := at.arg(1, "분 | off | default"); v {
 				case "off", "never", "0":
@@ -557,7 +576,7 @@ func main() {
 					cfg.AwayGraceMin = &n
 				}
 			default:
-				fail("bad_arg", "atalk config [user 별칭 | machine PC이름 | echo-final on|off | grace 분|off|default | offline 시간|off|default]")
+				fail("bad_arg", "atalk config [user 별칭 | machine PC이름 | echo-final on|off | grace 분|off|default | offline 시간|off|default | spawn-keep on|off | spawn-ttl 시간|off|default]")
 			}
 			cfg, err = c.SetConfig(cfg)
 			check(err)
@@ -570,7 +589,13 @@ func main() {
 		if h := cfg.OfflineTTLHours; h != nil {
 			ttl = map[bool]string{true: "지우지 않음", false: strconv.Itoa(*h) + "시간"}[*h == 0]
 		}
-		out(cfg, "이 PC 이름: "+orText(cfg.MachineName, core.DefaultMachineName(paths.MachineID())+" (기본)")+"\n사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace+"\n오프라인 네임카드 자동 삭제: "+ttl)
+		spawn := "보관 24시간 (기본)"
+		if cfg.SpawnKeep != nil && !*cfg.SpawnKeep {
+			spawn = "보관하지 않음 (꺼지는 대로 삭제)"
+		} else if h := cfg.SpawnTTLHours; h != nil {
+			spawn = map[bool]string{true: "보관 (지우지 않음)", false: "보관 " + strconv.Itoa(*h) + "시간"}[*h == 0]
+		}
+		out(cfg, "이 PC 이름: "+orText(cfg.MachineName, core.DefaultMachineName(paths.MachineID())+" (기본)")+"\n사용자 별칭 기본값: "+orText(cfg.User, "(없음 → \"사용자\")")+"\n자리 비움 후 자동 퇴장: "+grace+"\n오프라인 네임카드 자동 삭제: "+ttl+"\n띄운 세션 카드: "+spawn)
 
 	case "export":
 		room := at.arg(0, "ROOM")

@@ -137,6 +137,10 @@ type Config struct {
 	AwayGraceMin *int `json:"away_grace_min,omitempty"`
 	// OfflineTTLHours 는 offline 카드를 자동 삭제할 때까지의 시간. 0 이면 지우지 않음. 없으면 24.
 	OfflineTTLHours *int `json:"offline_ttl_hours,omitempty"`
+	// SpawnKeep 이 false 면 다른 에이전트가 띄운 세션(SpawnedBy)의 카드는 꺼지는 대로 지운다. 없으면 보관.
+	SpawnKeep *bool `json:"spawn_keep,omitempty"`
+	// SpawnTTLHours 는 띄운 세션의 카드를 꺼진 뒤 보관하는 시간 (보관하면 그동안 깨우기로 그 세션을 다시 열 수 있음). 0 이면 지우지 않음. 없으면 24.
+	SpawnTTLHours *int `json:"spawn_ttl_hours,omitempty"`
 	// DefaultMaxMessages 는 새 방의 메시지 한도. 없으면 1000.
 	DefaultMaxMessages *int `json:"default_max_messages,omitempty"`
 	// TrashRetentionDays 는 삭제한 방(trash/)을 보관하는 날 수. 0 이면 자동으로 비우지 않음. 없으면 30.
