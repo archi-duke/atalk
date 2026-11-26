@@ -210,6 +210,8 @@
   .sys { text-align:center; margin:6px 0; }
 
   .m { display:flex; gap:8px; margin-top:2px; align-items:flex-start; }
+  /* 화면 밖 메시지는 배치·그리기를 건너뛴다 (메시지 수백 개 — 입력할 때마다 전체를 다시 배치하면 느림) */
+  #msgs > .m, #msgs > .sys, #msgs > .day { content-visibility:auto; contain-intrinsic-size:auto 44px; }
   .m.first { margin-top:10px; }
   .m.mine { flex-direction:row-reverse; }
   .ava { width:38px; height:38px; border-radius:14px; display:grid; place-items:center; color:#fff; font-weight:700; font-size:15px; flex:none; }
@@ -302,7 +304,7 @@
   .targets a { color:var(--accent); font-weight:600; }
   .targets button.on { border-color:var(--accent); color:var(--accent); font-weight:600; }
   .compose { border-top:0; }
-  .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; min-height:38px; max-height:160px; outline:none; }
+  .compose textarea { flex:1; min-width:0; resize:none; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:10px; padding:8px 10px; font:inherit; line-height:1.4; min-height:38px; max-height:160px; outline:none; field-sizing:content; }
   .compose textarea:focus { border-color:var(--accent); }
   .compose button { border:0; border-radius:10px; padding:8px 14px; background:var(--mine); color:var(--mine-fg); font-weight:700; cursor:pointer; flex:none; }
   .compose button:disabled { opacity:.5; cursor:default; }
@@ -512,9 +514,13 @@ function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
 
 let pastNames = {}; // 지운 네임카드의 이름 (지난 대화 표시용)
 const nameOf = (id) => agents[id]?.name || pastNames[id] || id;
-function hhmm(ts) { const d = new Date(ts); return d.toLocaleTimeString("ko-KR", { hour: "numeric", minute: "2-digit" }); }
-function dayKey(ts) { const d = new Date(ts); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); }
-function dayLabel(ts) { return new Date(ts).toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" }); }
+// 날짜·시각 글자: toLocale…String 은 부를 때마다 형식 객체를 새로 만들어 느리다 (메시지 수백 개 × 이벤트마다) → 형식 객체 하나 + 결과 기억
+const TIME_FMT = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "2-digit" });
+const DAY_FMT = new Intl.DateTimeFormat("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+const tsMemo = (f) => { const c = new Map(); return (ts) => { let v = c.get(ts); if (v === undefined) { v = f(ts); if (c.size > 20000) c.clear(); c.set(ts, v); } return v; }; };
+const hhmm = tsMemo((ts) => TIME_FMT.format(new Date(ts)));
+const dayKey = tsMemo((ts) => { const d = new Date(ts); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); });
+const dayLabel = tsMemo((ts) => DAY_FMT.format(new Date(ts)));
 function shortWhen(ts) {
   if (!ts) return "";
   const d = new Date(ts), now = new Date();
@@ -806,6 +812,7 @@ document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
 // ───────── 대화창 ─────────
 let chat = null; // { room, messages, logs }
 // 방마다 입력 상태(받는 대상 @이름·쓰던 글·답장 대상)를 따로 기억한다 — 방을 바꾸면 그 방에서 하던 상태로 (이 브라우저에만)
+let lastLead = null, draftTimer = 0; // 입력창: 마지막으로 그린 @대상 부분, 쓰던 글 저장 타이머
 let drafts = (() => { try { return JSON.parse(localGet("atalk.drafts") || "{}") || {}; } catch { return {}; } })();
 function saveDraft(room) {
   if (!room || DATA) return;
@@ -815,7 +822,7 @@ function saveDraft(room) {
 }
 function restoreDraft(room) {
   const d = drafts[room] || {};
-  ta.value = d.text || ""; replyTo = d.reply || null;
+  ta.value = d.text || ""; replyTo = d.reply || null; lastLead = null;
   grow(); renderReplying();
 }
 function openRoom(r) {
@@ -880,6 +887,14 @@ function askCard(m, msgs) {
   return '<div class="askcard' + (live ? " live" : "") + '"><div class="ah">🙋 ' + (live ? "사용자 확인 필요" : "확인 요청 (지나감)") + "</div>" + html +
     '<div class="af">' + (live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") +
     (canFocus ? '<button type="button" data-focus-agent="' + esc(m.from) + '">CLI 창 열기</button>' : "") + "</div></div>";
+}
+// 맨 아래로: 화면 밖 메시지(content-visibility)는 그려 봐야 높이가 정해지므로, 끝에 닿을 때까지 몇 프레임 더 내린다
+let userScroll = 0; // 사람이 직접 굴리면 따라 내리기를 멈춘다
+["wheel", "touchstart", "mousedown"].forEach((e) => $("#msgs").addEventListener(e, () => userScroll++, { passive: true }));
+function scrollBottom(box, n = 0, tok = userScroll) {
+  if (tok !== userScroll) return;
+  box.scrollTop = box.scrollHeight;
+  if (n < 30) requestAnimationFrame(() => scrollBottom(box, n + 1, tok)); // 30프레임(약 0.5초) 동안 높이가 바뀌면 따라 내린다
 }
 let lastChatHtml = "";
 function renderChat(scroll) {
@@ -960,7 +975,7 @@ function renderChat(scroll) {
   box.querySelectorAll(".rp").forEach((el) => (el.onclick = () => startReply(bySeq[el.dataset.reply])));
   box.querySelectorAll("[data-focus-agent]").forEach((el) => (el.onclick = () => focusAgent(el.dataset.focusAgent)));
   renderReplying();
-  if (scroll || atBottom) box.scrollTop = box.scrollHeight;
+  if (scroll || atBottom) scrollBottom(box);
 }
 // ───────── 방 만들기 / 제목 변경 / 삭제 ─────────
 const slug = (t) => t.trim().replace(/\s+/g, "-").replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 64);
@@ -1290,12 +1305,20 @@ async function loadAlias() {
 }
 const ta = $("#text");
 // 입력창 높이를 글에 맞춘다. 숨겨진 동안(방 전환 중 등)에는 scrollHeight 가 0 이라 재면 높이가 0 으로 굳으므로 재지 않는다
+const NATIVE_GROW = typeof CSS !== "undefined" && CSS.supports("field-sizing", "content"); // 브라우저가 글에 맞춰 높이를 정함 (화면 전체를 다시 재지 않음)
 const grow = () => {
+  if (NATIVE_GROW) return;
   if (!ta.offsetParent) { ta.style.height = ""; return; }
   ta.style.height = "auto";
   ta.style.height = Math.min(Math.max(ta.scrollHeight, 38), 160) + "px";
 };
-ta.addEventListener("input", () => { grow(); renderTargets(); saveDraft(selected); });
+// 받는 대상 줄은 앞의 @이름 부분이 바뀔 때만 다시 그린다. 쓰던 글 저장은 잠깐 멈췄을 때
+ta.addEventListener("input", () => {
+  grow();
+  const lead = (ta.value.match(/^(@\S+\s*)+/) || [""])[0];
+  if (lead !== lastLead) { lastLead = lead; renderTargets(); }
+  clearTimeout(draftTimer); const room = selected; draftTimer = setTimeout(() => { if (selected === room) saveDraft(room); }, 300); // 방을 옮길 때는 옮기기 전에 바로 저장됨
+});
 ta.addEventListener("keydown", (e) => {
   // 한글 입력 조합 중의 Enter 는 글자 확정이므로 보내지 않는다
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); $("#compose").requestSubmit(); }
