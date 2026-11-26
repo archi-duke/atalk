@@ -27,7 +27,7 @@ func LaunchTerminalEnv(cwd string, argv []string, env map[string]string) error {
 	}
 	line := "cd " + shQuote(cwd) + " && " + pre + strings.Join(q, " ")
 	if runtime.GOOS == "darwin" {
-		esc := strings.NewReplacer(`\`, `\`, `"`, `\"`).Replace(line)
+		esc := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(line)
 		return exec.Command("osascript", "-e", `tell application "Terminal" to do script "`+esc+`"`, "-e", `tell application "Terminal" to activate`).Start()
 	}
 	for _, t := range [][]string{{"x-terminal-emulator", "-e"}, {"gnome-terminal", "--"}, {"konsole", "-e"}, {"xterm", "-e"}} {
