@@ -5,3 +5,4 @@ node_modules/
 /atalk
 .atalk-data/
 *.exe~
+*.exe
