@@ -80,11 +80,13 @@ func turnEnded(path string) bool {
 		var e struct {
 			Type    string `json:"type"`
 			IsMeta  bool   `json:"isMeta"`
+			Compact bool   `json:"isCompactSummary"`         // 대화 요약 (턴이 아님)
+			Only    bool   `json:"isVisibleInTranscriptOnly"` // 기록에만 보이는 항목
 			Message struct {
 				Content json.RawMessage `json:"content"`
 			} `json:"message"`
 		}
-		if json.Unmarshal([]byte(lines[i]), &e) != nil || e.IsMeta || (e.Type != "user" && e.Type != "assistant") {
+		if json.Unmarshal([]byte(lines[i]), &e) != nil || e.IsMeta || e.Compact || e.Only || (e.Type != "user" && e.Type != "assistant") {
 			continue
 		}
 		c := string(e.Message.Content)
