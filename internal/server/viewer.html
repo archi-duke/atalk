@@ -457,10 +457,10 @@
             <label><input type="checkbox" id="sGraceOff"> 퇴장시키지 않음</label></div>
           <div class="f"><span>오프라인 네임카드 자동 삭제</span><input type="number" id="sTtl" min="1" placeholder="24"> 시간
             <label><input type="checkbox" id="sTtlOff"> 지우지 않음</label></div>
-          <div class="f"><span>에이전트가 띄운 세션 카드</span><label><input type="checkbox" id="sSpawnKeep"> 꺼진 뒤에도 보관 (깨우기로 그 세션을 다시 열 수 있음)</label></div>
-          <div class="f"><span>띄운 세션 카드 보관 기간</span><input type="number" id="sSpawnTtl" min="1" placeholder="24"> 시간
+          <div class="f"><span>하위 에이전트 카드</span><label><input type="checkbox" id="sSpawnKeep"> 꺼진 뒤에도 보관 (깨우기로 그 세션을 다시 열 수 있음)</label></div>
+          <div class="f"><span>하위 에이전트 카드 보관 기간</span><input type="number" id="sSpawnTtl" min="1" placeholder="24"> 시간
             <label><input type="checkbox" id="sSpawnTtlOff"> 지우지 않음</label></div>
-          <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간, 띄운 세션 카드 보관 24시간).</p>
+          <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간, 하위 에이전트 카드 보관 24시간).</p>
         </section>
       </div>
       <div class="pane" data-p="view" hidden>
@@ -796,7 +796,7 @@ function renderSide() {
       const ws = x.workspace ? '<span class="ws">📁 ' + esc(x.workspace) + "</span> · " : "";
       return '<div class="row' + (x.status === "offline" ? " offline" : "") + '" data-a="' + esc(x.id) + '" data-agent="' + esc(x.id) + '" title="' + FOCUS_HINT + '"><div class="ava' + imgCls(x.avatar) + '" style="background:' + (KIND_COLOR[x.kind] || "#8a9099") + '">' + icoInner(x.avatar, x.name) + '</div><div class="txt">' +
         '<div class="top"><span class="title">' + esc(x.name) + '</span><span class="when"><span class="dot st-' + (x.busy ? "busy" : x.status) + '"></span>' + (x.lobby ? '<span title="원격 대기실: 상대 화면의 확인 숫자와 같으면 초대하세요">대기실 🔑 ' + esc(x.lobby.confirm) + "</span>" : x.needs_input ? '<span class="ask-t" title="' + esc("사용자 확인 필요: " + x.needs_input + " (에이전트 창(CLI)에서 답하세요)") + '">🙋 확인 필요</span>' : x.shared ? '<span title="Codex 공유 백그라운드 서버에서 실행 중: 창을 찾을 수 없음 (codex --no-daemon 으로 열면 됨)">창 없음 · ' + esc(agentStatus(x).text) + "</span>" : (() => { const st = agentStatus(x); return '<span class="' + (st.cls === "off" ? "off-t" : "") + '" title="' + esc(st.title) + '">' + esc(st.text) + "</span>"; })()) + "</span></div>" +
-        '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.spawned_by ? " · <span title=\"이 에이전트가 띄운 협업 세션\">↳ " + esc(nameOf(x.spawned_by)) + " 가 띄움</span>" : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
+        '<div class="prev">' + ws + esc(x.kind) + (x.room ? " · " + esc(x.room) + (x.role === "owner" ? " (방장)" : "") : "") + (x.spawned_by ? " · <span title=\"하위 에이전트: 이 에이전트가 띄운 협업 세션\">↳ " + esc(nameOf(x.spawned_by)) + " 의 하위</span>" : "") + (x.description ? " · " + esc(x.description) : "") + (x.lobby?.ip ? " · 주소 " + esc(x.lobby.ip) : "") + (x.provisional ? " · <span title=\"새로 켠 세션. 사람이 입력하거나 방에 들어가면 확정됩니다\">아직 안 씀</span>" : "") + "</div></div>" +
         headlessButtons(x) +
         (canWake(x) ? '<button class="wake" data-wake="' + esc(x.id) + '" title="' + (x.status === "offline" || x.status === "away" ? "이 세션을 작업 폴더에서 새 터미널로 다시 열고(이전 세션 이어서) 창을 앞으로" : "이 에이전트의 CLI 창을 앞으로") + '">깨우기</button>' : "") +
         (x.status === "offline" ? '<button class="del" data-id="' + esc(x.id) + '" title="이 네임카드 삭제 (지난 대화의 이름은 유지)">삭제</button>' : "") + "</div>" +
@@ -808,7 +808,7 @@ function renderSide() {
         ? '<div class="pc-head"><span class="pc-ico">🖥</span>' + esc(g.host.name || "알 수 없는 PC") + (g.local ? ' <span class="here">이 PC</span>' : "") + (OS_KO[g.host.os] ? " · " + OS_KO[g.host.os] : "") + "</div>" : "") +
         nestSpawned(g.items).map(([x, d, n]) => {
           let h = row(x);
-          if (n) h = h.replace('<span class="title">' + esc(x.name) + "</span>", '<span class="title">' + esc(x.name) + '</span><button class="kids" data-kids="' + esc(x.id) + '" title="이 에이전트가 띄운 세션 ' + n + '개 ' + (spawnOpen.has(x.id) ? "접기" : "펼치기") + '">' + '<span class="tri">' + (spawnOpen.has(x.id) ? "▾" : "▸") + "</span>띄운 세션 " + n + "</button>");
+          if (n) h = h.replace('<span class="title">' + esc(x.name) + "</span>", '<span class="title">' + esc(x.name) + '</span><button class="kids" data-kids="' + esc(x.id) + '" title="하위 에이전트(이 에이전트가 띄운 세션) ' + n + '개 ' + (spawnOpen.has(x.id) ? "접기" : "펼치기") + '">' + '<span class="tri">' + (spawnOpen.has(x.id) ? "▾" : "▸") + "</span>하위 " + n + "</button>");
           return d ? h.replace('<div class="row', '<div style="--depth:' + d + '" class="child row') : h;
         }).join("")).join("") || '<div class="empty">등록된 에이전트 없음</div>');
     $("#list").querySelectorAll("[data-kids]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); toggleSpawned(b.dataset.kids); }));
@@ -875,7 +875,7 @@ function agentDetail(x) {
     kv("PC", esc(x.host?.name || "") + (x.local ? " (이 PC)" : "")) +
     kv("작업", x.workspace ? esc(x.workspace) : x.workspace === "" ? "(숨김)" : "") +
     kv("폴더", x.local && x.cwd ? "<code>" + esc(x.cwd) + '</code><button data-copy="' + esc(x.cwd) + '">복사</button>' : x.local ? "" : "(다른 PC — 표시 안 함)") +
-    kv("종류", esc(x.kind)) + kv("ID", "<code>" + esc(x.id) + "</code>") + kv("띄운 쪽", x.spawned_by ? esc(nameOf(x.spawned_by)) : "") +
+    kv("종류", esc(x.kind)) + kv("ID", "<code>" + esc(x.id) + "</code>") + kv("상위 에이전트", x.spawned_by ? esc(nameOf(x.spawned_by)) : "") +
     kv("사람", x.human ? esc(x.human) : "") + kv("능력", (x.capabilities || []).map(esc).join(", ")) +
     kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") + headlessDetail(x) +
     (DATA ? "" : '<div><b>아이콘</b><span><button data-icon-agent="' + esc(x.id) + '">아이콘 변경…</button></span></div>') + "</div>";
