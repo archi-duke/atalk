@@ -55,6 +55,8 @@ var sessionEnv = []string{
 	"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
 	"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_BRIDGE_SESSION_ID",
 	"CLAUDE_CODE_CHILD_NOTES_DIR", "CLAUDE_CODE_SESSION_ATTENDED",
+	// ATalk 가 한 턴·한 창에만 주는 표시: 데몬이 그 안에서 다시 시작되면 물려받아, 데몬이 여는 창마다 헤드리스 턴이나 띄운 창으로 잘못 알았다
+	"ATALK_HEADLESS", "ATALK_SPAWN", "ATALK_AGENT",
 }
 
 // ScrubSessionEnv 는 데몬이 시작할 때 물려받은 에이전트 세션 환경 변수를 지운다 (데몬이 여는 창·명령에 넘어가지 않게).
