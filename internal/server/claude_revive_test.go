@@ -54,7 +54,8 @@ func TestTurnEnded(t *testing.T) {
 	res := `{"type":"user","message":{"content":[{"type":"tool_result","content":"x"}]}}`
 	esc := `{"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user]"}]}}`
 	sys := `{"type":"system","subtype":"x"}`
-	if !w(user, say, sys) || w(user, tool) || w(user, tool, res) || w(user) || !w(user, tool, esc) {
+	sum := `{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"content":"This session is being continued"}}`
+	if !w(user, say, sys) || w(user, tool) || w(user, tool, res) || w(user) || !w(user, tool, esc) || !w(user, say, sum) {
 		t.Fatal("턴 끝 판단")
 	}
 }
