@@ -2,7 +2,7 @@ package server
 
 // Claude 되살리기 (에이전트 쪽 PC): Claude Code 는 메시지 대기 훅(asyncRewake)이 살아 있을 때만 밖에서 깨울 수 있다.
 // 대기 훅이 끝난 세션(🔕 — 12시간 제한이 지났거나 Esc 로 중단함)에 나에게 온 메시지가 오면,
-// 데몬이 그 창의 Claude 를 종료하고 새 터미널 창에서 같은 세션을 이어서 연다 (claude --resume <세션> "<메시지 알림>").
+// 데몬이 그 창을 닫고(Claude 와 그 셸) 새 터미널 창에서 같은 세션을 이어서 연다 (claude --resume <세션> "<메시지 알림>").
 // 쉬는 동안에는 아무것도 하지 않으므로 토큰을 쓰지 않는다. 사람이 그 창을 쓰는 중이면 안 되므로
 // 대기 훅 프로세스가 정말 없고, 대화 기록(transcript)이 reviveQuiet 동안 바뀌지 않았을 때만 한다.
 
@@ -186,9 +186,7 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 	}
 	text = "[ATalk] 메시지 대기가 끊겨 있어 데몬이 이 세션을 다시 열었습니다.\n" + strings.TrimPrefix(text, "[ATalk] ")
 	r.last[v.ID] = time.Now()
-	if p, err := os.FindProcess(*v.Pid); err == nil {
-		_ = p.Kill()
-	}
+	_ = procs.CloseAgentWindow(*v.Pid) // 예전 창은 닫는다 (Claude 만 끄면 빈 셸 창이 남음)
 	if err := procs.LaunchTerminal(*v.Cwd, []string{"claude", "--resume", v.SessionID, text}); err != nil {
 		return false, err
 	}
