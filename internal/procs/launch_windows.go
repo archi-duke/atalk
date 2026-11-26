@@ -18,6 +18,9 @@ func psScript(argv []string, env map[string]string) string {
 		q[i] = "'" + strings.ReplaceAll(a, "'", "''") + "'"
 	}
 	pre := ""
+	for _, k := range sessionEnv { // 창(wt)이 이미 이 변수들을 갖고 있을 수 있어 스크립트 안에서도 지운다
+		pre += "Remove-Item Env:" + k + " -ErrorAction SilentlyContinue\n"
+	}
 	for k, v := range env { // wt 는 데몬의 환경 변수를 넘겨주지 않으므로 스크립트 안에서 정한다
 		pre += "$env:" + k + " = '" + strings.ReplaceAll(v, "'", "''") + "'\n"
 	}
