@@ -89,6 +89,7 @@
   .askcard .aq { margin:4px 0 2px; }
   .askcard .ao { display:flex; flex-wrap:wrap; gap:5px; margin:4px 0; }
   .askcard .ao span { border:1px solid var(--line); border-radius:12px; padding:1px 9px; font-size:12px; background:var(--panel); }
+  .askcard .ao span.pick { background:#e8553b; border-color:#e8553b; color:#fff; font-weight:600; }
   .askcard pre { margin:4px 0; white-space:pre-wrap; word-break:break-all; font-size:12px; }
   .askcard .af { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); margin-top:4px; }
   .askcard .af button { border:1px solid var(--line); background:var(--panel); border-radius:8px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--fg); }
@@ -914,13 +915,14 @@ function askCard(m, msgs) {
   const lastAsk = [...msgs].reverse().find((x) => x.from === m.from && x.type === "status" && x.body.startsWith(ASK_PREFIX));
   const live = !!a?.needs_input && lastAsk?.seq === m.seq;
   let html = "", opts = null;
+  const picked = answerOf(m).replace(/ \((웹|CLI[^)]*)\)$/, ""); // 고른 답 (지나간 카드에서 그 선택지를 칠함)
   const perm = body.match(/^(\S+) 실행 허가(?:: ([\s\S]*))?$/);
   if (perm) {
     html += '<div class="aq"><b>' + esc(perm[1]) + "</b> 실행을 허가할까요?</div>" + (perm[2] ? "<pre>" + esc(perm[2]) + "</pre>" : "");
   } else {
     for (const line of body.split("\n")) {
       const q = line.match(/^([\s\S]*?) \(([^()]*)\)$/);
-      if (q && q[2].includes(" / ")) { html += '<div class="aq">' + esc(q[1]) + '</div><div class="ao">' + q[2].split(" / ").map((o) => "<span>" + esc(o) + "</span>").join("") + "</div>"; opts = opts === null ? q[2].split(" / ") : false; }
+      if (q && q[2].includes(" / ")) { html += '<div class="aq">' + esc(q[1]) + '</div><div class="ao">' + q[2].split(" / ").map((o) => "<span" + (o === picked ? ' class="pick" title="고른 답"' : "") + ">" + esc(o) + "</span>").join("") + "</div>"; opts = opts === null ? q[2].split(" / ") : false; }
       else html += '<div class="aq">' + esc(line) + "</div>";
     }
   }
