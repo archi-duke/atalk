@@ -997,6 +997,12 @@ func TestEchoWake(t *testing.T) {
 	if r := ok(c.EchoWake("claude-code_m", []string{"테스트 3개가 실패합니다 — 경로 문제입니다.", "고쳤습니다."}, true, []int{q2.Seq})); len(r) != 1 || r[0].Body != "고쳤습니다." {
 		t.Fatalf("마지막 문장: %+v", r)
 	}
+	// 도구 훅에서 빠진 중간 메모가 턴 끝(마지막이 send)에만 잡힘: 맺음말만 빼고 중간 메모는 남긴다
+	q3 := ok(c.Post("opencode_o", "r", PostInput{Type: "task", Body: "다시 시험", To: []string{"claude-code_m"}}))
+	ok(c.Post("claude-code_m", "r", PostInput{Type: "result", Body: "시험 결과입니다.", ReplyTo: ptr(q3.Seq)}))
+	if r := ok(c.EchoWake("claude-code_m", []string{"긴 메모\n둘째 줄\n셋째 줄\n넷째 줄", "결과를 보냈습니다."}, true, []int{q3.Seq})); len(r) != 1 || r[0].Body != "긴 메모\n둘째 줄\n셋째 줄\n넷째 줄" {
+		t.Fatalf("늦게 잡힌 중간 메모: %+v", r)
+	}
 	// 내 사람이 웹에서 쓴 말(내 이름)에 대한 답도
 	h := ok(c.Post("claude-code_m", "r", PostInput{Body: "반영해봐", Human: true, To: []string{"claude-code_m"}}))
 	if r := ok(c.EchoWake("claude-code_m", []string{"반영했습니다."}, true, []int{h.Seq})); len(r) != 1 || *r[0].ReplyTo != h.Seq {
