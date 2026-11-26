@@ -46,7 +46,8 @@ func TestTurnEnded(t *testing.T) {
 			s += l + "\n"
 		}
 		_ = os.WriteFile(p, []byte(s), 0o644)
-		return turnEnded(p)
+		ok, _ := turnEnded(p)
+		return ok
 	}
 	user := `{"type":"user","message":{"content":"해줘"}}`
 	say := `{"type":"assistant","message":{"content":[{"type":"text","text":"끝"}]}}`
@@ -57,5 +58,8 @@ func TestTurnEnded(t *testing.T) {
 	sum := `{"type":"user","isCompactSummary":true,"isVisibleInTranscriptOnly":true,"message":{"content":"This session is being continued"}}`
 	if !w(user, say, sys) || w(user, tool) || w(user, tool, res) || w(user) || !w(user, tool, esc) || !w(user, say, sum) {
 		t.Fatal("턴 끝 판단")
+	}
+	if ok, at := turnEnded(func() string { w(`{"type":"assistant","timestamp":"2026-11-26T00:41:17.083Z","message":{"content":[{"type":"text","text":"끝"}]}}`, `{"type":"system","subtype":"away_summary","timestamp":"2026-11-26T00:44:19Z"}`); return p }()); !ok || at.Format("15:04:05") != "00:41:17" {
+		t.Fatalf("마지막 대화 시각: %v %v", ok, at)
 	}
 }
