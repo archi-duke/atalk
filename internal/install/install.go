@@ -193,6 +193,7 @@ var hookEvents = []struct {
 	{"UserPromptSubmit", "prompt", false, false, ""},
 	{"Notification", "notify", true, false, ""},                   // 사람의 확인이 필요함(도구 허가·질문) → 대화방에 알리고 "확인 필요" 표시
 	{"PreToolUse", "pre", true, false, ""},                        // 사용자에게 묻는 질문 → 대화방에 질문 내용
+	{"PreToolUse", "pre-send", false, false, "Bash|PowerShell"},   // atalk send 직전: 그 앞에 쓴 메모를 먼저 기록 (메모가 답보다 아래에 붙지 않게). send 가 아니면 바로 끝남
 	{"PermissionRequest", "permission-request", false, false, ""}, // 허가 창·선택 질문 → 대화방 카드에서 웹으로 답할 수 있게 (창과 함께 기다림)
 	{"PostToolUse", "tool", true, false, ""},                      // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
 }
