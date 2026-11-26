@@ -2375,7 +2375,7 @@ var systemTag = regexp.MustCompile(`^<([a-zA-Z][a-zA-Z0-9_-]*)(\s[^>]*)?>[\s\S]*
 // IsSystemPrompt 는 사람이 입력한 말이 아니라 에이전트 도구가 입력처럼 넣은 것인지 본다
 // (Claude Code 의 Monitor·백그라운드 작업 알림, 시스템 알림, 셸·명령 출력 등). 사람이 붙여 넣은 <pasted_content> 는 사람의 입력이다.
 func IsSystemPrompt(text string) bool {
-	t := strings.TrimSpace(text)
+	t := strings.TrimLeft(strings.TrimSpace(text), "\"'") // 명령줄 인자로 넘긴 지시가 따옴표째 들어오는 경우 (opencode run)
 	for _, p := range []string{"[ATalk", "<task-notification>", "<system-reminder>", "[SYSTEM NOTIFICATION", "<local-command-", "<command-name>", "<command-message>", "<bash-input>", "<bash-stdout>", "<bash-stderr>"} {
 		if strings.HasPrefix(t, p) {
 			return true

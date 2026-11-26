@@ -1044,6 +1044,7 @@ func TestIsSystemPrompt(t *testing.T) {
 		"[SYSTEM NOTIFICATION - NOT USER INPUT] ...",
 		"<bash-input>ls</bash-input>",
 		"<local-command-stdout>ok</local-command-stdout>",
+		"\"[ATalk] r 방에서 새 메시지가 왔습니다.\"", // opencode run 에 인자로 넘긴 지시 (따옴표째)
 		"<some-new-tag attr=\"1\">\nbody\n</some-new-tag>",
 	} {
 		if !IsSystemPrompt(s) {
