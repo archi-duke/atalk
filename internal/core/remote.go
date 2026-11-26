@@ -182,3 +182,44 @@ func (c *Atalk) RemoteConns() (out []RemoteConn, err error) {
 	})
 	return
 }
+
+// SpawnRemote 는 다른 PC 에서 원격으로 연결된 에이전트(by)가 그 PC 에서 띄운(atalk spawn) 세션을 이 데몬에 등록하고 토큰을 준다.
+// 새 세션은 띄운 에이전트와 같은 PC 로 기록되고, 띄운 에이전트로 표시되며(SpawnedBy), 띄운 에이전트가 있는 방에 바로 들어간다.
+func (c *Atalk) SpawnRemote(by string, in RegisterInput) (res RegisterResult, token string, err error) {
+	b, err := c.GetAgent(by)
+	if err != nil {
+		return res, "", err
+	}
+	if b.Local || b.Host == nil {
+		return res, "", conflict("not_remote", "원격으로 연결된 에이전트만 쓸 수 있음")
+	}
+	h := *b.Host
+	in.Host, in.Spawn, in.Ancestors, in.Cwd, in.Pid = &h, "", nil, nil, nil
+	if MakeAgentID(in.Kind, in.SessionID) == by {
+		return res, "", bad("invalid_session", "띄운 세션은 새 세션이어야 함")
+	}
+	if res, token, err = c.PairRemote(in); err != nil {
+		return res, "", err
+	}
+	id := res.Agent.ID
+	err = c.guard(func() error {
+		cur, err := c.requireAgent(id)
+		if err != nil {
+			return err
+		}
+		cur.SpawnedBy = by
+		cur.UpdatedAt = c.ts()
+		c.saveCard(cur)
+		if m, ok := c.memberships[by]; ok && m.State == StateInRoom {
+			if mm, ok := c.memberships[id]; !ok || mm.Room != m.Room {
+				c.joinInternal(id, m.Room, RoleMember, true)
+			}
+		}
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "update"}})
+		return nil
+	})
+	if err == nil {
+		res.Agent, _ = c.GetAgent(id)
+	}
+	return
+}

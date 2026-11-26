@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"atalk/internal/client"
 	"atalk/internal/core"
 	"atalk/internal/procs"
 )
@@ -65,7 +66,14 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 			return nil, err
 		}
 	}
-	prompt := spawnIntro(by.Name, by.ID, room) + in.Prompt
+	introRoom := room
+	// 띄우는 에이전트가 다른 PC 의 데몬에 원격으로 연결돼 있으면, 새 세션도 시작할 때 그 데몬에 연결되어(훅) 띄운 에이전트의 방에 들어간다
+	if rc := client.LoadConn(by.ID); rc != nil && in.Room != "-" {
+		if a, err := s.relayClients.get(rc).Agent(by.ID); err == nil && a.Room != nil {
+			introRoom, room = *a.Room, ""
+		}
+	}
+	prompt := spawnIntro(by.Name, by.ID, introRoom) + in.Prompt
 	argv, err := procs.SpawnCommand(in.Kind, prompt)
 	if err != nil {
 		return nil, &core.Error{Status: 409, Code: "spawn_unsupported", Message: err.Error()}
@@ -77,5 +85,5 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 	if err := procs.LaunchTerminalEnv(cwd, argv, map[string]string{"ATALK_SPAWN": token}); err != nil {
 		return nil, &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
 	}
-	return map[string]any{"launched": true, "kind": in.Kind, "cwd": cwd, "room": room}, nil
+	return map[string]any{"launched": true, "kind": in.Kind, "cwd": cwd, "room": introRoom}, nil
 }

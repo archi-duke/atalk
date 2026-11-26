@@ -253,3 +253,34 @@ func (c *Client) RevokeRemote(agent string) error {
 func (c *Client) DisconnectRemote() error {
 	return c.call("POST", "/remote/disconnect", map[string]any{}, nil, 0)
 }
+
+// SpawnRemote 는 원격에 연결된 에이전트(이 클라이언트의 토큰)가 이 PC 에서 띄운 세션(card)을 원격 데몬에 등록하고
+// 그 세션의 연결 정보를 저장한다. 원격 데몬은 그 세션을 띄운 에이전트의 방에 바로 넣는다.
+func (c *Client) SpawnRemote(card core.RegisterInput, cwd string) (*RemoteConn, core.AgentView, error) {
+	if c.Conn == nil {
+		return nil, core.AgentView{}, &Error{0, "not_remote", "원격 연결이 아님"}
+	}
+	rc := &RemoteConn{URL: c.Conn.URL, Fingerprint: c.Conn.Fingerprint, HostName: c.Conn.HostName, Host: c.Conn.Host, ConnectedAt: time.Now().UTC().Format(time.RFC3339)}
+	if cwd != "" {
+		rc.WorkspaceID = core.WorkspaceID(rc.Host.ID, rc.Host.OS, cwd)
+		w := core.WorkspaceLabel(cwd)
+		rc.Workspace = &w
+	}
+	if card.Workspace != nil {
+		rc.Workspace = card.Workspace
+	}
+	card.Cwd = &cwd
+	card = rc.RemoteCard(card)
+	var out struct {
+		Agent core.AgentView `json:"agent"`
+		Token string         `json:"token"`
+	}
+	if err := c.call("POST", "/remote/spawn", map[string]any{"card": card}, &out, 0); err != nil {
+		return nil, core.AgentView{}, err
+	}
+	rc.Agent, rc.Token = out.Agent.ID, out.Token
+	if err := SaveConn(rc); err != nil {
+		return nil, core.AgentView{}, err
+	}
+	return rc, out.Agent, nil
+}

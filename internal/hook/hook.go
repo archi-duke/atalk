@@ -213,6 +213,24 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 		return nil
 	}
 	a := r.Agent
+	// atalk spawn 으로 연 창인데 띄운 에이전트가 다른 PC 의 데몬에 원격으로 연결돼 있으면, 이 세션도 그 데몬에 연결한다
+	// (그 데몬이 띄운 에이전트의 방에 바로 넣는다). 이후 훅·명령은 연결 정보를 보고 그 데몬을 쓴다.
+	remoteNote := ""
+	if reg.Spawn != "" && a.SpawnedBy != "" && client.LoadConn(a.ID) == nil {
+		if brc := client.LoadConn(a.SpawnedBy); brc != nil {
+			card := core.RegisterInput{Kind: kind, SessionID: in.SessionID, Name: &a.Name, Description: &a.Description, Capabilities: &a.Capabilities, Workspace: a.Workspace}
+			if rrc, ra, err := client.NewRemote(brc).SpawnRemote(card, cwd); err == nil {
+				if a.Room != nil {
+					_ = c.Leave(a.ID, "다른 PC 의 대화방으로 연결")
+				}
+				c, a, r = client.NewRemote(rrc), ra, core.RegisterResult{Agent: ra}
+				remoteNote = fmt.Sprintf("- 띄운 에이전트와 같이 %s 의 ATalk 데몬에 원격으로 연결했습니다 (atalk 명령·알림은 그 데몬을 씀).", orDefault(rrc.HostName, "원격 PC"))
+				if ra.Room != nil {
+					remoteNote += fmt.Sprintf(" 지금 %s 방에 들어가 있습니다.", *ra.Room)
+				}
+			}
+		}
+	}
 	exe := "atalk"
 	if !install.InUserPath(install.PathDir()) {
 		exe = install.Exe()
@@ -224,6 +242,9 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	}
 	if kind != "claude-code" {
 		lines = append(lines, fmt.Sprintf("- atalk 명령에는 --as %s 를 붙이세요 (MCP 를 쓰면 atalk_attach(agent_id=%q)).", a.ID, a.ID))
+	}
+	if remoteNote != "" {
+		lines = append(lines, remoteNote)
 	}
 	// 새 세션은 이전 세션의 이름표만 이어받는다. 방에는 사용자가 들어가라고 할 때만 들어간다.
 	if reg.Shared {
