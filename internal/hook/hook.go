@@ -57,6 +57,9 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 	if json.Unmarshal(raw, &in) != nil || in.SessionID == "" || !core.IsValidKind(kind) {
 		return
 	}
+	if event == "pre-send" && !isSendCommand(in) { // 셸 도구마다 불리므로 atalk send 가 아니면 데몬에 묻지 않고 바로 끝낸다
+		return
+	}
 	c := client.ForAgent(core.MakeAgentID(kind, in.SessionID)) // 다른 PC 의 데몬에 연결된 세션이면 그쪽으로 (atalk connect)
 	if event == "session-start" || (event == "prompt" && strings.HasPrefix(strings.TrimSpace(in.Prompt), client.HumanPrefix)) {
 		_ = daemon.Ensure(c) // 데몬이 없으면 백그라운드로 띄운다
@@ -119,6 +122,11 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 				_ = c.NeedInput(id, text)
 			}
 		}
+	case "pre-send": // PreToolUse(셸, 동기): atalk send 직전 — 그 앞에 쓴 응답 문장을 먼저 기록해, 메모가 답보다 아래에 붙지 않게
+		texts, p, wake := turnInfo(in.TranscriptPath)
+		if len(texts) > 0 {
+			enqueue(c, id, client.EchoEvent{Reply: true, Texts: texts, Final: ptrBool(false), Prompt: p, Wake: wake})
+		}
 	case "tool": // PostToolUse (백그라운드): 지금까지 쓴 응답 문장(흰색 ●)을 실시간으로 기록 + 작업 중 신호 갱신. 도구 줄(녹색 ●)·출력은 남기지 않음
 		if healthy {
 			_ = c.Activity(id, true) // 일을 이어 감 → "확인 필요" 도 풀림 (허가했거나 답했음)
@@ -154,6 +162,20 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 }
 
 func ptrBool(b bool) *bool { return &b }
+
+// sendRe 는 셸 명령 안의 "atalk send" (atalk.exe·경로·따옴표, --as 옵션 허용).
+var sendRe = regexp.MustCompile(`atalk(?:\.exe)?["']?\s+(?:--as\s+\S+\s+)?send\b`)
+
+// isSendCommand: 이 도구 호출이 atalk send 를 실행하나 (Bash·PowerShell 의 command).
+func isSendCommand(in Input) bool {
+	var ti struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal(in.ToolInput, &ti) != nil {
+		return false
+	}
+	return sendRe.MatchString(ti.Command)
+}
 
 // echoTurnEnd 는 턴이 끝날 때(Stop) 이번 턴의 응답 문장 중 아직 기록 안 된 것을 남기고 그 입력을 닫는다 (기록할 입력이 없으면 데몬이 무시).
 // transcript 에 중간 문장이 빠지거나 늦게 저장되는 경우가 있어, 훅이 주는 마지막 응답은 항상 덧붙인다.
