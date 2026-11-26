@@ -986,6 +986,17 @@ func TestEchoWake(t *testing.T) {
 	if r := ok(c.EchoWake("claude-code_m", []string{"네, 맥은 최신 상태입니다. 방에도 답했습니다."}, true, []int{q.Seq})); len(r) != 0 {
 		t.Fatalf("send 뒤 CLI 답이 또 기록됨: %+v", r)
 	}
+	// 수신 확인을 send 로 보낸 뒤에도 작업 중간에 쓴 문장은 남긴다 (send 와 같은 문장은 빼고)
+	q2 := ok(c.Post("opencode_o", "r", PostInput{Type: "task", Body: "빌드 확인", To: []string{"claude-code_m"}}))
+	ok(c.Post("claude-code_m", "r", PostInput{Type: "chat", Body: "확인했습니다. 빌드를 보겠습니다.", ReplyTo: ptr(q2.Seq)}))
+	r = ok(c.EchoWake("claude-code_m", []string{"확인했습니다.  빌드를 보겠습니다.", "테스트 3개가 실패합니다 — 경로 문제입니다."}, false, []int{q2.Seq}))
+	if len(r) != 1 || r[0].Body != "테스트 3개가 실패합니다 — 경로 문제입니다." {
+		t.Fatalf("send 뒤 중간 보고: %+v", r)
+	}
+	// 중간 보고 뒤에 결과를 send 하지 않고 끝낸 턴: 마지막 문장도 남김
+	if r := ok(c.EchoWake("claude-code_m", []string{"테스트 3개가 실패합니다 — 경로 문제입니다.", "고쳤습니다."}, true, []int{q2.Seq})); len(r) != 1 || r[0].Body != "고쳤습니다." {
+		t.Fatalf("마지막 문장: %+v", r)
+	}
 	// 내 사람이 웹에서 쓴 말(내 이름)에 대한 답도
 	h := ok(c.Post("claude-code_m", "r", PostInput{Body: "반영해봐", Human: true, To: []string{"claude-code_m"}}))
 	if r := ok(c.EchoWake("claude-code_m", []string{"반영했습니다."}, true, []int{h.Seq})); len(r) != 1 || *r[0].ReplyTo != h.Seq {
