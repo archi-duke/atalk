@@ -43,3 +43,6 @@ func SpawnCommand(kind, prompt string) ([]string, error) {
 
 // CodexWakePrompt 는 깨우기로 다시 연 Codex 세션의 첫 입력. "[ATalk" 로 시작해 CLI 입력 기록에서 빠진다.
 const CodexWakePrompt = "[ATalk] 이 세션을 다시 열었습니다. 대화방 알림이 오면 처리하고, 없으면 대기 중 이라고만 답하세요."
+
+// SafeSession 은 세션 id 를 명령줄에 그대로 넣어도 되는지.
+func SafeSession(id string) bool { return safeArg.MatchString(id) }

@@ -55,3 +55,12 @@ func FindAgentPID() int {
 	}
 	return 0
 }
+
+// Name 은 실행 중인 프로세스의 이름 (예: claude.exe, node). 없으면 "".
+func Name(pid int) string {
+	procs, err := list()
+	if err != nil {
+		return ""
+	}
+	return procs[pid].Name
+}

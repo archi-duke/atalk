@@ -57,6 +57,7 @@ type Server struct {
 	remote       remoteState  // 원격 포트 (remote.go)
 	relayClients relayClients // 중계 (relay.go)
 	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
+	revive       claudeReviver   // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
 }
 
 func New(opts Options) (*Server, error) {
