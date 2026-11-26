@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"fmt"
 	"os"
 	"strings"
@@ -86,4 +87,31 @@ func (s *Server) spawn(in SpawnInput) (any, error) {
 		return nil, &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
 	}
 	return map[string]any{"launched": true, "kind": in.Kind, "cwd": cwd, "room": introRoom}, nil
+}
+
+// linkRemoteSpawn 은 띄운 에이전트가 다른 PC 의 데몬에 원격으로 연결돼 있으면, 띄워진 세션(a)도 그 데몬에 연결한다
+// (그 데몬이 띄운 에이전트의 방에 바로 넣는다). 연결 정보를 저장하므로 이후 중계(/relay)·훅은 그 데몬을 쓴다.
+// Claude Code·Codex 는 SessionStart 훅이 같은 일을 하고, opencode 는 플러그인이 표식을 쓸 때 여기서 한다.
+func (s *Server) linkRemoteSpawn(a core.AgentView) core.AgentView {
+	if a.SpawnedBy == "" || client.LoadConn(a.ID) != nil {
+		return a
+	}
+	brc := client.LoadConn(a.SpawnedBy)
+	if brc == nil {
+		return a
+	}
+	cwd := ""
+	if a.Cwd != nil {
+		cwd = *a.Cwd
+	}
+	card := core.RegisterInput{Kind: a.Kind, SessionID: a.SessionID, Name: &a.Name, Description: &a.Description, Capabilities: &a.Capabilities, Workspace: a.Workspace}
+	_, ra, err := s.relayClients.get(brc).SpawnRemote(card, cwd)
+	if err != nil {
+		log.Printf("띄운 세션 원격 연결 실패 (%s): %v", a.ID, err)
+		return a
+	}
+	if a.Room != nil {
+		_ = s.Core.Leave(a.ID, "다른 PC 의 대화방으로 연결")
+	}
+	return ra
 }

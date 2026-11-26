@@ -341,6 +341,9 @@ func (s *Server) routes() http.Handler {
 			return nil, err
 		}
 		a, prompt, err := c.ClaimSpawn(r.PathValue("id"), b.Token)
+		if err == nil {
+			a = s.linkRemoteSpawn(a) // 띄운 에이전트가 다른 PC 데몬에 연결돼 있으면 이 세션도 (opencode: 이후 중계가 그쪽으로)
+		}
 		return map[string]any{"agent": a, "prompt": prompt}, err
 	})
 	// 사람의 확인이 필요함 (도구 허가·질문): 대화방에 알리고 "확인 필요" 로 표시. text 가 "" 면 풀림
