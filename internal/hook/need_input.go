@@ -137,7 +137,15 @@ func permissionRequest(c *client.Client, id string, in Input) any {
 	if text == "" {
 		return nil
 	}
-	r, err := c.Approval(id, text, question)
+	// 데몬이 다시 시작되는 등으로 연결이 끊기면 다시 묻는다 (창은 CLI 에 그대로 떠 있음). 답이 없음(Decided=false)이면 끝
+	var r client.ApprovalResult
+	var err error
+	for deadline := time.Now().Add(30 * time.Minute); ; {
+		if r, err = c.Approval(id, text, question); err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(3 * time.Second)
+	}
 	if err != nil || !r.Decided {
 		return nil
 	}
