@@ -896,7 +896,20 @@ function scrollBottom(box, n = 0, tok = userScroll) {
   box.scrollTop = box.scrollHeight;
   if (n < 30) requestAnimationFrame(() => scrollBottom(box, n + 1, tok)); // 30프레임(약 0.5초) 동안 높이가 바뀌면 따라 내린다
 }
-let lastChatHtml = "";
+let lastChat = { room: null, keys: [], htmls: [], bySeq: {} }; // 지난번에 그린 목록 (바뀐 항목만 다시 그리기)
+// 목록 안 클릭은 목록 하나에서 받는다 (항목을 바꿔 끼워도 다시 걸 필요 없음)
+$("#msgs").addEventListener("click", (e) => {
+  const qt = e.target.closest(".quote");
+  if (qt) {
+    const t = document.getElementById("s" + qt.dataset.seq);
+    if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); const b = t.querySelector(".bubble"); b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
+    return;
+  }
+  const rp = e.target.closest(".rp");
+  if (rp) { startReply(lastChat.bySeq[rp.dataset.reply]); return; }
+  const fa = e.target.closest("[data-focus-agent]");
+  if (fa) focusAgent(fa.dataset.focusAgent);
+});
 function renderChat(scroll) {
   const box = $("#msgs");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -925,11 +938,15 @@ function renderChat(scroll) {
   const cursors = room.members.map((m) => [m.agent, m.cursor || 0]);
   const busyNow = Object.fromEntries(room.members.map((m) => [m.agent, !!m.busy && m.state !== "away"]));
 
-  let html = "", lastDay = "";
+  // 목록을 항목(날짜 구분·시스템 줄·말풍선)별 HTML 로 만들어, 지난번과 달라진 항목만 바꿔 끼운다
+  // (작업 중 표시·처리 기록 하나가 바뀔 때마다 메시지 수백 개를 통째로 다시 그리면 그동안 입력이 멈춘다)
+  const keys = [], htmls = [];
+  const push = (k, h) => { keys.push(k); htmls.push(h); };
+  let lastDay = "";
   msgs.forEach((m, i) => {
     const dk = dayKey(m.ts);
-    if (dk !== lastDay) { html += '<div class="day"><span>' + esc(dayLabel(m.ts)) + "</span></div>"; lastDay = dk; }
-    if (m.type === "system") { html += '<div class="sys"><span>' + esc(clean(m.body)) + "</span></div>"; return; }
+    if (dk !== lastDay) { push("d" + dk, '<div class="day"><span>' + esc(dayLabel(m.ts)) + "</span></div>"); lastDay = dk; }
+    if (m.type === "system") { push("s" + m.seq, '<div class="sys"><span>' + esc(clean(m.body)) + "</span></div>"); return; }
     const prev = msgs[i - 1], next = msgs[i + 1];
     const same = (a, b) => a && b && a.type !== "system" && b.type !== "system" && a.from === b.from && (a.human || "") === (b.human || "") &&
       dayKey(a.ts) === dayKey(b.ts) && hhmm(a.ts) === hhmm(b.ts);
@@ -958,22 +975,20 @@ function renderChat(scroll) {
     const canReply = !DATA && !room.closed_at && !mine && room.members.some((x) => x.agent === m.from && x.state === "in_room");
     const rp = canReply ? '<button type="button" class="rp" data-reply="' + m.seq + '" title="이 말에 답장 (' + esc(nameOf(m.from)) + '에게만)">↩ 답장</button>' : "";
     const meta = '<div class="meta">' + wk + (unread ? '<span class="n">' + unread + "</span>" : "") + (lastInGroup ? "<span>" + hhmm(m.ts) + "</span>" : "") + rp + "</div>";
-    html += '<div class="m' + (mine ? " mine" : "") + (first ? " first" : "") + '" id="s' + m.seq + '" title="#' + m.seq + '">' +
+    push("m" + m.seq, '<div class="m' + (mine ? " mine" : "") + (first ? " first" : "") + '" id="s' + m.seq + '" title="#' + m.seq + '">' +
       (first ? avatar(m) : '<div class="ava blank"></div>') + '<div class="col">' +
       (first && !mine ? '<div class="who" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + senderLabel(m) + "</div>" : "") +
       '<div class="line"><div class="bubble">' + inner + "</div>" + meta + "</div>" +
-      (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>";
+      (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>");
   });
-  html = html || '<div class="empty">메시지 없음</div>';
-  if (html === lastChatHtml) { renderReplying(); return; } // 달라진 게 없으면 다시 그리지 않는다 (입력·스크롤이 끊기지 않게)
-  lastChatHtml = html;
-  box.innerHTML = html;
-  box.querySelectorAll(".quote").forEach((el) => (el.onclick = () => {
-    const t = document.getElementById("s" + el.dataset.seq);
-    if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); const b = t.querySelector(".bubble"); b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
-  }));
-  box.querySelectorAll(".rp").forEach((el) => (el.onclick = () => startReply(bySeq[el.dataset.reply])));
-  box.querySelectorAll("[data-focus-agent]").forEach((el) => (el.onclick = () => focusAgent(el.dataset.focusAgent)));
+  const prev = lastChat.room === room.room_id && box.children.length === lastChat.keys.length ? lastChat : null;
+  if (!keys.length) box.innerHTML = '<div class="empty">메시지 없음</div>';
+  else if (prev && prev.keys.every((k, i) => k === keys[i])) { // 앞부분이 같음 → 바뀐 항목만 교체, 새 항목은 뒤에 붙임
+    const kids = box.children;
+    for (let i = 0; i < prev.keys.length; i++) if (prev.htmls[i] !== htmls[i]) kids[i].outerHTML = htmls[i];
+    if (keys.length > prev.keys.length) box.insertAdjacentHTML("beforeend", htmls.slice(prev.keys.length).join(""));
+  } else box.innerHTML = htmls.join("");
+  lastChat = { room: room.room_id, keys, htmls, bySeq };
   renderReplying();
   if (scroll || atBottom) scrollBottom(box);
 }
