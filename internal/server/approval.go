@@ -66,6 +66,14 @@ func (s *Server) approvalRoutes(h func(string, handler)) {
 			select {
 			case a := <-ch:
 				_ = c.SetNeedInput(id, "")
+				switch {
+				case a.answer != "":
+					c.NoteAskAnswer(id, a.answer+" (웹)")
+				case a.allow:
+					c.NoteAskAnswer(id, "허용 (웹)")
+				default:
+					c.NoteAskAnswer(id, "거부 (웹)")
+				}
 				if a.allow {
 					return map[string]any{"decided": true, "allow": true, "answer": a.answer}, nil
 				}
@@ -77,6 +85,9 @@ func (s *Server) approvalRoutes(h func(string, handler)) {
 				mine := s.approvals.m[id] == ch
 				s.approvals.mu.Unlock()
 				if err != nil || v.NeedsInput == "" || !mine {
+					if err == nil && v.NeedsInput == "" && mine {
+						c.NoteAskAnswer(id, "CLI 에서 답함")
+					}
 					return map[string]any{"decided": false}, nil
 				}
 			case <-deadline:

@@ -92,6 +92,7 @@
   .askcard pre { margin:4px 0; white-space:pre-wrap; word-break:break-all; font-size:12px; }
   .askcard .af { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); margin-top:4px; }
   .askcard .af button { border:1px solid var(--line); background:var(--panel); border-radius:8px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--fg); }
+  .askcard .aa { font-size:12px; font-weight:600; color:var(--fg); margin-top:6px; }
   .askcard .af button.ok { background:#e8553b; border-color:#e8553b; color:#fff; font-weight:600; }
   .ask-t { color:#fff; border-radius:8px; padding:0 6px; font-weight:600; }
   .room-ico { width:44px; height:44px; border-radius:16px; background:var(--chat); display:grid; place-items:center; font-weight:700; color:var(--sys); flex:none; }
@@ -905,6 +906,8 @@ async function loadChat(scroll) {
 // 데몬이 남긴 status "🙋 사용자 확인 필요 — 내용" 을 카드로. 줄마다 "질문 (선택1 / 선택2)" 또는 "도구 실행 허가: 명령".
 // 그 에이전트가 아직 기다리는 중이고 이것이 마지막 확인 요청이면 "답 기다리는 중" (tomato), 아니면 "지나감".
 const ASK_PREFIX = "🙋 사용자 확인 필요 — ";
+// 확인 카드에 사람이 한 답 (처리 기록 메모 "답: …")
+const answerOf = (m) => { const e = (chat?.logs || []).filter((x) => x.seq === m.seq && x.agent === m.from && (x.note || "").startsWith("답: ")).pop(); return e ? e.note.slice(3) : ""; };
 function askCard(m, msgs) {
   const body = m.body.slice(ASK_PREFIX.length);
   const a = agents[m.from];
@@ -928,6 +931,7 @@ function askCard(m, msgs) {
   const btns = !web ? "" : perm ? '<button type="button" class="ok" data-approve="1"' + aid + ">허용</button><button type=\"button\" data-approve=\"0\"" + aid + ">거부</button>"
     : opts.map((o) => '<button type="button" class="ok" data-answer="' + esc(o) + '"' + aid + ">" + esc(o) + "</button>").join("");
   return '<div class="askcard' + (live ? " live" : "") + '"><div class="ah">🙋 ' + (live ? "사용자 확인 필요" : "확인 요청 (지나감)") + "</div>" + html +
+    (!live && answerOf(m) ? '<div class="aa">✔ ' + esc(answerOf(m)) + "</div>" : "") +
     '<div class="af">' + (web ? (a?.headless ? "창 없이 도는 세션 — 여기서 답하세요" : "여기서 답하거나 에이전트 창(CLI)에서 답하세요") : live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") + btns +
     (canFocus ? '<button type="button" data-focus-agent="' + esc(m.from) + '">CLI 창 열기</button>' : "") + "</div></div>";
 }
