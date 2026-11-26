@@ -2565,6 +2565,8 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 // EchoWake 는 사람 입력 없이 ATalk 알림으로 깨어난 턴의 응답 문장(CLI 의 흰색 ●)을 그 알림 메시지의 답으로 기록한다 (알림 없음).
 // wake 는 그 알림에 담긴 메시지 번호들 — 이 에이전트에게 온 것 중 가장 마지막 메시지에 붙인다.
 // 받은 메시지를 옮겨 적은 "📨" 줄은 빼고, 에이전트가 이미 send 로 그 메시지에 답한 글과 같은 문장은 다시 남기지 않는다.
+// send 로 답한 턴이라도 작업 중간에 쓴 문장(중간 보고)은 남긴다 — 처음(수신 확인)과 마지막(결과)만 보이고 중간이 빠지던 문제.
+// 다만 턴이 끝날 때 마지막 send 뒤에 쓴 맺음말은 남기지 않는다.
 // CLI 입력 큐(EchoQueue)는 건드리지 않는다.
 func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (out []Message, err error) {
 	err = c.guard(func() error {
@@ -2606,20 +2608,26 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 			texts = texts[len(texts)-1:]
 		}
 		have := map[string]bool{}
+		var sent []string // 이 메시지에 send 로 답한 글
+		lastSend := false // 이 메시지에 대한 내 마지막 글이 send (그 뒤로 남긴 기록 없음)
 		for _, x := range c.st.Messages(m.Room, target, 0) {
 			if x.From == agent && x.Human == "" && x.ReplyTo != nil && *x.ReplyTo == target {
+				lastSend = !x.Echo
 				if !x.Echo {
-					// 이미 send 로 이 메시지에 답했음 → 그 뒤 CLI 응답(보통 같은 내용을 다르게 쓴 것)은 남기지 않는다 (답이 두 번 보이지 않게)
-					return nil
+					sent = append(sent, squash(x.Body))
+					continue
 				}
 				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록
 			}
+		}
+		if final && lastSend {
+			return nil // 마지막 send 뒤의 맺음말 (보통 send 를 다르게 쓴 것 — 답이 두 번 보이지 않게)
 		}
 		for _, text := range texts {
 			if r := []rune(text); len(r) > EchoMax {
 				text = "(앞부분 생략)…\n" + string(r[len(r)-EchoMax:])
 			}
-			if have[text] {
+			if have[text] || sameAsSent(text, sent) {
 				continue
 			}
 			s := target
@@ -2629,6 +2637,20 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 		return nil
 	})
 	return
+}
+
+// squash: 비교용 — 공백을 모두 뺀다.
+func squash(s string) string { return strings.Join(strings.Fields(s), "") }
+
+// sameAsSent: send 로 보낸 글과 사실상 같은 문장 (한쪽이 다른 쪽을 품음).
+func sameAsSent(text string, sent []string) bool {
+	t := squash(text)
+	for _, s := range sent {
+		if t != "" && s != "" && (strings.Contains(s, t) || strings.Contains(t, s)) {
+			return true
+		}
+	}
+	return false
 }
 
 // lateInput: 이 턴의 입력이 방에 들어오기 전에 들어와 기록되지 않았나 — 방에 들어온 뒤 이 에이전트의 CLI 입력 기록이 하나도 없을 때만.

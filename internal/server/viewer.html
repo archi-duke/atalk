@@ -243,6 +243,11 @@
   .bubble { background:var(--bubble); padding:8px 11px; border-radius:4px 14px 14px 14px; white-space:pre-wrap; word-break:break-word; overflow-wrap:anywhere; min-width:0; }
   .m.mine .bubble { background:var(--mine); color:var(--mine-fg); border-radius:14px 4px 14px 14px; }
   .m:not(.first) .bubble { border-radius:14px; }
+  /* 작업 메모: send 로 답한 턴에서 에이전트가 작업 중간에 쓴 문장 (CLI 의 흰색 ●). 세 줄까지만, 누르면 펼침 */
+  .bubble.note { background:transparent; border:1px dashed #9aa0a8; color:var(--muted); font-size:12.5px; cursor:pointer; }
+  .bubble.note .md { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+  .bubble.note.open .md { display:block; }
+  .bubble.note .note-t { display:block; font-size:10.5px; margin-bottom:2px; }
   .bubble code { font:12.5px ui-monospace,Consolas,monospace; background:var(--quote); padding:0 4px; border-radius:4px; }
   /* 마크다운 본문 */
   .md { white-space:normal; }
@@ -1009,7 +1014,15 @@ function scrollBottom(box, n = 0, tok = userScroll) {
 }
 let lastChat = { room: null, keys: [], htmls: [], bySeq: {} }; // 지난번에 그린 목록 (바뀐 항목만 다시 그리기)
 // 목록 안 클릭은 목록 하나에서 받는다 (항목을 바꿔 끼워도 다시 걸 필요 없음)
+const noteOpen = new Set(); // 펼친 작업 메모
 $("#msgs").addEventListener("click", (e) => {
+  const nt = e.target.closest(".bubble.note");
+  if (nt && !e.target.closest("a") && !String(getSelection())) {
+    const seq = Number(nt.dataset.note);
+    noteOpen.has(seq) ? noteOpen.delete(seq) : noteOpen.add(seq);
+    renderChat(false);
+    return;
+  }
   const qt = e.target.closest(".quote");
   if (qt) {
     const t = document.getElementById("s" + qt.dataset.seq);
@@ -1053,6 +1066,8 @@ function renderChat(scroll) {
   $("#view").innerHTML = opts.map(([v, t]) => '<option value="' + esc(v) + '"' + (v === viewer ? " selected" : "") + ">" + esc(t) + "</option>").join("");
 
   const bySeq = Object.fromEntries(msgs.map((m) => [m.seq, m]));
+  // send 로 답한 메시지 (보낸 이|답한 메시지) — 같은 메시지에 대한 그 에이전트의 CLI 기록은 작업 메모로 작게
+  const sentTo = new Set(msgs.filter((x) => !x.echo && !x.human && x.reply_to).map((x) => x.from + "|" + x.reply_to));
   const logs = {};
   for (const e of chat.logs || []) (logs[e.seq] ||= {})[e.agent] = e; // 에이전트별 마지막 상태
   const cursors = room.members.map((m) => [m.agent, m.cursor || 0]);
@@ -1081,7 +1096,9 @@ function renderChat(scroll) {
     } else if ((m.to || []).length) {
       inner += '<span class="chip status"><span class="to" style="margin:0">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span></span>";
     }
-    const q = m.reply_to ? bySeq[m.reply_to] : null;
+    const note = !!(m.echo && !m.human && m.reply_to && sentTo.has(m.from + "|" + m.reply_to));
+    const q = m.reply_to && !note ? bySeq[m.reply_to] : null;
+    if (note) inner += '<span class="note-t" title="에이전트가 작업 중간에 쓴 말 (CLI 기록). 누르면 펼치거나 접습니다">📝 작업 메모</span>';
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
     inner += m.type === "status" && m.body.startsWith(ASK_PREFIX) ? askCard(m, msgs) : '<div class="md">' + fmt(m.body) + "</div>";
 
@@ -1098,7 +1115,7 @@ function renderChat(scroll) {
     push("m" + m.seq, '<div class="m' + (mine ? " mine" : "") + (first ? " first" : "") + '" id="s' + m.seq + '" title="#' + m.seq + '">' +
       (first ? avatar(m) : '<div class="ava blank"></div>') + '<div class="col">' +
       (first && !mine ? '<div class="who" data-agent="' + esc(m.from) + '" title="' + FOCUS_HINT + '">' + senderLabel(m) + "</div>" : "") +
-      '<div class="line"><div class="bubble">' + inner + "</div>" + meta + "</div>" +
+      '<div class="line"><div class="bubble' + (note ? " note" + (noteOpen.has(m.seq) ? " open" : "") : "") + (note ? '" data-note="' + m.seq : "") + '">' + inner + "</div>" + meta + "</div>" +
       (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>");
   });
   const prev = lastChat.room === room.room_id && box.children.length === lastChat.keys.length ? lastChat : null;
