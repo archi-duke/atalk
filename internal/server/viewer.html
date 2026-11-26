@@ -1322,7 +1322,7 @@ $("#mDelete").onclick = async () => {
 // 비활성: 자리 비움(에이전트가 꺼짐)
 // 알림 꺼짐: 쉬고 있는 Claude Code 인데 메시지 대기 훅이 없음 (CLI 에서 Esc 로 중지한 뒤 등) → 메시지가 와도 못 깨어남
 const DEAF_HINT = "메시지 대기가 꺼져 있어 메시지가 와도 깨어나지 못합니다 (CLI 에서 작업을 중지(Esc)한 뒤 등). 에이전트 창(CLI)에 아무거나 입력하면 다시 켜집니다";
-const deaf = (x) => !!x && x.kind === "claude-code" && !x.busy && !x.listening && !x.lobby && (x.status === "in_room" || x.status === "waiting");
+const deaf = (x) => !!x && x.kind === "claude-code" && !x.headless && !x.busy && !x.listening && !x.lobby && (x.status === "in_room" || x.status === "waiting");
 // 에이전트 상태 글: 에이전트 목록·대화방 목록·대화창이 모두 이것 하나로 (같은 에이전트가 곳에 따라 달리 보이지 않게).
 // m(방 멤버 정보)이 있으면 그 방 기준, 없으면 에이전트 카드 기준
 function agentStatus(a, m) {
