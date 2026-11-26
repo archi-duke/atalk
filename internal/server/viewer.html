@@ -210,6 +210,9 @@
   .sys { text-align:center; margin:6px 0; }
 
   .m { display:flex; gap:8px; margin-top:2px; align-items:flex-start; }
+  /* 띄운 세션: 띄운 에이전트 카드 아래 들여 쓰기 */
+  .row.child { padding-left:calc(16px + var(--depth, 1) * 18px); position:relative; }
+  .row.child::before { content:"↳"; position:absolute; left:calc(var(--depth, 1) * 18px - 4px); top:16px; color:var(--muted); font-size:12px; }
   /* 화면 밖 메시지는 배치·그리기를 건너뛴다 (메시지 수백 개 — 입력할 때마다 전체를 다시 배치하면 느림) */
   #msgs > .m, #msgs > .sys, #msgs > .day { content-visibility:auto; contain-intrinsic-size:auto 44px; }
   .m.first { margin-top:10px; }
@@ -444,7 +447,10 @@
             <label><input type="checkbox" id="sGraceOff"> 퇴장시키지 않음</label></div>
           <div class="f"><span>오프라인 네임카드 자동 삭제</span><input type="number" id="sTtl" min="1" placeholder="24"> 시간
             <label><input type="checkbox" id="sTtlOff"> 지우지 않음</label></div>
-          <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간).</p>
+          <div class="f"><span>에이전트가 띄운 세션 카드</span><label><input type="checkbox" id="sSpawnKeep"> 꺼진 뒤에도 보관 (깨우기로 그 세션을 다시 열 수 있음)</label></div>
+          <div class="f"><span>띄운 세션 카드 보관 기간</span><input type="number" id="sSpawnTtl" min="1" placeholder="24"> 시간
+            <label><input type="checkbox" id="sSpawnTtlOff"> 지우지 않음</label></div>
+          <p class="note">비워 두면 기본값 (자동 퇴장 30분, 네임카드 삭제 24시간, 띄운 세션 카드 보관 24시간).</p>
         </section>
       </div>
       <div class="pane" data-p="view" hidden>
@@ -708,6 +714,16 @@ async function loadSide() {
   }));
   renderSide();
 }
+// 에이전트가 띄운 세션은 띄운 에이전트 카드 아래에 들여 써서 보인다 ([카드, 깊이] 목록). 띄운 에이전트가 목록에 없으면 맨 위에
+function nestSpawned(items) {
+  const ids = new Set(items.map((x) => x.id)), kids = new Map(), out = [];
+  for (const x of items) if (x.spawned_by && ids.has(x.spawned_by) && x.spawned_by !== x.id) (kids.get(x.spawned_by) || kids.set(x.spawned_by, []).get(x.spawned_by)).push(x);
+  const walk = (x, d, seen) => { if (seen.has(x.id)) return; seen.add(x.id); out.push([x, d]); for (const k of kids.get(x.id) || []) walk(k, Math.min(d + 1, 3), seen); };
+  const seen = new Set();
+  for (const x of items) if (!(x.spawned_by && ids.has(x.spawned_by) && x.spawned_by !== x.id)) walk(x, 0, seen);
+  for (const x of items) walk(x, 0, seen); // 순환 등으로 빠진 것
+  return out;
+}
 function renderSide() {
   if (tab === "agents") {
     const list = Object.values(agents).sort((p, q) => (p.status === "offline") - (q.status === "offline"));
@@ -731,10 +747,10 @@ function renderSide() {
         (openAgent === x.id ? agentDetail(x) : "");
     };
     $("#list").innerHTML = (offline.length
-      ? '<div class="prune">오프라인 ' + offline.length + '개 · 하루 지나면 자동 삭제<button id="pruneAll">모두 삭제</button></div>' : "") +
+      ? '<div class="prune">오프라인 ' + offline.length + '개 · 설정한 기간이 지나면 자동 삭제<button id="pruneAll">모두 삭제</button></div>' : "") +
       (groups.map((g) => (true
         ? '<div class="pc-head">🖥 ' + esc(g.host.name || "알 수 없는 PC") + (g.local ? ' <span class="here">이 PC</span>' : "") + (OS_KO[g.host.os] ? " · " + OS_KO[g.host.os] : "") + "</div>" : "") +
-        g.items.map(row).join("")).join("") || '<div class="empty">등록된 에이전트 없음</div>');
+        nestSpawned(g.items).map(([x, d]) => d ? row(x).replace('<div class="row', '<div style="--depth:' + d + '" class="child row') : row(x)).join("")).join("") || '<div class="empty">등록된 에이전트 없음</div>');
     $("#list").querySelectorAll(".row[data-a]").forEach((el) => (el.onclick = (e) => {
       if (e.target.closest(".del, .wake")) return;
       openAgent = openAgent === el.dataset.a ? null : el.dataset.a; renderSide();
@@ -1411,6 +1427,10 @@ async function openSettings() {
   $("#sAccept").checked = cfg.auto_accept_invites !== false;
   numField(cfg.away_grace_min, "#sGrace", "#sGraceOff");
   numField(cfg.offline_ttl_hours, "#sTtl", "#sTtlOff");
+  numField(cfg.spawn_ttl_hours, "#sSpawnTtl", "#sSpawnTtlOff");
+  $("#sSpawnKeep").checked = cfg.spawn_keep !== false;
+  const spawnKeepSync = () => { $("#sSpawnTtl").disabled = !$("#sSpawnKeep").checked || $("#sSpawnTtlOff").checked; $("#sSpawnTtlOff").disabled = !$("#sSpawnKeep").checked; };
+  $("#sSpawnKeep").onchange = spawnKeepSync; spawnKeepSync();
   // 알림·화면 (브라우저)
   $("#sNotify").checked = prefs.notify; $("#sSound").checked = prefs.sound; $("#sMineOnly").checked = prefs.mineOnly;
   notifyNote();
@@ -1429,7 +1449,7 @@ async function openSettings() {
 }
 $("#setBtn").onclick = () => openSettings().catch((e) => alert("설정을 불러오지 못함: " + e.message));
 $("#setClose").onclick = $("#setCancel").onclick = () => dlg.close();
-for (const [el, off] of [["#sGrace", "#sGraceOff"], ["#sTtl", "#sTtlOff"], ["#sTrashDays", "#sTrashOff"]]) $(off).onchange = () => { $(el).disabled = $(off).checked; };
+for (const [el, off] of [["#sGrace", "#sGraceOff"], ["#sTtl", "#sTtlOff"], ["#sSpawnTtl", "#sSpawnTtlOff"], ["#sTrashDays", "#sTrashOff"]]) $(off).onchange = () => { $(el).disabled = $(off).checked; };
 $("#sAuto").onchange = async () => {
   try { await send("PUT", "/admin/autostart", { on: $("#sAuto").checked }); $("#setMsg").textContent = "자동 시작 " + ($("#sAuto").checked ? "켬" : "끔"); }
   catch (e) { $("#sAuto").checked = !$("#sAuto").checked; $("#setMsg").textContent = e.message; }
@@ -1437,7 +1457,7 @@ $("#sAuto").onchange = async () => {
 $("#setForm").onsubmit = async (e) => {
   e.preventDefault();
   const next = { ...cfg, user: $("#sUser").value.trim(), machine_name: $("#sMachine").value.trim() || null,
-    away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
+    away_grace_min: numVal("#sGrace", "#sGraceOff"), offline_ttl_hours: numVal("#sTtl", "#sTtlOff"), spawn_ttl_hours: numVal("#sSpawnTtl", "#sSpawnTtlOff"), spawn_keep: $("#sSpawnKeep").checked ? null : false, trash_retention_days: numVal("#sTrashDays", "#sTrashOff"),
     default_max_messages: $("#sLimit").value ? Number($("#sLimit").value) : null,
     auto_resume: $("#sResume").checked ? null : false, echo_prompts: $("#sEcho").checked ? null : false, echo_final_only: $("#sEchoFinal").checked ? true : null, auto_accept_invites: $("#sAccept").checked ? null : false };
   for (const k of Object.keys(next)) if (next[k] === null) delete next[k];

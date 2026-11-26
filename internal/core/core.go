@@ -2699,10 +2699,15 @@ func (c *Atalk) humanOf(agent string) string {
 // sweepOffline 은 offline 이 된 시각을 카드에 적고, offline 이 오래된(기본 24시간) 카드는 지운다.
 // 방에 있는(in_room/away) 카드는 지우지 않는다. pid 를 모르는 카드(CLI 로 등록한 사람 등)는 offline 이 되지 않으므로 지워지지 않는다.
 func (c *Atalk) sweepOffline(now time.Time) {
-	ttl := 24 * time.Hour
-	if cfg := c.readConfig(); cfg.OfflineTTLHours != nil {
+	cfg := c.readConfig()
+	ttl, spawnTTL := 24*time.Hour, 24*time.Hour
+	if cfg.OfflineTTLHours != nil {
 		ttl = time.Duration(*cfg.OfflineTTLHours) * time.Hour
 	}
+	if cfg.SpawnTTLHours != nil {
+		spawnTTL = time.Duration(*cfg.SpawnTTLHours) * time.Hour
+	}
+	spawnKeep := cfg.SpawnKeep == nil || *cfg.SpawnKeep
 	ids := make([]string, 0, len(c.agents))
 	for id := range c.agents {
 		ids = append(ids, id)
@@ -2722,6 +2727,14 @@ func (c *Atalk) sweepOffline(now time.Time) {
 			c.removeCard(id, "같은 프로세스가 다른 세션으로 방에 복귀함 (쓰지 않은 새 세션)")
 			continue
 		}
+		if off && card.SpawnedBy != "" && !spawnKeep { // 띄운 세션 카드를 보관하지 않음 → 꺼지는 대로
+			c.removeCard(id, "띄운 세션이 끝남 (보관하지 않음 설정)")
+			continue
+		}
+		keep := ttl
+		if card.SpawnedBy != "" { // 띄운 세션은 따로 정한 보관 기간
+			keep = spawnTTL
+		}
 		switch {
 		case off && card.OfflineSince == nil:
 			card.OfflineSince = ptr(c.ts())
@@ -2729,8 +2742,8 @@ func (c *Atalk) sweepOffline(now time.Time) {
 		case !off && card.OfflineSince != nil:
 			card.OfflineSince = nil
 			c.saveCard(card)
-		case off && ttl > 0:
-			if t, err := time.Parse(time.RFC3339Nano, *card.OfflineSince); err == nil && now.Sub(t) > ttl {
+		case off && keep > 0:
+			if t, err := time.Parse(time.RFC3339Nano, *card.OfflineSince); err == nil && now.Sub(t) > keep {
 				c.removeCard(id, "offline 이 오래되어 자동 삭제")
 			}
 		}
@@ -2774,6 +2787,9 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		}
 		if in.OfflineTTLHours != nil && (*in.OfflineTTLHours < 0 || *in.OfflineTTLHours > 24*3650) {
 			return bad("invalid_ttl", "offline_ttl_hours 는 0(지우지 않음) ~ 87600 시간")
+		}
+		if in.SpawnTTLHours != nil && (*in.SpawnTTLHours < 0 || *in.SpawnTTLHours > 24*3650) {
+			return bad("invalid_ttl", "spawn_ttl_hours 는 0(지우지 않음) ~ 87600 시간")
 		}
 		if in.DefaultMaxMessages != nil && (*in.DefaultMaxMessages < 10 || *in.DefaultMaxMessages > 1000000) {
 			return bad("invalid_limit", "default_max_messages 는 10 ~ 1000000")
