@@ -2588,7 +2588,7 @@ func (c *Atalk) EchoReply(agent string, texts []string, final bool, prompt strin
 // wake 는 그 알림에 담긴 메시지 번호들 — 이 에이전트에게 온 것 중 가장 마지막 메시지에 붙인다.
 // 받은 메시지를 옮겨 적은 "📨" 줄은 빼고, 에이전트가 이미 send 로 그 메시지에 답한 글과 같은 문장은 다시 남기지 않는다.
 // send 로 답한 턴이라도 작업 중간에 쓴 문장(중간 보고)은 남긴다 — 처음(수신 확인)과 마지막(결과)만 보이고 중간이 빠지던 문제.
-// 다만 턴이 끝날 때 마지막 send 뒤에 쓴 맺음말은 남기지 않는다.
+// 다만 턴이 끝날 때 마지막 send 뒤에 쓴 맺음말(마지막 글)은 남기지 않는다.
 // CLI 입력 큐(EchoQueue)는 건드리지 않는다.
 func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (out []Message, err error) {
 	err = c.guard(func() error {
@@ -2642,8 +2642,10 @@ func (c *Atalk) EchoWake(agent string, texts []string, final bool, wake []int) (
 				have[strings.TrimSpace(x.Body)] = true // 앞서 남긴 기록
 			}
 		}
-		if final && lastSend {
-			return nil // 마지막 send 뒤의 맺음말 (보통 send 를 다르게 쓴 것 — 답이 두 번 보이지 않게)
+		if final && lastSend && len(texts) > 0 {
+			// 마지막 send 뒤의 맺음말(마지막 글)만 뺀다 — 보통 send 를 다르게 쓴 것이라 답이 두 번 보이지 않게.
+			// 그 앞의 중간 글은 남긴다: 대화 기록 파일이 늦게 저장돼 도구 훅에서 빠진 중간 메모가 여기서만 잡힌다.
+			texts = texts[:len(texts)-1]
 		}
 		for _, text := range texts {
 			if r := []rune(text); len(r) > EchoMax {
