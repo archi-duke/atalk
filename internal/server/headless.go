@@ -35,11 +35,15 @@ type headlessRunner struct {
 	spawning map[string]int  // 작업 폴더 → 헤드리스로 띄우는 중 (등록 전이라 id 를 모름)
 	lastSeq  map[string]int  // 에이전트 id → 마지막으로 넘긴 메시지 번호 (처리하지 못해도 같은 메시지로 다시 돌지 않게)
 	toCLI    map[string]bool // 턴이 도는 중에 [CLI로 열기]를 누름 → 턴이 끝나면 연다
+	cmds     map[string]*exec.Cmd // 에이전트 id → 도는 턴의 프로세스 (급할 때 중단)
+	stopped  map[string]bool      // 사람이 중단시킨 턴
+	resume   map[string]string    // 중단하고 창을 열 때 첫 입력 (이어서 하게 할 때)
 }
 
 func (h *headlessRunner) init() {
 	if h.running == nil {
 		h.running, h.spawning, h.lastSeq, h.toCLI = map[string]bool{}, map[string]int{}, map[string]int{}, map[string]bool{}
+		h.cmds, h.stopped, h.resume = map[string]*exec.Cmd{}, map[string]bool{}, map[string]string{}
 	}
 }
 
@@ -124,7 +128,8 @@ func headlessCmd(kind, sid, prompt, mode string) (*exec.Cmd, error) {
 }
 
 // runTurn 은 cwd 에서 그 종류의 한 턴을 숨김 실행하고 끝날 때까지 기다린다. sid 가 있으면 그 세션을 이어서.
-func runTurn(kind, cwd, sid, prompt, logID, mode string, env map[string]string) error {
+// started 가 있으면 프로세스를 띄운 직후 부른다 (중단할 수 있게).
+func runTurn(kind, cwd, sid, prompt, logID, mode string, env map[string]string, started func(*exec.Cmd)) error {
 	cmd, err := headlessCmd(kind, sid, prompt, mode)
 	if err != nil {
 		return err
@@ -144,7 +149,12 @@ func runTurn(kind, cwd, sid, prompt, logID, mode string, env map[string]string) 
 	defer f.Close()
 	fmt.Fprintf(f, "\n===== %s 턴 시작 (%s)\n", time.Now().Format(time.RFC3339), strings.Join(args, " "))
 	cmd.Stdout, cmd.Stderr = f, f
-	err = cmd.Run()
+	if err = cmd.Start(); err == nil {
+		if started != nil {
+			started(cmd)
+		}
+		err = cmd.Wait()
+	}
 	fmt.Fprintf(f, "===== %s 턴 끝 (%v)\n", time.Now().Format(time.RFC3339), err)
 	return err
 }
@@ -220,17 +230,30 @@ func (s *Server) runHeadless() {
 		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
 		mode := s.modeFor(v)
 		go func(kind, id, cwd, sid string) {
-			if err := runTurn(kind, cwd, sid, text, id, mode, nil); err != nil {
-				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
-			}
-			_ = c.Activity(id, false) // 턴이 끝남 (실행이 바로 실패해 끝 훅이 오지 않은 경우에도 작업 중 표시가 남지 않게)
+			err := runTurn(kind, cwd, sid, text, id, mode, nil, func(cmd *exec.Cmd) {
+				s.headless.mu.Lock()
+				s.headless.cmds[id] = cmd
+				s.headless.mu.Unlock()
+			})
 			s.headless.mu.Lock()
 			delete(s.headless.running, id)
+			delete(s.headless.cmds, id)
+			stopped := s.headless.stopped[id]
+			delete(s.headless.stopped, id)
 			open := s.headless.toCLI[id]
 			delete(s.headless.toCLI, id)
+			resume := s.headless.resume[id]
+			delete(s.headless.resume, id)
 			s.headless.mu.Unlock()
+			if err != nil && !stopped {
+				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
+			}
+			if stopped {
+				log.Printf("헤드리스: %s 의 턴을 사람이 중단함", id)
+			}
+			_ = c.Activity(id, false) // 턴이 끝남 (중단했거나 실행이 바로 실패해 끝 훅이 오지 않은 경우에도 작업 중 표시가 남지 않게)
 			if open { // 턴이 도는 동안 [CLI로 열기]를 눌렀음
-				if err := s.openCLI(id); err != nil {
+				if err := s.openCLI(id, resume); err != nil {
 					log.Printf("헤드리스 → CLI 실패 (%s): %v", id, err)
 				}
 			}
@@ -245,7 +268,7 @@ func (s *Server) spawnHeadless(kind, cwd, prompt, token string) {
 	s.headless.spawning[cwd]++
 	s.headless.mu.Unlock()
 	go func() {
-		if err := runTurn(kind, cwd, "", prompt, "spawn-"+token, s.headlessMode(), map[string]string{"ATALK_SPAWN": token}); err != nil {
+		if err := runTurn(kind, cwd, "", prompt, "spawn-"+token, s.headlessMode(), map[string]string{"ATALK_SPAWN": token}, nil); err != nil {
 			log.Printf("헤드리스 띄우기 실패 (%s): %v", cwd, err)
 		}
 		s.headless.mu.Lock()
@@ -257,7 +280,9 @@ func (s *Server) spawnHeadless(kind, cwd, prompt, token string) {
 // setHeadless 는 POST /agents/{id}/headless {on}: 켜면 CLI 창을 닫고 헤드리스로, 끄면 CLI 창으로 다시 연다.
 func (s *Server) setHeadless(r *http.Request) (any, error) {
 	var b struct {
-		On bool `json:"on"`
+		On     bool `json:"on"`
+		Force  bool `json:"force"`  // 보이기: 도는 턴을 기다리지 않고 중단한 뒤 바로 연다
+		Resume bool `json:"resume"` // force 와 함께: 창을 연 뒤 중단된 작업을 이어서 하게 한다
 	}
 	if err := readBody(r, &b); err != nil {
 		return nil, err
@@ -303,22 +328,66 @@ func (s *Server) setHeadless(r *http.Request) (any, error) {
 	running := s.headless.running[id]
 	if running { // 턴이 도는 중 → 그 턴이 끝나면 연다 (같은 세션이 두 곳에서 돌지 않게)
 		s.headless.toCLI[id] = true
+		if b.Force && b.Resume {
+			s.headless.resume[id] = ResumePrompt
+		}
 	}
 	s.headless.mu.Unlock()
+	if running && b.Force {
+		if err := s.stopTurn(id); err != nil {
+			return nil, err
+		}
+		return map[string]any{"launched": false, "stopping": true}, nil
+	}
 	if running {
 		return map[string]any{"launched": false, "queued": true}, nil
 	}
 	if v.Busy {
 		return nil, &core.Error{Status: 409, Code: "busy", Message: "헤드리스 턴이 도는 중 — 끝난 뒤에 다시 하세요"}
 	}
-	if err := s.openCLI(id); err != nil {
+	if err := s.openCLI(id, ""); err != nil {
 		return nil, err
 	}
 	return map[string]any{"launched": true}, nil
 }
 
+// ResumePrompt 는 중단하고 창을 열 때 이어서 하게 하는 첫 입력.
+const ResumePrompt = "사용자가 작업 중이던 숨김 턴을 강제로 중단하고 이 창을 열었습니다. 중단되기 전까지 한 일을 확인하고 (도구 실행이 중간에 끊겼을 수 있음) 하던 작업을 이어서 진행하세요."
+
+// stopTurn 은 도는 헤드리스 턴을 중단한다 (프로세스와 그 아래 도구 실행까지). 끝난 뒤 처리는 턴을 돌린 쪽이 한다.
+func (s *Server) stopTurn(id string) error {
+	s.headless.mu.Lock()
+	s.headless.init()
+	cmd := s.headless.cmds[id]
+	if cmd != nil {
+		s.headless.stopped[id] = true
+	}
+	s.headless.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return &core.Error{Status: 409, Code: "not_running", Message: "도는 숨김 턴이 없음"}
+	}
+	if err := procs.KillTree(cmd.Process.Pid); err != nil {
+		_ = cmd.Process.Kill()
+	}
+	return nil
+}
+
+// stopHeadless 는 POST /agents/{id}/stop: 도는 숨김 턴만 중단한다 (숨김은 그대로 — 다음 메시지가 오면 다시 돈다).
+func (s *Server) stopHeadless(r *http.Request) (any, error) {
+	id := r.PathValue("id")
+	v, err := s.Core.GetAgent(id)
+	if err != nil {
+		return nil, err
+	}
+	if !v.Local {
+		return nil, &core.Error{Status: 409, Code: "not_here", Message: "이 PC 의 에이전트만 중단할 수 있음 (다른 PC 는 그 PC 에서)"}
+	}
+	return map[string]any{"stopping": true}, s.stopTurn(id)
+}
+
 // openCLI 는 헤드리스 에이전트를 CLI 창으로 다시 연다 (claude --resume <세션>).
-func (s *Server) openCLI(id string) error {
+// prompt 가 있으면 첫 입력으로 넣는다 (Claude Code·Codex).
+func (s *Server) openCLI(id, prompt string) error {
 	v, err := s.Core.GetAgent(id)
 	if err != nil {
 		return err
@@ -330,6 +399,14 @@ func (s *Server) openCLI(id string) error {
 		return err
 	}
 	argv, _ := procs.ResumeCommand(v.Kind, v.SessionID)
+	if prompt != "" {
+		switch v.Kind {
+		case "claude-code":
+			argv = append(argv, prompt)
+		case "codex": // 마지막 인자가 깨우기 입력
+			argv[len(argv)-1] = prompt
+		}
+	}
 	if err := procs.LaunchTerminal(*v.Cwd, argv); err != nil {
 		_, _ = s.Core.SetHeadless(id, true)
 		return &core.Error{Status: 500, Code: "launch_failed", Message: "터미널을 열 수 없음: " + err.Error()}
