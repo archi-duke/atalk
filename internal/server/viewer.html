@@ -637,30 +637,30 @@ function avatar(m) {
 const canWake = (x) => x.local && !x.lobby && !x.shared && !x.headless && (x.kind === "claude-code" || x.kind === "opencode" || x.kind === "codex") && (x.status === "offline" || x.status === "waiting" || x.status === "away");
 // 헤드리스(창 없이 메시지마다 데몬이 한 턴씩): 이 PC 의 Claude Code 만. 창이 떠 있으면 [헤드리스로], 헤드리스면 [CLI로 열기]
 const HL_MODES = [["", "이어받기 (CLI 에서 쓰던 모드)"], ["default", "매번 묻기"], ["acceptEdits", "파일 수정 허용"], ["bypassPermissions", "모두 허용"], ["plan", "계획만"]];
-const hlModeSelect = (x) => '<select class="hl-mode" data-id="' + esc(x.id) + '" title="헤드리스 턴의 권한 모드 (창이 없어 허용 목록 밖 도구는 웹 카드로 물음)">' +
+const hlModeSelect = (x) => '<select class="hl-mode" data-id="' + esc(x.id) + '" title="숨김(창 없이) 턴의 권한 모드 (창이 없어 허용 목록 밖 도구는 웹 카드로 물음)">' +
   HL_MODES.map(([v, t]) => '<option value="' + v + '"' + ((x.headless_mode || "") === v ? " selected" : "") + ">" + t + "</option>").join("") + "</select>";
 const headlessButtons = (x) => {
   if (!x.local || x.kind !== "claude-code" || x.lobby) return "";
   // 목록 한 줄에는 상태 아이콘만: ☁ = 창 없이(헤드리스) 도는 중. 바꾸기·권한은 줄을 눌러 펼친 상세에서
-  if (x.headless) return '<span class="hl-ico" title="헤드리스: 창 없이 돌고, 메시지가 오면 데몬이 한 턴씩 실행합니다 (줄을 눌러 상세에서 CLI로 열기·권한)">☁</span>';
+  if (x.headless) return '<span class="hl-ico" title="숨김: 창 없이 돌고, 메시지가 오면 데몬이 한 턴씩 실행합니다 (줄을 눌러 상세에서 보이기·권한)">☁</span>';
   return "";
 };
 // 상세: 실행 방식(CLI ↔ 헤드리스)과 헤드리스 권한 모드
 const headlessDetail = (x) => {
   if (!x.local || x.kind !== "claude-code" || x.lobby || DATA) return "";
   const btn = x.headless
-    ? '<button data-headless="off" data-id="' + esc(x.id) + '" title="CLI 창으로 다시 엽니다 (그동안의 대화가 그대로 보임). 일하는 중이면 이번 턴이 끝난 뒤">CLI로 열기</button>'
-    : (x.status === "in_room" || x.status === "waiting") && !x.busy ? '<button data-headless="on" data-id="' + esc(x.id) + '" title="CLI 창을 닫고 창 없이 이어 갑니다. 메시지가 오면 데몬이 한 턴씩 실행합니다">헤드리스로</button>' : "";
-  return "<div><b>실행</b><span>" + (x.headless ? "☁ 헤드리스 (창 없음) " : "CLI 창 ") + btn + "</span></div>" +
-    "<div><b>헤드리스 권한</b><span>" + hlModeSelect(x) + "</span></div>";
+    ? '<button data-headless="off" data-id="' + esc(x.id) + '" title="CLI 창으로 다시 엽니다 (그동안의 대화가 그대로 보임). 일하는 중이면 이번 턴이 끝난 뒤">보이기 (Show)</button>'
+    : (x.status === "in_room" || x.status === "waiting") && !x.busy ? '<button data-headless="on" data-id="' + esc(x.id) + '" title="CLI 창을 닫고 창 없이 이어 갑니다. 메시지가 오면 데몬이 한 턴씩 실행합니다">숨기기 (Hide)</button>' : "";
+  return "<div><b>실행</b><span>" + (x.headless ? "☁ 숨김 (창 없음) " : "보임 (CLI 창) ") + btn + "</span></div>" +
+    "<div><b>숨김일 때 권한</b><span>" + hlModeSelect(x) + "</span></div>";
 };
 async function setHeadless(id, on, btn) {
-  if (on && !confirm("'" + nameOf(id) + "' 의 CLI 창을 닫고 헤드리스(창 없이)로 바꿀까요?\n메시지가 오면 데몬이 한 턴씩 실행합니다. [CLI로 열기]로 언제든 다시 열 수 있습니다.")) return;
+  if (on && !confirm("'" + nameOf(id) + "' 의 CLI 창을 닫고 숨길까요(Hide)?\n창 없이 이어 가고, 메시지가 오면 데몬이 한 턴씩 실행합니다. [보이기]로 언제든 다시 창을 열 수 있습니다.")) return;
   if (btn) btn.disabled = true;
   try {
     const r = await fetch("/agents/" + encodeURIComponent(id) + "/headless", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) }).then((x) => x.json());
     if (!r.ok) alert(r.error?.message || "바꾸지 못함");
-    else if (r.queued) alert("'" + nameOf(id) + "' 이(가) 지금 일하는 중입니다. 이번 턴이 끝나면 CLI 창으로 엽니다.");
+    else if (r.queued) alert("'" + nameOf(id) + "' 이(가) 지금 일하는 중입니다. 이번 턴이 끝나면 창을 보이게(Show) 합니다.");
   } catch (e) { alert(String(e)); }
   if (btn) btn.disabled = false;
   loadSide();
