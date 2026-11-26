@@ -591,7 +591,13 @@ function md(src) {
   return out.join("");
 }
 // 말풍선 본문: 마크다운으로 렌더
-function fmt(s) { return md(s); }
+// 마크다운 변환은 무거워(메시지 수백 개) 같은 글은 한 번만 — 화면은 이벤트마다 다시 그려진다
+const fmtCache = new Map();
+function fmt(s) {
+  let h = fmtCache.get(s);
+  if (h === undefined) { h = md(s); if (fmtCache.size > 5000) fmtCache.clear(); fmtCache.set(s, h); }
+  return h;
+}
 const FOCUS_HINT = "Ctrl+클릭: 이 에이전트의 CLI 창을 맨 앞으로";
 // 아이콘 내용: "emoji:…" → 그 글자, data:image/… → 이미지, 없으면 이름 첫 글자
 function icoInner(icon, name) {
@@ -828,13 +834,17 @@ async function loadChat(scroll) {
   else {
     if (!selected) return;
     const r = encodeURIComponent(selected);
-    const [room, m, l] = await Promise.all([j("/rooms/" + r), j("/rooms/" + r + "/messages?limit=1000"), j("/rooms/" + r + "/logs")]);
+    // 같은 방을 다시 읽을 때는 새 메시지만 (에이전트가 일하는 동안 이벤트가 잦아, 매번 전부 받으면 입력이 느려진다)
+    const prev = chat && chat.room.room_id === selected && !scroll ? chat.messages || [] : null;
+    const lastSeq = prev && prev.length ? prev[prev.length - 1].seq : 0;
+    const [room, m, l] = await Promise.all([j("/rooms/" + r), j("/rooms/" + r + "/messages?limit=1000" + (lastSeq ? "&after=" + lastSeq : "")), j("/rooms/" + r + "/logs")]);
+    if (selected !== decodeURIComponent(r)) return; // 읽는 동안 다른 방으로 옮김
     if (!room.ok) { // 다른 곳에서 방이 지워짐
       selected = null; chat = null; $("#head").hidden = true; $("#compose").hidden = true; $("#targets").hidden = true; $("#presence").innerHTML = "";
       $("#msgs").innerHTML = '<div class="empty">이 방은 더 이상 없습니다.</div>';
       return;
     }
-    let messages = m.messages || [];
+    let messages = lastSeq ? prev.concat(m.messages || []) : m.messages || [];
     while (messages.length && messages.length % 1000 === 0) { // 1000개씩 끊어 읽기
       const more = (await j("/rooms/" + r + "/messages?limit=1000&after=" + messages[messages.length - 1].seq)).messages || [];
       if (!more.length) break;
@@ -871,6 +881,7 @@ function askCard(m, msgs) {
     '<div class="af">' + (live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") +
     (canFocus ? '<button type="button" data-focus-agent="' + esc(m.from) + '">CLI 창 열기</button>' : "") + "</div></div>";
 }
+let lastChatHtml = "";
 function renderChat(scroll) {
   const box = $("#msgs");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
@@ -938,7 +949,10 @@ function renderChat(scroll) {
       '<div class="line"><div class="bubble">' + inner + "</div>" + meta + "</div>" +
       (lg ? '<div class="logs">' + lg + "</div>" : "") + "</div></div>";
   });
-  box.innerHTML = html || '<div class="empty">메시지 없음</div>';
+  html = html || '<div class="empty">메시지 없음</div>';
+  if (html === lastChatHtml) { renderReplying(); return; } // 달라진 게 없으면 다시 그리지 않는다 (입력·스크롤이 끊기지 않게)
+  lastChatHtml = html;
+  box.innerHTML = html;
   box.querySelectorAll(".quote").forEach((el) => (el.onclick = () => {
     const t = document.getElementById("s" + el.dataset.seq);
     if (t) { t.scrollIntoView({ block: "center", behavior: "smooth" }); const b = t.querySelector(".bubble"); b.classList.remove("flash"); void b.offsetWidth; b.classList.add("flash"); }
