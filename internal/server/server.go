@@ -58,6 +58,7 @@ type Server struct {
 	relayClients relayClients // 중계 (relay.go)
 	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
 	revive       claudeReviver   // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
+	headless     headlessRunner  // 창 없이 도는 에이전트 (headless.go)
 }
 
 func New(opts Options) (*Server, error) {
@@ -367,6 +368,7 @@ func (s *Server) routes() http.Handler {
 		}
 		return map[string]any{}, c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs)
 	})
+	h("POST /agents/{id}/headless", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.setHeadless(r) })
 	h("POST /agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.wake(r.PathValue("id"))
 	})

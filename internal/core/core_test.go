@@ -1750,3 +1750,25 @@ func TestClaimSpawn(t *testing.T) {
 		t.Fatal("빈 세션은 방에 들어가지 않음")
 	}
 }
+
+// 헤드리스: 헤드리스 턴에서 등록하면 PID 없이 표시되고 (턴 사이에도 오프라인이 아님), 창(PID)이 다시 등록하면 풀린다.
+func TestHeadlessRegister(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	e.alive[100] = true
+	id := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "h1", Cwd: s("D:/h"), Pid: i(100)})).Agent.ID
+	v := ok(c.SetHeadless(id, true))
+	if !v.Headless || v.Pid != nil || v.Status == "offline" {
+		t.Fatalf("헤드리스로: %+v", v)
+	}
+	delete(e.alive, 100)
+	check(t, c.Sweep())
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "h1", Headless: true, Provisional: true}))
+	if v := ok(c.GetAgent(id)); !v.Headless || v.Pid != nil || v.Status != "waiting" || v.Provisional {
+		t.Fatalf("헤드리스 턴 등록: %+v", v)
+	}
+	e.alive[200] = true
+	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "h1", Pid: i(200)})).Agent; v.Headless || v.Pid == nil || *v.Pid != 200 {
+		t.Fatalf("창이 다시 등록하면 헤드리스가 풀려야 함: %+v", v)
+	}
+}

@@ -623,8 +623,14 @@ func (c *Client) SendHuman(agent, text string) (core.Message, error) {
 
 // Wake 는 이 PC 의 에이전트를 깨운다: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고(launched), 떠 있으면 창을 앞으로.
 // Spawn 은 이 PC 의 새 터미널 창에서 협업할 새 세션을 연다 (by = 띄우는 에이전트). room 이 "" 이면 by 의 방, "-" 면 방에 넣지 않음.
-func (c *Client) Spawn(by, kind, cwd, prompt, name, room string) (out map[string]any, err error) {
-	err = c.call("POST", "/spawn", map[string]any{"by": by, "kind": kind, "cwd": cwd, "prompt": prompt, "name": name, "room": room}, &out, 0)
+func (c *Client) Spawn(by, kind, cwd, prompt, name, room string, headless bool) (out map[string]any, err error) {
+	err = c.call("POST", "/spawn", map[string]any{"by": by, "kind": kind, "cwd": cwd, "prompt": prompt, "name": name, "room": room, "headless": headless}, &out, 0)
+	return
+}
+
+// SetHeadless 는 이 PC 의 에이전트를 헤드리스로 바꾸거나(창을 닫음) CLI 창으로 다시 연다.
+func (c *Client) SetHeadless(id string, on bool) (out map[string]any, err error) {
+	err = c.call("POST", "/agents/"+esc(id)+"/headless", map[string]any{"on": on}, &out, 0)
 	return
 }
 

@@ -654,6 +654,13 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		if card.Capabilities == nil {
 			card.Capabilities = []string{}
 		}
+		switch { // 창 없이 도는 세션(헤드리스)은 PID 없이. 창(프로세스)이 다시 등록하면 헤드리스가 아님
+		case in.Headless:
+			card.Headless, card.Pid, card.Shared = true, nil, false
+			in.Provisional = false
+		case in.Pid != nil && *in.Pid > 0 && card.Headless:
+			card.Headless, card.Pid, card.Shared = false, in.Pid, in.Shared
+		}
 		if err := c.applyHost(&card, in); err != nil {
 			return err
 		}
@@ -2781,6 +2788,11 @@ func (c *Atalk) SetConfig(in Config) (cfg Config, err error) {
 		if in.TrashRetentionDays != nil && (*in.TrashRetentionDays < 0 || *in.TrashRetentionDays > 3650) {
 			return bad("invalid_trash", "trash_retention_days 는 0(비우지 않음) ~ 3650 일")
 		}
+		switch in.HeadlessPermissionMode {
+		case "", "default", "acceptEdits", "bypassPermissions", "plan":
+		default:
+			return bad("invalid_mode", "headless_permission_mode 는 default | acceptEdits | bypassPermissions | plan (비우면 Claude Code 설정)")
+		}
 		in.MachineName = strings.TrimSpace(in.MachineName)
 		if len([]rune(in.MachineName)) > 40 || strings.ContainsAny(in.MachineName, "\r\n") {
 			return bad("invalid_machine_name", "PC 이름은 한 줄, 40자 이하")
@@ -2989,4 +3001,30 @@ func (c *Atalk) HasWork(agent string) bool {
 		return nil
 	})
 	return has
+}
+
+// SetHeadless 는 이 PC 의 에이전트를 헤드리스(창 없이, 메시지마다 데몬이 한 턴씩 실행)로 바꾸거나 되돌린다.
+// 켜면 PID 를 지운다 (창은 호출한 쪽이 닫는다). 끄면 창이 다시 등록할 때 PID 가 정해진다.
+func (c *Atalk) SetHeadless(id string, on bool) (v AgentView, err error) {
+	err = c.guard(func() error {
+		card, err := c.requireAgent(id)
+		if err != nil {
+			return err
+		}
+		if !c.isLocal(card) {
+			return conflict("not_here", "이 PC 의 에이전트만 바꿀 수 있음")
+		}
+		card.Headless = on
+		if on {
+			card.Pid, card.Shared = nil, false
+		}
+		card.UpdatedAt = c.ts()
+		c.saveCard(card)
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": id, "action": "update"}})
+		return nil
+	})
+	if err == nil {
+		v, err = c.GetAgent(id)
+	}
+	return
 }

@@ -136,7 +136,9 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		echoTurnEnd(c, id, in) // Esc 로 중단한 턴의 남은 문장
 		if healthy {
 			_ = c.Activity(id, false)
-			_ = c.Away(id, "session_end:"+orDefault(in.Reason, "exit"))
+			if !Headless() { // 헤드리스 턴은 한 턴마다 끝난다 — 자리를 비운 것이 아님
+				_ = c.Away(id, "session_end:"+orDefault(in.Reason, "exit"))
+			}
 		}
 	}
 	if out != nil {
@@ -199,6 +201,9 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 		reg.Ancestors = procs.Ancestors(pid) // 다른 에이전트가 이 세션을 실행했으면 그 에이전트를 띄운 쪽으로
 	}
 	reg.Spawn = os.Getenv("ATALK_SPAWN") // atalk spawn 으로 연 창
+	if Headless() { // 데몬이 창 없이 실행한 턴: 턴이 끝나면 프로세스가 없으므로 PID 를 두지 않는다
+		reg.Headless, reg.Pid, reg.Shared, reg.Provisional = true, nil, false, false
+	}
 	if caps := os.Getenv("ATALK_CAPABILITIES"); caps != "" {
 		list := []string{}
 		for _, s := range strings.Split(caps, ",") {
@@ -545,3 +550,6 @@ func samePath(a, b string) bool {
 
 // sharedNote 는 Codex 가 공유 백그라운드 서버에서 돌 때의 안내 (사람에게도 보임).
 const sharedNote = "[ATalk] 이 Codex 세션은 공유 백그라운드 서버에서 실행 중이라, 웹 화면에서 이 창을 찾을 수 없고(Ctrl+클릭·깨우기) 창을 닫아도 방에 남아 보입니다. ATalk 와 함께 쓰려면 `codex --no-daemon` 으로 여세요 (이어서 열기: `codex resume --no-daemon <세션>`)."
+
+// Headless 는 이 훅이 데몬이 창 없이 실행한 턴(claude -p) 안에서 도는지 (ATALK_HEADLESS=1).
+func Headless() bool { return os.Getenv("ATALK_HEADLESS") == "1" }

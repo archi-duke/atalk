@@ -61,7 +61,8 @@ const help = `atalk — 에이전트 대화방
   atalk title ROOM 제목                               방 제목 바꾸기
   atalk delete ROOM --yes                             방 삭제 (멤버는 모두 나오고, 대화 기록은 <root>/trash/ 로 옮겨짐)
   atalk invite AGENT [--room ROOM]                    (방장) 내 방으로 초대 / --room 이면 사람으로 그 방에 초대
-  atalk spawn claude|codex|opencode [--cwd DIR] [--name N] [--room ROOM|-] TEXT|-   협업할 새 세션을 새 창에서 열기 (내가 띄운 것으로 기록, 내 방에 들어옴)
+  atalk spawn claude|codex|opencode [--cwd DIR] [--name N] [--room ROOM|-] [--headless] TEXT|-   협업할 새 세션을 새 창에서 열기 (내가 띄운 것으로 기록, 내 방에 들어옴. --headless: 창 없이, Claude Code 만)
+  atalk headless AGENT on|off        이 PC 의 Claude Code 를 헤드리스로 (창을 닫고 메시지마다 데몬이 한 턴씩) / off: CLI 창으로 다시 열기
   atalk wake AGENT                                    이 PC 의 에이전트 깨우기 (꺼져 있으면 새 터미널로 이전 세션 열기, 떠 있으면 창 앞으로)
   atalk accept ROOM | atalk decline ROOM              초대 수락/거절
   atalk request ROOM [--note TEXT]                    참여 신청
@@ -372,13 +373,34 @@ func main() {
 		if text == "" {
 			fail("missing_arg", "첫 지시(TEXT 또는 -)가 필요함")
 		}
-		res, err := lc.Spawn(me(), kind, a.str("cwd"), text, a.str("name"), a.str("room"))
+		res, err := lc.Spawn(me(), kind, a.str("cwd"), text, a.str("name"), a.str("room"), a.has("headless"))
 		check(err)
 		msg := fmt.Sprintf("%s 새 세션을 새 창에서 여는 중 (폴더 %v)", kind, res["cwd"])
+		if a.has("headless") {
+			msg = fmt.Sprintf("%s 새 세션을 창 없이(헤드리스) 시작함 (폴더 %v)", kind, res["cwd"])
+		}
 		if r, _ := res["room"].(string); r != "" {
 			msg += " — 등록되면 " + r + " 방에 들어옵니다"
 		}
 		out(res, msg)
+
+	case "headless": // 이 PC 의 에이전트를 헤드리스로 (창을 닫고 메시지마다 데몬이 한 턴씩) / off: CLI 창으로 다시 열기
+		target := at.arg(0, "AGENT (id 또는 이름)")
+		on := at.arg(1, "on | off") != "off"
+		all, err := lc.Agents("", "")
+		check(err)
+		id := ""
+		for _, x := range all {
+			if x.ID == target || x.Name == target {
+				id = x.ID
+			}
+		}
+		if id == "" {
+			fail("not_found", "에이전트 없음: "+target)
+		}
+		res, err := lc.SetHeadless(id, on)
+		check(err)
+		out(res, map[bool]string{true: target + " 을(를) 헤드리스로 바꿈 — 창을 닫았고, 메시지가 오면 데몬이 한 턴씩 실행합니다", false: target + " 을(를) CLI 창으로 다시 엶"}[on])
 
 	case "wake": // 이 PC 의 에이전트 깨우기: 꺼져 있으면 작업 폴더에서 새 터미널로 이전 세션을 열고, 떠 있으면 창을 앞으로
 		target := at.arg(0, "AGENT (id 또는 이름)")
@@ -543,6 +565,12 @@ func main() {
 					}
 					cfg.OfflineTTLHours = &n
 				}
+			case "headless-mode": // 헤드리스 턴의 권한 모드
+				v := at.arg(1, "default | acceptEdits | bypassPermissions | plan | settings")
+				if v == "settings" {
+					v = ""
+				}
+				cfg.HeadlessPermissionMode = v
 			case "grace":
 				switch v := at.arg(1, "분 | off | default"); v {
 				case "off", "never", "0":
