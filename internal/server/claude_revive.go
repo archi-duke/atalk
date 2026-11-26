@@ -4,7 +4,7 @@ package server
 // 대기 훅이 끝난 세션(🔕 — 12시간 제한이 지났거나 Esc 로 중단함)에 나에게 온 메시지가 오면,
 // 데몬이 그 창을 닫고(Claude 와 그 셸) 새 터미널 창에서 같은 세션을 이어서 연다 (claude --resume <세션> "<메시지 알림>").
 // 쉬는 동안에는 아무것도 하지 않으므로 토큰을 쓰지 않는다. 사람이 그 창을 쓰는 중이면 안 되므로
-// 대기 훅 프로세스가 정말 없고, 대화 기록(transcript)이 reviveQuiet 동안 바뀌지 않았을 때만 한다.
+// 대기 훅 프로세스가 정말 없고, 마지막 대화(transcript 의 마지막 주고받음)가 reviveQuiet 전일 때만 한다.
 
 import (
 	"encoding/json"
@@ -63,11 +63,12 @@ func claudeTranscript(sessionID string) string {
 }
 
 // turnEnded 는 대화 기록의 마지막 주고받음이 끝난 턴인지: 마지막이 도구를 부르지 않은 응답이거나, Esc 로 중단함.
-// 도구 호출·도구 결과·사람 입력으로 끝나 있으면 아직 일하는 중이다.
-func turnEnded(path string) bool {
+// 도구 호출·도구 결과·사람 입력으로 끝나 있으면 아직 일하는 중이다. at 은 그 마지막 주고받음의 시각 (없으면 0).
+// 파일 수정 시각은 쓰지 않는다: Claude 는 쉬는 중에도 요약(away_summary) 같은 항목을 덧붙인다.
+func turnEnded(path string) (ended bool, at time.Time) {
 	f, err := os.Open(path)
 	if err != nil {
-		return false
+		return false, at
 	}
 	defer f.Close()
 	const tail = 512 << 10
@@ -79,6 +80,7 @@ func turnEnded(path string) bool {
 	for i := len(lines) - 1; i >= 0; i-- {
 		var e struct {
 			Type    string `json:"type"`
+			TS      string `json:"timestamp"`
 			IsMeta  bool   `json:"isMeta"`
 			Compact bool   `json:"isCompactSummary"`         // 대화 요약 (턴이 아님)
 			Only    bool   `json:"isVisibleInTranscriptOnly"` // 기록에만 보이는 항목
@@ -90,12 +92,13 @@ func turnEnded(path string) bool {
 			continue
 		}
 		c := string(e.Message.Content)
+		at, _ = time.Parse(time.RFC3339Nano, e.TS)
 		if e.Type == "assistant" {
-			return !strings.Contains(c, `"tool_use"`)
+			return !strings.Contains(c, `"tool_use"`), at
 		}
-		return strings.Contains(c, "[Request interrupted by user")
+		return strings.Contains(c, "[Request interrupted by user"), at
 	}
-	return false
+	return false, at
 }
 
 // reviveClaude 는 이 PC 의 Claude Code 에이전트 중 🔕 인데 메시지가 온 세션을 되살린다 (watchLobbies 가 3초마다 부름).
@@ -164,11 +167,17 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 	if tp == "" {
 		return false, nil
 	}
-	if st, err := os.Stat(tp); err != nil || time.Since(st.ModTime()) < reviveQuiet {
-		return false, nil // 최근에 대화가 있었음 — 사람이 그 창을 쓰는 중일 수 있다
-	}
-	if !turnEnded(tp) {
+	ended, at := turnEnded(tp)
+	if !ended {
 		return false, nil // 턴 도중 (오래 걸리는 명령을 실행 중 등) — 작업 중 표시는 15분이면 풀리므로 기록으로 한 번 더 본다
+	}
+	if at.IsZero() {
+		if st, err := os.Stat(tp); err == nil {
+			at = st.ModTime()
+		}
+	}
+	if time.Since(at) < reviveQuiet {
+		return false, nil // 최근에 대화가 있었음 — 사람이 그 창을 쓰는 중일 수 있다
 	}
 	if n := procs.Name(*v.Pid); n != "" && !strings.Contains(strings.ToLower(n), "claude") && !strings.Contains(strings.ToLower(n), "node") {
 		return false, nil // PID 가 다른 프로그램에 다시 쓰였음
