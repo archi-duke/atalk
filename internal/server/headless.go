@@ -79,7 +79,7 @@ func headlessCmd(kind, sid, prompt, mode string) (*exec.Cmd, error) {
 		return cmd, nil
 	case "codex":
 		// codex exec 은 실행 중에 사람에게 묻지 않는다 → 정한 범위(샌드박스) 안에서만. 막히면 에이전트가 방에 묻고(atalk ask) 턴을 끝낸다
-		args := []string{"exec"}
+		args := []string{"exec", "--skip-git-repo-check"} // 작업 폴더가 git 저장소가 아니어도 (창으로 열 때는 이미 신뢰한 폴더)
 		switch mode {
 		case "bypassPermissions":
 			args = append(args, "--dangerously-bypass-approvals-and-sandbox")
