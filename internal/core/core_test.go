@@ -1772,3 +1772,34 @@ func TestHeadlessRegister(t *testing.T) {
 		t.Fatalf("창이 다시 등록하면 헤드리스가 풀려야 함: %+v", v)
 	}
 }
+
+// 띄운 세션 카드: 보관 기간을 따로 정하고(spawn_ttl_hours), 보관하지 않으면(spawn_keep=false) 꺼지는 대로 지운다.
+func TestSpawnedCardRetention(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	e.alive[100], e.alive[300], e.alive[400] = true, true, true
+	p := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "parent", Cwd: s("D:/p"), Pid: i(100)})).Agent.ID
+	k1 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "kid1", Cwd: s("D:/k"), Pid: i(300), Ancestors: []int{100}})).Agent
+	if k1.SpawnedBy != p {
+		t.Fatalf("띄운 에이전트 기록: %+v", k1)
+	}
+	ok(c.SetConfig(Config{SpawnTTLHours: i(2)}))
+	delete(e.alive, 300)
+	check(t, c.Sweep())
+	e.clock = e.clock.Add(time.Hour)
+	check(t, c.Sweep())
+	ok(c.GetAgent(k1.ID)) // 1시간: 보관 중
+	e.clock = e.clock.Add(2 * time.Hour)
+	check(t, c.Sweep())
+	_, err := c.GetAgent(k1.ID)
+	nok(t, err, k1.ID) // 3시간: 지움
+	ok(c.GetAgent(p))  // 띄운 에이전트는 그대로
+
+	no := false
+	k2 := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "kid2", Cwd: s("D:/k2"), Pid: i(400), Ancestors: []int{100}})).Agent
+	ok(c.SetConfig(Config{SpawnKeep: &no}))
+	delete(e.alive, 400)
+	check(t, c.Sweep())
+	_, err = c.GetAgent(k2.ID)
+	nok(t, err, k2.ID) // 보관하지 않음: 꺼지는 대로
+}
