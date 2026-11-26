@@ -263,6 +263,32 @@ func (s *Server) routes() http.Handler {
 		a, err := c.GetAgent(r.PathValue("id"))
 		return map[string]any{"agent": a}, err
 	})
+	// A2A 호환 네임카드 (A2A 1.0 AgentCard). 같은 카드를 A2A 의 잘 알려진 경로로도 낸다 (에이전트마다 /a2a/{id})
+	a2aCard := func(w http.ResponseWriter, r *http.Request) (any, error) {
+		a, err := c.GetAgent(r.PathValue("id"))
+		if err != nil {
+			return nil, err
+		}
+		writeJSON(w, core.ToA2A(a, "http://"+r.Host))
+		return skip{}, nil
+	}
+	h("GET /agents/{id}/agent-card.json", a2aCard)
+	h("GET /a2a/{id}/.well-known/agent-card.json", a2aCard)
+	// A2A 카드 목록 (켜져 있는 에이전트): 다른 A2A 도구가 에이전트를 찾을 때
+	h("GET /a2a/cards", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		list, err := c.ListAgents("", "")
+		if err != nil {
+			return nil, err
+		}
+		cards := []core.A2ACard{}
+		for _, a := range list {
+			if a.Status != "offline" && !a.Provisional {
+				cards = append(cards, core.ToA2A(a, "http://"+r.Host))
+			}
+		}
+		writeJSON(w, map[string]any{"cards": cards})
+		return skip{}, nil
+	})
 	h("PATCH /agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var p core.CardPatch
 		if err := readBody(r, &p); err != nil {
@@ -845,4 +871,12 @@ func writeErr(w http.ResponseWriter, err error) {
 	w.Header().Set("content-type", "application/json; charset=utf-8")
 	w.WriteHeader(ce.Status)
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": map[string]string{"code": ce.Code, "message": ce.Message}})
+}
+
+// writeJSON 은 감싸지 않은 JSON 을 그대로 쓴다 (A2A 카드처럼 정해진 모양을 내야 할 때).
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("content-type", "application/json; charset=utf-8")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
 }
