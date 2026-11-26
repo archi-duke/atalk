@@ -665,3 +665,14 @@ func (c *Client) Notice(room string, msgs []core.InboxMessage, extra []string, s
 	parts = append(parts, ProcessRule)
 	return strings.Join(parts, "\n\n")
 }
+
+// Approval 은 헤드리스 턴의 허가 요청: 대화방 확인 카드에 사람이 [허용]/[거부]로 답할 때까지 기다린다 (최대 10분).
+// agent 를 모르면 spawn 표식으로 찾는다.
+func (c *Client) Approval(agent, spawn, text string) (allow bool, message string, err error) {
+	var out struct {
+		Allow   bool   `json:"allow"`
+		Message string `json:"message"`
+	}
+	err = c.call("POST", "/approval", map[string]any{"agent": agent, "spawn": spawn, "text": text}, &out, 11*time.Minute)
+	return out.Allow, out.Message, err
+}

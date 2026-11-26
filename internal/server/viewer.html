@@ -92,6 +92,7 @@
   .askcard pre { margin:4px 0; white-space:pre-wrap; word-break:break-all; font-size:12px; }
   .askcard .af { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--muted); margin-top:4px; }
   .askcard .af button { border:1px solid var(--line); background:var(--panel); border-radius:8px; font-size:11px; padding:1px 8px; cursor:pointer; color:var(--fg); }
+  .askcard .af button.ok { background:#e8553b; border-color:#e8553b; color:#fff; font-weight:600; }
   .ask-t { color:#fff; border-radius:8px; padding:0 6px; font-weight:600; }
   .room-ico { width:44px; height:44px; border-radius:16px; background:var(--chat); display:grid; place-items:center; font-weight:700; color:var(--sys); flex:none; }
   .dot { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:4px; vertical-align:middle; }
@@ -902,9 +903,11 @@ function askCard(m, msgs) {
       else html += '<div class="aq">' + esc(line) + "</div>";
     }
   }
-  const canFocus = live && a?.local && !a?.shared;
+  const canFocus = live && a?.local && !a?.shared && !a?.headless;
+  const web = live && a?.approval && !DATA; // 헤드리스: 창이 없으므로 여기서 바로 답한다
   return '<div class="askcard' + (live ? " live" : "") + '"><div class="ah">🙋 ' + (live ? "사용자 확인 필요" : "확인 요청 (지나감)") + "</div>" + html +
-    '<div class="af">' + (live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") +
+    '<div class="af">' + (web ? "창 없이 도는 세션 — 여기서 답하세요 (10분 안에 답이 없으면 거부)" : live ? "에이전트 창(CLI)에서 답하세요" : "답했거나 지나간 요청") +
+    (web ? '<button type="button" class="ok" data-approve="1" data-agent-id="' + esc(m.from) + '">허용</button><button type="button" data-approve="0" data-agent-id="' + esc(m.from) + '">거부</button>' : "") +
     (canFocus ? '<button type="button" data-focus-agent="' + esc(m.from) + '">CLI 창 열기</button>' : "") + "</div></div>";
 }
 // 맨 아래로: 화면 밖 메시지(content-visibility)는 그려 봐야 높이가 정해지므로, 끝에 닿을 때까지 몇 프레임 더 내린다
@@ -926,6 +929,13 @@ $("#msgs").addEventListener("click", (e) => {
   }
   const rp = e.target.closest(".rp");
   if (rp) { startReply(lastChat.bySeq[rp.dataset.reply]); return; }
+  const ap = e.target.closest("[data-approve]");
+  if (ap) { // 헤드리스 허가 요청에 답함
+    ap.disabled = true;
+    fetch("/agents/" + encodeURIComponent(ap.dataset.agentId) + "/approval", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ allow: ap.dataset.approve === "1" }) })
+      .then((r) => r.json()).then((r) => { if (!r.ok) alert(r.error?.message || "답하지 못함"); }).catch((err) => alert(String(err)));
+    return;
+  }
   const fa = e.target.closest("[data-focus-agent]");
   if (fa) focusAgent(fa.dataset.focusAgent);
 });

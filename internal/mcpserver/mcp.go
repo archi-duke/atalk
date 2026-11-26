@@ -447,3 +447,38 @@ func meRoom(st *state) (string, string, error) {
 	room, err := st.c.MyRoom(me)
 	return me, room, err
 }
+
+// RunPermission 은 헤드리스 Claude Code 턴(claude -p --permission-prompt-tool mcp__atalkperm__permission)의 허가 도구만 있는 MCP 서버.
+// 허가가 필요한 도구를 쓰려 하면 ATalk 대화방에 확인 카드를 올리고, 사람이 웹에서 [허용]/[거부]할 때까지 기다린다.
+func RunPermission(ctx context.Context) error {
+	c := client.New("")
+	agent, spawn := os.Getenv("ATALK_AGENT"), os.Getenv("ATALK_SPAWN")
+	srv := mcp.NewServer(&mcp.Implementation{Name: "atalkperm", Version: "0.1.0"}, nil)
+	tool(srv, "permission", "ATalk: 사람에게 도구 실행 허가를 묻는다 (대화방 확인 카드).",
+		func(in struct {
+			ToolName  string         `json:"tool_name"`
+			Input     map[string]any `json:"input"`
+			ToolUseID string         `json:"tool_use_id,omitempty"`
+		}) (*mcp.CallToolResult, error) {
+			detail := ""
+			for _, k := range []string{"command", "file_path", "path", "url", "pattern"} {
+				if v, ok := in.Input[k].(string); ok && v != "" {
+					detail = v
+					break
+				}
+			}
+			text := in.ToolName + " 실행 허가"
+			if detail != "" {
+				text += ": " + detail
+			}
+			allow, msg, err := c.Approval(agent, spawn, text)
+			if err != nil {
+				allow, msg = false, "ATalk 에 허가를 묻지 못함: "+err.Error()
+			}
+			if allow {
+				return jsonText(map[string]any{"behavior": "allow", "updatedInput": in.Input}), nil
+			}
+			return jsonText(map[string]any{"behavior": "deny", "message": msg}), nil
+		})
+	return srv.Run(ctx, &mcp.StdioTransport{})
+}

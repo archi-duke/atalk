@@ -58,6 +58,8 @@ type Atalk struct {
 	busy      map[string]time.Time // 일하는 중인 에이전트 → 마지막 신호 시각 (메모리에만)
 	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
 	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
+	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
+	claimed   map[string]string // 쓴 spawn 표식 → 에이전트 id (헤드리스 허가 요청이 표식으로 에이전트를 찾음, 메모리에만)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -482,6 +484,7 @@ func (c *Atalk) view(card *AgentCard) AgentView {
 	v.Busy = c.isBusy(card.ID)
 	v.Listening = c.isListening(card.ID)
 	v.NeedsInput = c.needInput[card.ID]
+	v.Approval = c.approvals[card.ID]
 	h := Host{ID: c.machineID, OS: LocalOS()}
 	if card.Host != nil {
 		h = *card.Host
@@ -556,6 +559,7 @@ func (c *Atalk) ClaimSpawn(agent, token string) (v AgentView, prompt string, err
 			return conflict("spawn_expired", "띄우기 표식이 없거나 지났음")
 		}
 		delete(c.spawns, token)
+		c.noteClaimed(token, agent)
 		cur.SpawnedBy, room, by, prompt = p.By, p.Room, p.By, p.Prompt
 		if p.Name != "" {
 			cur.Name = p.Name
@@ -700,6 +704,7 @@ func (c *Atalk) Register(in RegisterInput) (res RegisterResult, err error) {
 		if cur := c.agents[id]; cur != nil && cur.SpawnedBy == "" { // 누가 띄웠나: atalk spawn 표식, 아니면 부모 프로세스가 등록된 에이전트
 			if p, ok := c.spawns[in.Spawn]; in.Spawn != "" && ok && c.now().Sub(p.At) <= spawnTTL {
 				delete(c.spawns, in.Spawn)
+				c.noteClaimed(in.Spawn, id)
 				cur.SpawnedBy, spawnRoom, spawnBy = p.By, p.Room, p.By
 				if p.Name != "" {
 					cur.Name = p.Name
@@ -3027,4 +3032,36 @@ func (c *Atalk) SetHeadless(id string, on bool) (v AgentView, err error) {
 		v, err = c.GetAgent(id)
 	}
 	return
+}
+
+func (c *Atalk) noteClaimed(token, agent string) {
+	if c.claimed == nil {
+		c.claimed = map[string]string{}
+	}
+	if len(c.claimed) > 500 {
+		c.claimed = map[string]string{}
+	}
+	c.claimed[token] = agent
+}
+
+// AgentBySpawn 은 그 spawn 표식으로 등록한 에이전트 id (없으면 "").
+func (c *Atalk) AgentBySpawn(token string) (id string) {
+	_ = c.guard(func() error { id = c.claimed[token]; return nil })
+	return
+}
+
+// SetApproval 은 에이전트에 웹에서 답할 수 있는 허가 요청이 있는지 표시한다 (화면의 확인 카드에 [허용]/[거부]).
+func (c *Atalk) SetApproval(agent string, on bool) {
+	_ = c.guard(func() error {
+		if c.approvals == nil {
+			c.approvals = map[string]bool{}
+		}
+		if on {
+			c.approvals[agent] = true
+		} else {
+			delete(c.approvals, agent)
+		}
+		c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "approval"}})
+		return nil
+	})
 }

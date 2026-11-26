@@ -59,6 +59,7 @@ type Server struct {
 	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
 	revive       claudeReviver   // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
 	headless     headlessRunner  // 창 없이 도는 에이전트 (headless.go)
+	approvals    approvals       // 헤드리스 허가 요청 (approval.go)
 }
 
 func New(opts Options) (*Server, error) {
@@ -234,6 +235,7 @@ func (s *Server) routes() http.Handler {
 	})
 	s.adminRoutes(h)
 	s.remoteAdminRoutes(h)
+	s.approvalRoutes(h)
 	h("GET /names", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		names, err := c.Names()
 		return map[string]any{"names": names}, err
