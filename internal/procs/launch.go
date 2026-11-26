@@ -4,6 +4,7 @@ package procs
 
 import (
 	"errors"
+	"os"
 	"regexp"
 )
 
@@ -46,3 +47,19 @@ const CodexWakePrompt = "[ATalk] 이 세션을 다시 열었습니다. 대화방
 
 // SafeSession 은 세션 id 를 명령줄에 그대로 넣어도 되는지.
 func SafeSession(id string) bool { return safeArg.MatchString(id) }
+
+// sessionEnv 는 에이전트(Claude Code) 세션 안에서만 의미 있는 환경 변수. 데몬이 Claude 세션 안에서 시작되면 이것들을 물려받아,
+// 데몬이 연 새 창의 Claude 가 자신을 "하위 세션" 으로 알고 대화 기록 저장을 끄는 등 다르게 동작한다 (기록이 없으면 CLI 기록·되살리기가 안 됨).
+var sessionEnv = []string{
+	"CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT",
+	"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+	"CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN", "CLAUDE_CODE_BRIDGE_SESSION_ID",
+	"CLAUDE_CODE_CHILD_NOTES_DIR", "CLAUDE_CODE_SESSION_ATTENDED",
+}
+
+// ScrubSessionEnv 는 데몬이 시작할 때 물려받은 에이전트 세션 환경 변수를 지운다 (데몬이 여는 창·명령에 넘어가지 않게).
+func ScrubSessionEnv() {
+	for _, k := range sessionEnv {
+		_ = os.Unsetenv(k)
+	}
+}

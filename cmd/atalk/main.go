@@ -269,6 +269,7 @@ func main() {
 		release, err := daemon.Lock(root)
 		check(err)
 		defer release()
+		procs.ScrubSessionEnv() // Claude 세션 안에서 시작돼도 그 세션 표시를 새 창·명령에 물려주지 않게
 		srv, err := server.New(server.Options{Root: root, Addr: fmt.Sprintf("127.0.0.1:%d", port), AwayGrace: time.Duration(graceMin) * time.Minute, MachineID: paths.MachineID(), RemoteDir: paths.RemoteServerDir()})
 		check(err)
 		p, err := srv.Listen()

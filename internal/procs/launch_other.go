@@ -21,7 +21,7 @@ func LaunchTerminalEnv(cwd string, argv []string, env map[string]string) error {
 	for i, a := range argv {
 		q[i] = shQuote(a)
 	}
-	pre := ""
+	pre := "unset " + strings.Join(sessionEnv, " ") + " && " // 에이전트 세션 안에서 시작된 데몬의 환경이 새 창으로 넘어가지 않게
 	for k, v := range env {
 		pre += "export " + k + "=" + shQuote(v) + " && "
 	}
