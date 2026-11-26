@@ -500,6 +500,7 @@ func (s *Server) remoteHandler() http.Handler {
 	for _, p := range []string{"echo", "activate", "activity", "away", "leave", "ack", "delivered", "need-input"} {
 		pass("POST /agents/{id}/"+p, rule{self: true})
 	}
+	pass("POST /approval", rule{actor: true, open: true}) // 허가 창·질문을 호스트 화면 카드에서 답하게 (답할 때까지 기다림)
 	pass("GET /agents/{id}/unread", rule{self: true})
 	pass("GET /agents/{id}/pending", rule{self: true})
 	pass("GET /agents/{id}/wait", rule{self: true, open: true})

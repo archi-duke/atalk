@@ -2,6 +2,8 @@ package hook
 
 import (
 	"encoding/json"
+
+	"atalk/internal/client"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,4 +123,44 @@ func recentTool(id string) (lastTool, bool) {
 		return t, false
 	}
 	return t, true
+}
+
+// permissionRequest 는 Claude Code 의 PermissionRequest 훅: 허가 창(또는 선택 질문 창)이 CLI 에 뜬 채로,
+// 대화방 확인 카드에 올려 웹에서 답하기를 기다린다. 웹에서 답하면 그 답으로 창을 처리하고(decision),
+// CLI 에서 먼저 답하거나 시간이 지나면 아무것도 돌려주지 않는다 (창은 CLI 에서 그대로). 헤드리스(-p)에서도 같다.
+func permissionRequest(c *client.Client, id string, in Input) any {
+	question := in.ToolName == "AskUserQuestion"
+	text := permissionText(in)
+	if question {
+		text = askText(in.ToolInput)
+	}
+	if text == "" {
+		return nil
+	}
+	r, err := c.Approval(id, text, question)
+	if err != nil || !r.Decided {
+		return nil
+	}
+	decision := map[string]any{"behavior": "deny", "message": orDefault(r.Message, "사용자가 거부함")}
+	if r.Allow {
+		decision = map[string]any{"behavior": "allow"}
+		if question { // 선택 질문: 원래 입력에 답(질문 → 고른 선택지)을 붙여 돌려준다
+			var ti map[string]any
+			if json.Unmarshal(in.ToolInput, &ti) == nil {
+				answers := map[string]any{}
+				if qs, ok := ti["questions"].([]any); ok {
+					for _, q := range qs {
+						if m, ok := q.(map[string]any); ok {
+							if qt, ok := m["question"].(string); ok {
+								answers[qt] = r.Answer
+							}
+						}
+					}
+				}
+				ti["answers"] = answers
+				decision["updatedInput"] = ti
+			}
+		}
+	}
+	return map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": "PermissionRequest", "decision": decision}}
 }

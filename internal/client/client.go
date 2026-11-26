@@ -666,13 +666,17 @@ func (c *Client) Notice(room string, msgs []core.InboxMessage, extra []string, s
 	return strings.Join(parts, "\n\n")
 }
 
-// Approval 은 헤드리스 턴의 허가 요청: 대화방 확인 카드에 사람이 [허용]/[거부]로 답할 때까지 기다린다 (최대 10분).
-// agent 를 모르면 spawn 표식으로 찾는다.
-func (c *Client) Approval(agent, spawn, text string) (allow bool, message string, err error) {
-	var out struct {
-		Allow   bool   `json:"allow"`
-		Message string `json:"message"`
-	}
-	err = c.call("POST", "/approval", map[string]any{"agent": agent, "spawn": spawn, "text": text}, &out, 11*time.Minute)
-	return out.Allow, out.Message, err
+// ApprovalResult 는 웹 카드에서 받은 답. Decided 가 false 면 웹에서 답하지 않음 (CLI 창에서 답했거나 시간이 지남).
+type ApprovalResult struct {
+	Decided bool   `json:"decided"`
+	Allow   bool   `json:"allow"`
+	Answer  string `json:"answer,omitempty"` // 질문이면 고른 답
+	Message string `json:"message,omitempty"`
+}
+
+// Approval 은 허가 요청·질문을 대화방 확인 카드로 올리고 웹에서 답할 때까지 기다린다 (PermissionRequest 훅).
+// CLI 창에서 먼저 답하면(에이전트가 일을 이어 가면) Decided=false 로 끝난다.
+func (c *Client) Approval(agent, text string, question bool) (r ApprovalResult, err error) {
+	err = c.call("POST", "/approval", map[string]any{"agent": agent, "text": text, "question": question}, &r, 31*time.Minute)
+	return
 }

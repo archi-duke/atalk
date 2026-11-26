@@ -247,7 +247,7 @@ func main() {
 	cmd, rest := a.pos[0], a.pos[1:]
 	at := args{pos: rest, flags: a.flags}
 	switch cmd {
-	case "server", "mcp", "mcp-permission", "hook", "daemon", "autostart", "install", "uninstall":
+	case "server", "mcp", "hook", "daemon", "autostart", "install", "uninstall":
 	case "remote", "connect":
 		check(daemon.Ensure(lc))
 	default:
@@ -296,11 +296,6 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
 		check(mcpserver.Run(ctx))
-
-	case "mcp-permission": // 헤드리스 턴의 허가 도구 (데몬이 claude -p 에 붙임)
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		defer stop()
-		check(mcpserver.RunPermission(ctx))
 
 	case "hook":
 		if at.arg(1, "EVENT") == "wait" { // asyncRewake: 깨울 일이 생기면 종료 코드 2

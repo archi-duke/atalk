@@ -118,9 +118,10 @@ func Check(p Paths) Status {
 func (p Paths) skillFile() string    { return filepath.Join(p.Claude, "skills", "atalk", "SKILL.md") }
 func (p Paths) settingsFile() string { return filepath.Join(p.Claude, "settings.json") }
 func (p Paths) pluginFile() string   { return filepath.Join(p.Opencode, "plugin", "atalk.ts") }
+
 // TUI 플러그인은 plugin/ 폴더 밖에 둔다 (plugin/ 의 파일은 서버 플러그인으로만 불러와 server() 가 없으면 오류). tui.json 의 plugin 목록으로 등록.
-func (p Paths) tuiPluginFile() string { return filepath.Join(p.Opencode, "atalk", "atalk-tui.ts") }
-func (p Paths) tuiConfigFile() string { return filepath.Join(p.Opencode, "tui.json") }
+func (p Paths) tuiPluginFile() string    { return filepath.Join(p.Opencode, "atalk", "atalk-tui.ts") }
+func (p Paths) tuiConfigFile() string    { return filepath.Join(p.Opencode, "tui.json") }
 func (p Paths) oldTuiPluginFile() string { return filepath.Join(p.Opencode, "plugin", "atalk-tui.ts") }
 
 // editTuiPlugins 는 opencode 의 tui.json "plugin" 목록에 ATalk TUI 플러그인을 넣거나(add) 뺀다. 다른 설정은 그대로 둔다.
@@ -175,6 +176,9 @@ func Skill(p Paths) (string, error) {
 // waitHookTimeout 은 대기 훅(asyncRewake)의 제한 시간(초). atalk hook claude-code wait 의 최대 대기(12시간)와 같게.
 const waitHookTimeout = 12 * 60 * 60
 
+// permissionHookTimeout 은 PermissionRequest 훅의 제한 시간(초). 데몬이 웹의 답을 기다리는 시간(30분)보다 조금 길게.
+const permissionHookTimeout = 31 * 60
+
 // hookEvents 는 Claude Code settings.json 에 넣는 훅. async 는 백그라운드 + asyncRewake (끝날 때 종료 코드 2 면 쉬는 Claude 를 깨움).
 var hookEvents = []struct {
 	event, arg    string
@@ -187,9 +191,10 @@ var hookEvents = []struct {
 	{"Stop", "wait", true, true, ""}, // 응답을 마칠 때마다 다시 대기: 메시지가 오면 깨움 (Monitor listen 대신 — 기다리는 동안 토큰을 쓰지 않음)
 	{"SessionEnd", "session-end", false, false, ""},
 	{"UserPromptSubmit", "prompt", false, false, ""},
-	{"Notification", "notify", true, false, ""},             // 사람의 확인이 필요함(도구 허가·질문) → 대화방에 알리고 "확인 필요" 표시
-	{"PreToolUse", "pre", true, false, ""},   // 사용자에게 묻는 질문 → 대화방에 질문 내용
-	{"PostToolUse", "tool", true, false, ""}, // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
+	{"Notification", "notify", true, false, ""},                   // 사람의 확인이 필요함(도구 허가·질문) → 대화방에 알리고 "확인 필요" 표시
+	{"PreToolUse", "pre", true, false, ""},                        // 사용자에게 묻는 질문 → 대화방에 질문 내용
+	{"PermissionRequest", "permission-request", false, false, ""}, // 허가 창·선택 질문 → 대화방 카드에서 웹으로 답할 수 있게 (창과 함께 기다림)
+	{"PostToolUse", "tool", true, false, ""},                      // 백그라운드: 도구를 쓸 때마다 그때까지 쓴 응답 문장을 대화방 기록에 (CLI 응답 실시간)
 }
 
 // isOurs 는 settings.json 의 훅 명령이 atalk 가 넣은 것인지 본다.
@@ -229,6 +234,9 @@ func Claude(p Paths) ([]string, error) {
 			entry := map[string]any{"type": "command", "command": fmt.Sprintf(`"%s" hook claude-code %s`, Exe(), h.arg)}
 			if h.async {
 				entry["async"] = true
+			}
+			if h.arg == "permission-request" { // 웹의 답을 기다리는 동안 (CLI 창은 함께 떠 있음)
+				entry["timeout"] = permissionHookTimeout
 			}
 			if h.rewake {
 				entry["asyncRewake"] = true

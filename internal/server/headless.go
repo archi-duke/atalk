@@ -6,7 +6,6 @@ package server
 // CLI 로 열지 않고(409), CLI 창이 떠 있는 세션은 헤드리스가 아니다(창이 등록하면 Headless 가 풀림).
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -59,16 +58,6 @@ func runClaudeTurn(cwd, sid, prompt, logID, mode string, env map[string]string) 
 		return errors.New("claude 를 찾을 수 없음: " + err.Error())
 	}
 	args := []string{"-p"}
-	// 허가가 필요한 도구는 ATalk 에 묻는다 (대화방 확인 카드 → 웹에서 [허용]/[거부])
-	if exe, err := os.Executable(); err == nil {
-		cfg := map[string]any{"mcpServers": map[string]any{"atalkperm": map[string]any{"command": exe, "args": []string{"mcp-permission"}}}}
-		b, _ := json.Marshal(cfg)
-		p := filepath.Join(os.TempDir(), "atalk-headless", "permission-mcp.json")
-		_ = os.MkdirAll(filepath.Dir(p), 0o755)
-		if os.WriteFile(p, b, 0o644) == nil {
-			args = append(args, "--mcp-config", p, "--permission-prompt-tool", "mcp__atalkperm__permission")
-		}
-	}
 	if mode != "" { // 창이 없어 허가를 물을 수 없음 — 설정한 권한 모드로
 		args = append(args, "--permission-mode", mode)
 	}
@@ -157,7 +146,7 @@ func (s *Server) runHeadless() {
 		_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
 		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
 		go func(id, cwd, sid string) {
-			if err := runClaudeTurn(cwd, sid, text, id, s.headlessMode(), map[string]string{"ATALK_AGENT": id}); err != nil {
+			if err := runClaudeTurn(cwd, sid, text, id, s.headlessMode(), nil); err != nil {
 				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
 			}
 			s.headless.mu.Lock()

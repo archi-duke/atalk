@@ -106,6 +106,10 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		if healthy {
 			_ = c.NeedInput(id, permissionText(in))
 		}
+	case "permission-request": // Claude Code PermissionRequest: 허가 창·선택 질문이 뜰 때. 웹 카드에서 답하면 그 답으로 창을 처리한다
+		if healthy && kind == "claude-code" {
+			out = permissionRequest(c, id, in)
+		}
 	case "ask": // PreToolUse(AskUserQuestion): 사용자에게 묻는 질문을 대화방에
 		if healthy && in.ToolName == "AskUserQuestion" {
 			if text := askText(in.ToolInput); text != "" {

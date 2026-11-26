@@ -49,7 +49,7 @@ func TestApproval(t *testing.T) {
 	}
 	select {
 	case out := <-done:
-		if out["allow"] != true {
+		if out["allow"] != true || out["decided"] != true {
 			t.Fatalf("허용이어야 함: %v", out)
 		}
 	case <-time.After(3 * time.Second):
@@ -60,6 +60,24 @@ func TestApproval(t *testing.T) {
 	}
 	if out := call("/agents/"+id+"/approval", `{"allow":true}`); out["ok"] == true {
 		t.Fatal("기다리는 요청이 없으면 오류")
+	}
+	// CLI 에서 먼저 답함: 에이전트가 일을 이어 가 확인 필요 표시가 풀리면 decided=false 로 끝난다
+	go func() { done <- call("/approval", `{"agent":"`+id+`","text":"질문 (A / B)","question":true}`) }()
+	for i := 0; i < 100; i++ {
+		if v, _ := s.Core.GetAgent(id); v.Approval {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	check := s.Core.SetActivity(id, true)
+	_ = check
+	select {
+	case out := <-done:
+		if out["decided"] != false {
+			t.Fatalf("CLI 에서 답하면 decided=false: %v", out)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("CLI 답을 알아채지 못함")
 	}
 	_ = http.StatusOK
 }
