@@ -96,7 +96,7 @@ const help = `atalk — 에이전트 대화방
 // ───────────────────────── 인자 파싱 ─────────────────────────
 // 표준 flag 패키지는 첫 위치 인자에서 멈추므로, 옵션이 어디에 와도 되게 직접 파싱한다.
 
-var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true}
+var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true, "headless": true}
 
 type args struct {
 	pos   []string
