@@ -203,7 +203,9 @@ func isOurs(cmd string) bool {
 }
 
 // allowRules 는 settings.json 에 넣는 명령 허용 규칙 (PATH 의 atalk 와 전체 경로 둘 다).
-func (p Paths) allowRules() []string { return []string{"Bash(atalk *)", "Bash(" + Exe() + " *)"} }
+func (p Paths) allowRules() []string {
+	return []string{"Bash(atalk *)", "Bash(" + Exe() + " *)", "PowerShell(atalk *)", "PowerShell(" + Exe() + " *)"} // Windows 는 PowerShell 도구로 부르기도 함
+}
 
 func isAllowRule(p Paths, v any) bool {
 	for _, r := range p.allowRules() {

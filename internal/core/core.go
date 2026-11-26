@@ -59,6 +59,7 @@ type Atalk struct {
 	spawns    map[string]pendingSpawn // atalk spawn 표식 → 띄운 에이전트·방·이름 (메모리에만, 10분)
 	needInput map[string]string // 사람의 확인을 기다리는 에이전트 → 내용 (메모리에만)
 	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
+	askSeq    map[string][2]any // 에이전트 → 마지막 확인 카드의 방·번호 (답을 카드에 남길 때)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -1889,7 +1890,11 @@ func (c *Atalk) SetNeedInput(agent, text string) error {
 			c.needInput[agent] = text
 			if m, ok := c.memberships[agent]; ok {
 				if room, err := c.requireRoom(m.Room, true); err == nil && c.lastSeq[m.Room] < room.Policy.MaxMessages {
-					c.appendMessage(m.Room, Message{From: agent, Type: "status", To: []string{}, Body: "🙋 사용자 확인 필요 — " + text})
+					msg := c.appendMessage(m.Room, Message{From: agent, Type: "status", To: []string{}, Body: "🙋 사용자 확인 필요 — " + text})
+					if c.askSeq == nil {
+						c.askSeq = map[string][2]any{}
+					}
+					c.askSeq[agent] = [2]any{m.Room, msg.Seq}
 				}
 			}
 		}
@@ -3061,4 +3066,21 @@ func (c *Atalk) SetApproval(agent string, on bool) {
 		c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "approval"}})
 		return nil
 	})
+}
+
+// NoteAskAnswer 는 에이전트의 마지막 확인 카드에 사람이 한 답을 남긴다 (처리 기록의 메모: "답: …"). 화면은 지나간 카드에 이 답을 보여 준다.
+func (c *Atalk) NoteAskAnswer(agent, answer string) {
+	var room string
+	var seq int
+	_ = c.guard(func() error {
+		if v, ok := c.askSeq[agent]; ok {
+			room, _ = v[0].(string)
+			seq, _ = v[1].(int)
+		}
+		return nil
+	})
+	if room == "" || seq == 0 {
+		return
+	}
+	_, _ = c.Log(agent, room, seq, "done", "답: "+answer)
 }
