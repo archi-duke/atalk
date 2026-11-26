@@ -722,6 +722,8 @@ async function loadSide() {
   pastNames = nm.names || {};
   $("#root").textContent = h.root || "";
   agents = Object.fromEntries((a.agents || []).map((x) => [x.id, x]));
+  // 대화창은 에이전트 상태(확인 카드의 [허용]/[거부], 작업 중 표시 등)도 그리므로, 새 상태로 다시 그린다 (바뀐 말풍선만)
+  if (chat && !DATA) renderChat(false);
   rooms = r.rooms || [];
   await Promise.all(rooms.map(async (x) => {
     if (!x.last_seq || previews[x.room_id]?.seq === x.last_seq) return;
