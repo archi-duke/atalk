@@ -478,6 +478,21 @@ func (s *Server) remoteHandler() http.Handler {
 		forRemote(&res.Agent, s.viewerHost(r))
 		return res, err
 	})
+	// 원격 에이전트가 자기 PC 에서 띄운 협업 세션(atalk spawn)을 이 데몬에 등록 → 새 세션의 토큰. 띄운 에이전트의 방에 바로 들어감
+	fn("POST /remote/spawn", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Card core.RegisterInput `json:"card"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		res, tok, err := c.SpawnRemote(remoteAgentOf(r), b.Card)
+		if err != nil {
+			return nil, err
+		}
+		forRemote(&res.Agent, s.viewerHost(r))
+		return map[string]any{"agent": res.Agent, "token": tok}, nil
+	})
 	fn("POST /remote/disconnect", rule{}, func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]any{}, c.RevokeRemote(remoteAgentOf(r))
 	})

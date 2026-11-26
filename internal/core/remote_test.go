@@ -121,3 +121,31 @@ func TestRemoteTokenPersists(t *testing.T) {
 		t.Fatal("재시작 직후에는 시작 시각부터 센다")
 	}
 }
+
+// 원격 에이전트가 자기 PC 에서 띄운 세션: 같은 PC 로, 띄운 에이전트로 표시되고, 그 방에 바로 들어간다.
+func TestSpawnRemote(t *testing.T) {
+	c := newEnv(t).core()
+	res, _, err := c.PairRemote(remoteCard("r1"))
+	check(t, err)
+	by := res.Agent.ID
+	if _, err := c.CreateRoom(by, "g", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	// 이 PC 의 에이전트는 쓸 수 없음
+	loc, err := c.Register(RegisterInput{Kind: "claude-code", SessionID: "loc", Cwd: s("/w")})
+	check(t, err)
+	_, _, err = c.SpawnRemote(loc.Agent.ID, RegisterInput{Kind: "claude-code", SessionID: "n0"})
+	nok(t, err, "원격으로 연결된")
+
+	sp, tok, err := c.SpawnRemote(by, RegisterInput{Kind: "codex", SessionID: "n1", Name: s("보조"), Host: &Host{ID: "spoof", Name: "X", OS: "linux"}})
+	check(t, err)
+	a := sp.Agent
+	if tok == "" || c.RemoteAgent(tok) != a.ID || a.SpawnedBy != by || a.Host == nil || a.Host.ID != "other-pc" || a.Local {
+		t.Fatalf("띄운 원격 세션: %+v", a)
+	}
+	if a.Room == nil || *a.Room != "g" || a.Status != "in_room" {
+		t.Fatalf("띄운 에이전트의 방에 들어가야 함: %+v", a)
+	}
+	_, _, err = c.SpawnRemote(by, RegisterInput{Kind: "claude-code", SessionID: "r1"})
+	nok(t, err, "새 세션")
+}
