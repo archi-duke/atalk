@@ -248,7 +248,10 @@
   .m.mine .bubble { background:var(--mine); color:var(--mine-fg); border-radius:14px 4px 14px 14px; }
   .m:not(.first) .bubble { border-radius:14px; }
   /* 작업 메모: send 로 답한 턴에서 에이전트가 작업 중간에 쓴 문장 (CLI 의 흰색 ●). 세 줄까지만, 누르면 펼침 */
-  .bubble.note { background:transparent; border:1px dashed #9aa0a8; color:var(--muted); font-size:12.5px; cursor:pointer; }
+  .bubble.note { background:transparent; border:1px dashed #9aa0a8; color:var(--muted); font-size:12.5px; }
+  .bubble.note.long { cursor:pointer; }
+  .bubble.note.long::after { content:"▾ 더 보기"; display:block; margin-top:2px; font-size:11px; color:var(--accent); }
+  .bubble.note.long.open::after { content:"▴ 접기"; }
   .bubble.note .md { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   .bubble.note.open .md { display:block; }
   .bubble.note .note-t { display:block; font-size:10.5px; margin-bottom:2px; }
@@ -1052,8 +1055,16 @@ function scrollBottom(box, n = 0, tok = userScroll) {
 let lastChat = { room: null, keys: [], htmls: [], bySeq: {} }; // 지난번에 그린 목록 (바뀐 항목만 다시 그리기)
 // 목록 안 클릭은 목록 하나에서 받는다 (항목을 바꿔 끼워도 다시 걸 필요 없음)
 const noteOpen = new Set(); // 펼친 작업 메모
+// 세 줄을 넘는 메모에만 "더 보기/접기" 를 단다 (짧은 메모는 누를 게 없음)
+function markLongNotes(box) {
+  for (const b of box.querySelectorAll(".bubble.note")) {
+    const md = b.querySelector(".md");
+    const long = noteOpen.has(Number(b.dataset.note)) || (md && md.scrollHeight > md.clientHeight + 1);
+    b.classList.toggle("long", !!long);
+  }
+}
 $("#msgs").addEventListener("click", (e) => {
-  const nt = e.target.closest(".bubble.note");
+  const nt = e.target.closest(".bubble.note.long");
   if (nt && !e.target.closest("a") && !String(getSelection())) {
     const seq = Number(nt.dataset.note);
     noteOpen.has(seq) ? noteOpen.delete(seq) : noteOpen.add(seq);
@@ -1135,7 +1146,7 @@ function renderChat(scroll) {
     }
     const note = !!(m.echo && !m.human && m.reply_to && sentTo.has(m.from + "|" + m.reply_to));
     const q = m.reply_to && !note ? bySeq[m.reply_to] : null;
-    if (note) inner += '<span class="note-t" title="에이전트가 작업 중간에 쓴 말 (CLI 기록). 누르면 펼치거나 접습니다">📝 작업 메모</span>';
+    if (note) inner += '<span class="note-t" title="에이전트가 작업 중간에 쓴 말 (CLI 기록). 길면 눌러서 펼치거나 접습니다">📝 작업 메모</span>';
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
     inner += m.type === "status" && m.body.startsWith(ASK_PREFIX) ? askCard(m, msgs) : '<div class="md">' + fmt(m.body) + "</div>";
 
@@ -1163,6 +1174,7 @@ function renderChat(scroll) {
     if (keys.length > prev.keys.length) box.insertAdjacentHTML("beforeend", htmls.slice(prev.keys.length).join(""));
   } else box.innerHTML = htmls.join("");
   lastChat = { room: room.room_id, keys, htmls, bySeq };
+  markLongNotes(box);
   renderReplying();
   if (scroll || atBottom) scrollBottom(box);
 }
