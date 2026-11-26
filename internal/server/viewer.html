@@ -213,6 +213,7 @@
   .sys { text-align:center; margin:6px 0; }
 
   .m { display:flex; gap:8px; margin-top:2px; align-items:flex-start; }
+  .hl-mode { font-size:11px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--fg); padding:1px 2px; margin-right:4px; align-self:center; max-width:120px; }
   .hl-tag { font-size:11px; color:var(--muted); border:1px solid var(--line); border-radius:8px; padding:1px 6px; margin-right:4px; align-self:center; }
   /* 띄운 세션: 띄운 에이전트 카드 아래 들여 쓰기 */
   .row.child { padding-left:calc(16px + var(--depth, 1) * 18px); position:relative; }
@@ -632,9 +633,12 @@ function avatar(m) {
 // 깨우기: 이 PC 의 Claude Code·opencode·Codex 세션. 꺼져 있으면 새 터미널로 이전 세션을 이어서 열고, 떠 있으면 창을 앞으로
 const canWake = (x) => x.local && !x.lobby && !x.shared && !x.headless && (x.kind === "claude-code" || x.kind === "opencode" || x.kind === "codex") && (x.status === "offline" || x.status === "waiting" || x.status === "away");
 // 헤드리스(창 없이 메시지마다 데몬이 한 턴씩): 이 PC 의 Claude Code 만. 창이 떠 있으면 [헤드리스로], 헤드리스면 [CLI로 열기]
+const HL_MODES = [["", "권한: 이어받기"], ["default", "권한: 매번 묻기"], ["acceptEdits", "권한: 파일 수정 허용"], ["bypassPermissions", "권한: 모두 허용"], ["plan", "권한: 계획만"]];
+const hlModeSelect = (x) => '<select class="hl-mode" data-id="' + esc(x.id) + '" title="헤드리스 턴의 권한 모드 (창이 없어 허용 목록 밖 도구는 웹 카드로 물음)">' +
+  HL_MODES.map(([v, t]) => '<option value="' + v + '"' + ((x.headless_mode || "") === v ? " selected" : "") + ">" + t + "</option>").join("") + "</select>";
 const headlessButtons = (x) => {
   if (!x.local || x.kind !== "claude-code" || x.lobby) return "";
-  if (x.headless) return '<span class="hl-tag" title="창 없이 도는 세션: 메시지가 오면 데몬이 한 턴씩 실행합니다">헤드리스</span><button class="wake" data-headless="off" data-id="' + esc(x.id) + '" title="이 세션을 CLI 창으로 다시 엽니다 (그동안의 대화가 그대로 보임)">CLI로 열기</button>';
+  if (x.headless) return hlModeSelect(x) + '<span class="hl-tag" title="창 없이 도는 세션: 메시지가 오면 데몬이 한 턴씩 실행합니다">헤드리스</span><button class="wake" data-headless="off" data-id="' + esc(x.id) + '" title="이 세션을 CLI 창으로 다시 엽니다 (그동안의 대화가 그대로 보임)">CLI로 열기</button>';
   if ((x.status === "in_room" || x.status === "waiting") && !x.busy) return '<button class="wake" data-headless="on" data-id="' + esc(x.id) + '" title="CLI 창을 닫고 창 없이 이어 갑니다. 메시지가 오면 데몬이 한 턴씩 실행합니다">헤드리스로</button>';
   return "";
 };
@@ -794,6 +798,14 @@ function renderSide() {
       loadSide();
     };
     $("#list").querySelectorAll("[data-wake]").forEach((b) => (b.onclick = () => wakeAgent(b.dataset.wake, b)));
+    $("#list").querySelectorAll(".hl-mode").forEach((sel) => {
+      sel.onclick = (e) => e.stopPropagation();
+      sel.onchange = async () => {
+        const r = await fetch("/agents/" + encodeURIComponent(sel.dataset.id) + "/headless-mode", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: sel.value }) }).then((x) => x.json()).catch((e) => ({ ok: false, error: { message: String(e) } }));
+        if (!r.ok) alert(r.error?.message || "바꾸지 못함");
+        loadSide();
+      };
+    });
     $("#list").querySelectorAll("[data-headless]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); setHeadless(b.dataset.id, b.dataset.headless === "on", b); }));
     $("#list").querySelectorAll(".del").forEach((b) => (b.onclick = () => {
       if (confirm("'" + nameOf(b.dataset.id) + "' 네임카드를 삭제할까요? (지난 대화의 이름은 그대로 보입니다)")) del([b.dataset.id]);

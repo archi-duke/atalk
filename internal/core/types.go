@@ -35,6 +35,9 @@ type AgentCard struct {
 	SpawnedBy string `json:"spawned_by,omitempty"`
 	// Headless 는 창 없이 도는 세션: 메시지가 오면 데몬이 한 턴씩 실행한다 (claude -p --resume). 턴 사이에는 프로세스가 없어 PID 를 두지 않는다
 	Headless bool `json:"headless,omitempty"`
+	// HeadlessMode 는 헤드리스 턴의 권한 모드 (--permission-mode). 헤드리스로 바꿀 때 CLI 에서 쓰던 모드를 이어받고, 에이전트 목록에서 바꿀 수 있다.
+	// "" 이면 대화 기록의 마지막 모드, 그것도 없으면 설정(headless_permission_mode)
+	HeadlessMode string `json:"headless_mode,omitempty"`
 	// Avatar 는 화면의 아이콘: "emoji:🦊" 또는 작은 이미지 data URL (png·jpeg·webp). 없으면 이름 첫 글자
 	Avatar string `json:"avatar,omitempty"`
 	RegisteredAt string   `json:"registered_at"`

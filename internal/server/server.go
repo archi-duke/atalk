@@ -371,6 +371,17 @@ func (s *Server) routes() http.Handler {
 		return map[string]any{}, c.LogDelivered(r.PathValue("id"), b.Room, b.Seqs)
 	})
 	h("POST /agents/{id}/headless", func(w http.ResponseWriter, r *http.Request) (any, error) { return s.setHeadless(r) })
+	// 헤드리스 턴의 권한 모드 {mode}: "" 이어받기 | default | acceptEdits | bypassPermissions | plan
+	h("POST /agents/{id}/headless-mode", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		var b struct {
+			Mode string `json:"mode"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		a, err := c.SetHeadlessMode(r.PathValue("id"), b.Mode)
+		return map[string]any{"agent": a}, err
+	})
 	h("POST /agents/{id}/wake", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return s.wake(r.PathValue("id"))
 	})

@@ -6,7 +6,10 @@ package server
 // CLI 로 열지 않고(409), CLI 창이 떠 있는 세션은 헤드리스가 아니다(창이 등록하면 Headless 가 풀림).
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
+	"slices"
 	"fmt"
 	"log"
 	"net/http"
@@ -145,8 +148,9 @@ func (s *Server) runHeadless() {
 		s.headless.mu.Unlock()
 		_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
 		log.Printf("헤드리스: %s 에 메시지 %d개로 한 턴 실행", v.ID, len(forMe))
+		mode := s.modeFor(v)
 		go func(id, cwd, sid string) {
-			if err := runClaudeTurn(cwd, sid, text, id, s.headlessMode(), nil); err != nil {
+			if err := runClaudeTurn(cwd, sid, text, id, mode, nil); err != nil {
 				log.Printf("헤드리스 턴 실패 (%s): %v", id, err)
 			}
 			s.headless.mu.Lock()
@@ -205,6 +209,11 @@ func (s *Server) setHeadless(r *http.Request) (any, error) {
 			_ = procs.CloseAgentWindow(*v.Pid)
 		}
 		killWaitHook(id)
+		if v.HeadlessMode == "" { // CLI 에서 쓰던 권한 모드를 그대로 이어받는다 (에이전트 목록에서 바꿀 수 있음)
+			if m := lastPermissionMode(v.SessionID); m != "" {
+				_, _ = s.Core.SetHeadlessMode(id, m)
+			}
+		}
 		a, err := s.Core.SetHeadless(id, true)
 		return map[string]any{"agent": a}, err
 	}
@@ -245,4 +254,47 @@ func killWaitHook(id string) {
 func (s *Server) headlessMode() string {
 	cfg, _ := s.Core.GetConfig()
 	return cfg.HeadlessPermissionMode
+}
+
+// modeFor 는 헤드리스 턴의 권한 모드: 카드에 정한 모드 → 대화 기록의 마지막 모드(이어받기) → 설정.
+func (s *Server) modeFor(v core.AgentView) string {
+	if v.HeadlessMode != "" {
+		return v.HeadlessMode
+	}
+	if m := lastPermissionMode(v.SessionID); m != "" {
+		return m
+	}
+	return s.headlessMode()
+}
+
+// lastPermissionMode 는 Claude Code 대화 기록에 남은 마지막 권한 모드 (CLI 에서 Shift+Tab 으로 바꾼 것 포함). 없으면 "".
+func lastPermissionMode(sid string) string {
+	tp := claudeTranscript(sid)
+	if tp == "" {
+		return ""
+	}
+	f, err := os.Open(tp)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	const tail = 2 << 20
+	if st, err := f.Stat(); err == nil && st.Size() > tail {
+		_, _ = f.Seek(st.Size()-tail, 0)
+	}
+	b, _ := io.ReadAll(f)
+	lines := strings.Split(string(b), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if !strings.Contains(lines[i], `"permission-mode"`) {
+			continue
+		}
+		var e struct {
+			Type string `json:"type"`
+			Mode string `json:"permissionMode"`
+		}
+		if json.Unmarshal([]byte(strings.TrimSpace(lines[i])), &e) == nil && e.Type == "permission-mode" && slices.Contains(core.HeadlessModes, e.Mode) {
+			return e.Mode
+		}
+	}
+	return ""
 }
