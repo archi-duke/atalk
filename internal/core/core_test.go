@@ -1819,3 +1819,19 @@ func TestHeadlessMode(t *testing.T) {
 		t.Fatal("비우면 이어받기")
 	}
 }
+
+// CLI 창이 떠 있으면 헤드리스 턴이 등록해도 숨김으로 되돌리지 않는다
+func TestHeadlessNoFlipLiveCLI(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	e.alive[300] = true
+	id := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "nf", Cwd: s("D:/n"), Pid: i(300)})).Agent.ID
+	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "nf", Headless: true})).Agent; v.Headless || v.Pid == nil {
+		t.Fatalf("살아 있는 CLI 창이 있으면 숨김으로 바뀌면 안 됨: %+v", v)
+	}
+	delete(e.alive, 300)
+	if v := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "nf", Headless: true})).Agent; !v.Headless {
+		t.Fatalf("창이 꺼졌으면 숨김으로: %+v", v)
+	}
+	_ = id
+}
