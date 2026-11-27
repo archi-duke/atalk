@@ -305,10 +305,11 @@ func (c *Client) ClearWebLogins() (int, error) {
 
 // GoogleLogin 은 원격 포트 웹 화면의 구글 로그인 설정 (보안 비밀은 돌려주지 않음).
 type GoogleLogin struct {
-	Configured bool     `json:"configured"`
-	ClientID   string   `json:"client_id"`
-	Base       string   `json:"base"`
-	Users      []string `json:"users"`
+	Configured  bool     `json:"configured"`
+	ClientID    string   `json:"client_id"`
+	Base        string   `json:"base"`
+	RedirectURI string   `json:"redirect_uri"`
+	Users       []string `json:"users"`
 }
 
 func (c *Client) GoogleLogin() (g GoogleLogin, err error) {
@@ -317,8 +318,8 @@ func (c *Client) GoogleLogin() (g GoogleLogin, err error) {
 }
 
 // SetGoogleLogin 은 구글 로그인 설정을 저장한다 (clientID 가 "" 이면 끔).
-func (c *Client) SetGoogleLogin(clientID, secret, base string) (g GoogleLogin, err error) {
-	err = c.call("PUT", "/admin/remote/google", map[string]any{"client_id": clientID, "client_secret": secret, "base": base}, &g, 0)
+func (c *Client) SetGoogleLogin(clientID, secret, base, callback string) (g GoogleLogin, err error) {
+	err = c.call("PUT", "/admin/remote/google", map[string]any{"client_id": clientID, "client_secret": secret, "base": base, "callback": callback}, &g, 0)
 	return
 }
 

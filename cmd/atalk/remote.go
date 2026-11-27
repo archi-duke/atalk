@@ -197,14 +197,14 @@ func runConnect(lc *client.Client, a, at args, me func() string, out func(any, s
 func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
 	show := func(g client.GoogleLogin) {
 		if !g.Configured {
-			out(g, "구글 로그인: 꺼짐\n켜기: atalk remote web google <클라이언트 ID> --base https://<도메인>:<원격포트>  (보안 비밀은 이어서 입력)")
+			out(g, "구글 로그인: 꺼짐\n켜기: atalk remote web google <클라이언트 ID> --base https://<도메인>:<원격포트> [--callback /경로]  (보안 비밀은 이어서 입력)")
 			return
 		}
 		users := "(없음 — atalk remote web users add 이메일)"
 		if len(g.Users) > 0 {
 			users = strings.Join(g.Users, ", ")
 		}
-		out(g, "구글 로그인: 켜짐\n  주소: "+g.Base+"/login\n  구글에 등록할 리디렉션 URI: "+g.Base+"/auth/google/callback\n  클라이언트 ID: "+g.ClientID+"\n  허용 계정: "+users)
+		out(g, "구글 로그인: 켜짐\n  주소: "+g.Base+"/login\n  구글에 등록할 리디렉션 URI: "+g.RedirectURI+"\n  클라이언트 ID: "+g.ClientID+"\n  허용 계정: "+users)
 	}
 	if len(at.pos) < 3 {
 		g, err := lc.GoogleLogin()
@@ -213,7 +213,7 @@ func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
 		return
 	}
 	if at.pos[2] == "off" {
-		g, err := lc.SetGoogleLogin("", "", "")
+		g, err := lc.SetGoogleLogin("", "", "", "")
 		check(err)
 		show(g)
 		return
@@ -232,7 +232,7 @@ func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
 		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 		secret = strings.TrimSpace(line)
 	}
-	g, err := lc.SetGoogleLogin(at.pos[2], secret, base)
+	g, err := lc.SetGoogleLogin(at.pos[2], secret, base, at.str("callback"))
 	check(err)
 	show(g)
 }

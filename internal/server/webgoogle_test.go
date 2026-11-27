@@ -35,10 +35,11 @@ func TestGoogleLogin(t *testing.T) {
 
 	// 가짜 구글 토큰 엔드포인트: 받은 코드에 따라 이메일을 정한다
 	var nonce string
+	wantRedirect := base + "/auth/google/callback"
 	email := "Me@Example.com"
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
-		if r.PostForm.Get("client_secret") != "sec" || r.PostForm.Get("redirect_uri") != base+"/auth/google/callback" {
+		if r.PostForm.Get("client_secret") != "sec" || r.PostForm.Get("redirect_uri") != wantRedirect {
 			w.WriteHeader(400)
 			_, _ = w.Write([]byte(`{"error":"invalid_client"}`))
 			return
@@ -89,7 +90,7 @@ func TestGoogleLogin(t *testing.T) {
 		resp, _ := do(hc, base+"/auth/google")
 		loc, _ := url.Parse(resp.Header.Get("Location"))
 		q := loc.Query()
-		if !strings.HasPrefix(loc.String(), googleAuthURL) || q.Get("client_id") != "cid" || q.Get("redirect_uri") != base+"/auth/google/callback" {
+		if !strings.HasPrefix(loc.String(), googleAuthURL) || q.Get("client_id") != "cid" || q.Get("redirect_uri") != wantRedirect {
 			t.Fatalf("구글로 보내는 주소: %s", loc)
 		}
 		nonce = q.Get("nonce")
@@ -97,7 +98,7 @@ func TestGoogleLogin(t *testing.T) {
 		if stateOverride != "" {
 			state = stateOverride
 		}
-		_, body := do(hc, base+"/auth/google/callback?code=abc&state="+url.QueryEscape(state))
+		_, body := do(hc, wantRedirect+"?code=abc&state="+url.QueryEscape(state))
 		return body
 	}
 
@@ -107,6 +108,19 @@ func TestGoogleLogin(t *testing.T) {
 	}
 	if resp, _ := do(hc, base+"/agents"); resp.StatusCode != 200 {
 		t.Fatalf("로그인 뒤 /agents: %d", resp.StatusCode)
+	}
+
+	// 콜백 경로를 구글 콘솔에 맞춰 바꿀 수 있음 (예: /api/auth/callback/google)
+	if err := srv.SetGoogle(GoogleConfig{ClientID: "cid", ClientSecret: "sec", Base: base, Callback: "/api/auth/callback/google"}); err != nil {
+		t.Fatal(err)
+	}
+	wantRedirect = base + "/api/auth/callback/google"
+	hc3 := newClient()
+	if body := login(hc3, ""); !strings.Contains(body, "location.replace") {
+		t.Fatalf("바꾼 콜백 경로로 로그인: %.200s", body)
+	}
+	if err := srv.SetGoogle(GoogleConfig{ClientID: "cid", ClientSecret: "sec", Base: base, Callback: "/login"}); err == nil {
+		t.Fatal("로그인 화면 경로는 콜백으로 쓸 수 없음")
 	}
 
 	// state 가 다르면 거절

@@ -177,15 +177,16 @@ func (s *Server) webOrAgent(api http.Handler) http.Handler {
 			api.ServeHTTP(w, r)
 			return
 		}
+		if s.isGoogleCallback(r.URL.Path) { // 기본 /auth/google/callback 또는 설정한 경로 (구글 콘솔의 리디렉션 URI 와 맞춤)
+			s.googleCallback(w, r)
+			return
+		}
 		switch r.URL.Path {
 		case "/login":
 			s.webLogin(w, r)
 			return
 		case "/auth/google":
 			s.googleStart(w, r)
-			return
-		case "/auth/google/callback":
-			s.googleCallback(w, r)
 			return
 		case "/logout":
 			if r.Method == http.MethodPost && sameOrigin(r) {
