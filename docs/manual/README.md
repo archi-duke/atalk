@@ -524,6 +524,7 @@ archi-duke.ddns.net {
 	handle_path /atalk/* {
 		reverse_proxy https://192.168.219.108:44310 {
 			header_up X-Forwarded-Prefix /atalk
+			header_up Host {host}      # https 업스트림이면 Caddy 가 Host 를 바꾸므로, 원래 주소를 그대로 넘김 (출처 확인·구글 로그인에 필요)
 			transport http {
 				tls_insecure_skip_verify   # 공유기 안 구간: ATalk 인증서는 자체 서명(이름 없음)이라 이름 확인을 건너뜀 (암호화는 유지)
 			}
