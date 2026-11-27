@@ -181,6 +181,12 @@ func (s *Server) webOrAgent(api http.Handler) http.Handler {
 		case "/login":
 			s.webLogin(w, r)
 			return
+		case "/auth/google":
+			s.googleStart(w, r)
+			return
+		case "/auth/google/callback":
+			s.googleCallback(w, r)
+			return
 		case "/logout":
 			if r.Method == http.MethodPost && sameOrigin(r) {
 				if ck, err := r.Cookie(webCookie); err == nil {
@@ -226,12 +232,24 @@ func (s *Server) webLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, &core.Error{Status: 405, Code: "method_not_allowed", Message: "GET 또는 POST"})
 		return
 	}
+	s.loginPage(w, r, msg)
+}
+
+// loginPage 는 로그인 화면 (구글 로그인이 설정돼 있으면 구글 버튼이 먼저, 코드 로그인은 접어 둠).
+func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, msg string) {
 	code := r.URL.Query().Get("code")
+	googleBtn, codeOpen := "", " open"
+	if _, ok := s.googleConfig(); ok {
+		googleBtn = `<a class="gbtn" href="/auth/google">Google 계정으로 로그인</a><p class="hint">이 PC 에 등록된 구글 계정만 들어올 수 있습니다.</p>`
+		if code == "" {
+			codeOpen = ""
+		}
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	page := strings.NewReplacer("{{MSG}}", html.EscapeString(msg), "{{CODE}}", html.EscapeString(code), "{{PC}}", html.EscapeString(s.Core.Machine().Name)).Replace(webLoginPage)
+	page := strings.NewReplacer("{{MSG}}", html.EscapeString(msg), "{{CODE}}", html.EscapeString(code), "{{PC}}", html.EscapeString(s.Core.Machine().Name), "{{GOOGLE}}", googleBtn, "{{OPEN}}", codeOpen).Replace(webLoginPage)
 	_, _ = w.Write([]byte(page))
 }
 
@@ -247,12 +265,18 @@ h1{font-size:20px;margin:0 0 4px}p{margin:0 0 16px;opacity:.8;font-size:14px}
 input{width:100%;box-sizing:border-box;padding:10px;font:inherit;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit}
 button{margin-top:12px;width:100%;padding:10px;font:inherit;border:0;border-radius:8px;background:var(--acc);color:#fff;cursor:pointer}
 .err{color:var(--err);font-size:14px;margin-top:10px}
+.gbtn{display:block;text-align:center;padding:10px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600}
+.hint{margin:8px 0 12px;font-size:13px}
+details{margin-top:8px}summary{cursor:pointer;font-size:14px;opacity:.8}
 </style></head><body>
 <form method="post" action="/login">
 <h1>ATalk — {{PC}}</h1>
+{{GOOGLE}}
+<details{{OPEN}}><summary>1회용 코드로 로그인</summary>
 <p>이 PC 에서 <code>atalk remote web</code> 으로 받은 코드를 넣으세요 (한 번만, 10분).</p>
-<input name="code" value="{{CODE}}" autocomplete="one-time-code" autofocus required>
+<input name="code" value="{{CODE}}" autocomplete="one-time-code">
 <button type="submit">로그인</button>
+</details>
 <div class="err">{{MSG}}</div>
 </form></body></html>`
 
