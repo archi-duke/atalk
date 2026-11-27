@@ -302,3 +302,36 @@ func (c *Client) ClearWebLogins() (int, error) {
 	err := c.call("DELETE", "/admin/remote/web", nil, &out, 0)
 	return out.N, err
 }
+
+// GoogleLogin 은 원격 포트 웹 화면의 구글 로그인 설정 (보안 비밀은 돌려주지 않음).
+type GoogleLogin struct {
+	Configured bool     `json:"configured"`
+	ClientID   string   `json:"client_id"`
+	Base       string   `json:"base"`
+	Users      []string `json:"users"`
+}
+
+func (c *Client) GoogleLogin() (g GoogleLogin, err error) {
+	err = c.call("GET", "/admin/remote/google", nil, &g, 0)
+	return
+}
+
+// SetGoogleLogin 은 구글 로그인 설정을 저장한다 (clientID 가 "" 이면 끔).
+func (c *Client) SetGoogleLogin(clientID, secret, base string) (g GoogleLogin, err error) {
+	err = c.call("PUT", "/admin/remote/google", map[string]any{"client_id": clientID, "client_secret": secret, "base": base}, &g, 0)
+	return
+}
+
+// SetWebUser 는 구글 로그인 허용 목록에 이메일을 넣거나(on) 뺀다.
+func (c *Client) SetWebUser(email string, on bool) ([]string, error) {
+	var out struct {
+		Users []string `json:"users"`
+	}
+	var err error
+	if on {
+		err = c.call("POST", "/admin/remote/web/users", map[string]any{"email": email}, &out, 0)
+	} else {
+		err = c.call("DELETE", "/admin/remote/web/users/"+esc(email), nil, &out, 0)
+	}
+	return out.Users, err
+}

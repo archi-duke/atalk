@@ -688,6 +688,43 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 		}
 		return map[string]any{"code": code, "expires_at": exp.UTC().Format(time.RFC3339), "urls": urls}, nil
 	})
+	// 구글 로그인 (webgoogle.go): 설정과 허용 목록은 이 PC 에서만 바꾼다 (바깥 브라우저가 자기 계정을 넣지 못하게)
+	localOnlyErr := &core.Error{Status: 403, Code: "local_only", Message: "이 PC 에서만 바꿀 수 있음"}
+	h("GET /admin/remote/google", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		g, ok := s.googleConfig()
+		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "users": s.WebUsers()}, nil
+	})
+	h("PUT /admin/remote/google", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if isRemoteWeb(r) {
+			return nil, localOnlyErr
+		}
+		var g GoogleConfig
+		if err := readBody(r, &g); err != nil {
+			return nil, err
+		}
+		if err := s.SetGoogle(g); err != nil {
+			return nil, err
+		}
+		g, ok := s.googleConfig()
+		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "users": s.WebUsers()}, nil
+	})
+	h("POST /admin/remote/web/users", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if isRemoteWeb(r) {
+			return nil, localOnlyErr
+		}
+		var b struct {
+			Email string `json:"email"`
+		}
+		if err := readBody(r, &b); err != nil {
+			return nil, err
+		}
+		u, err := s.SetWebUser(b.Email, true)
+		return map[string]any{"users": u}, err
+	})
+	h("DELETE /admin/remote/web/users/{email}", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		u, err := s.SetWebUser(r.PathValue("email"), false)
+		return map[string]any{"users": u}, err
+	})
 	h("DELETE /admin/remote/web", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]any{"logged_out": s.ClearWebSessions()}, nil
 	})

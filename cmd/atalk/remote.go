@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
@@ -43,6 +44,26 @@ func runRemote(lc *client.Client, at args, out func(any, string)) {
 			n, err := lc.ClearWebLogins()
 			check(err)
 			out(map[string]int{"logged_out": n}, fmt.Sprintf("웹 화면 로그인 %d개를 끊음", n))
+			return
+		}
+		if len(at.pos) > 1 && at.pos[1] == "google" {
+			runWebGoogle(lc, at, out)
+			return
+		}
+		if len(at.pos) > 1 && at.pos[1] == "users" {
+			if len(at.pos) > 3 && (at.pos[2] == "add" || at.pos[2] == "remove") {
+				_, err := lc.SetWebUser(at.pos[3], at.pos[2] == "add")
+				check(err)
+			} else if len(at.pos) > 2 {
+				fail("bad_arg", "atalk remote web users [add|remove 이메일]")
+			}
+			g, err := lc.GoogleLogin()
+			check(err)
+			text := "구글 로그인 허용 계정: (없음)"
+			if len(g.Users) > 0 {
+				text = "구글 로그인 허용 계정:\n  " + strings.Join(g.Users, "\n  ")
+			}
+			out(g.Users, text)
 			return
 		}
 		pc, err := lc.NewWebCode()
@@ -169,4 +190,49 @@ func runConnect(lc *client.Client, a, at args, me func() string, out func(any, s
 	out(map[string]any{"ok": true, "agent": v, "url": rc.URL, "host": rc.HostName},
 		fmt.Sprintf("%s (%s) 에 연결함: %s %q\n이 세션의 atalk 명령과 훅은 이제 그 PC 의 데몬을 씁니다. 방 목록: atalk rooms / 참여: atalk request ROOM / 끊기: atalk disconnect",
 			orText(rc.HostName, "원격 PC"), rc.URL, v.ID, v.Name))
+}
+
+// runWebGoogle: atalk remote web google [CLIENT_ID --base URL | off]
+// 보안 비밀은 명령줄에 남지 않게 표준 입력으로 받는다 (--secret-file 로 파일에서도).
+func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
+	show := func(g client.GoogleLogin) {
+		if !g.Configured {
+			out(g, "구글 로그인: 꺼짐\n켜기: atalk remote web google <클라이언트 ID> --base https://<도메인>:<원격포트>  (보안 비밀은 이어서 입력)")
+			return
+		}
+		users := "(없음 — atalk remote web users add 이메일)"
+		if len(g.Users) > 0 {
+			users = strings.Join(g.Users, ", ")
+		}
+		out(g, "구글 로그인: 켜짐\n  주소: "+g.Base+"/login\n  구글에 등록할 리디렉션 URI: "+g.Base+"/auth/google/callback\n  클라이언트 ID: "+g.ClientID+"\n  허용 계정: "+users)
+	}
+	if len(at.pos) < 3 {
+		g, err := lc.GoogleLogin()
+		check(err)
+		show(g)
+		return
+	}
+	if at.pos[2] == "off" {
+		g, err := lc.SetGoogleLogin("", "", "")
+		check(err)
+		show(g)
+		return
+	}
+	base := at.str("base")
+	if base == "" {
+		fail("bad_arg", "--base https://<도메인>:<원격포트> 가 필요함 (구글에 등록한 리디렉션 URI 의 앞부분)")
+	}
+	var secret string
+	if f := at.str("secret-file"); f != "" {
+		b, err := os.ReadFile(f)
+		check(err)
+		secret = strings.TrimSpace(string(b))
+	} else {
+		fmt.Fprint(os.Stderr, "클라이언트 보안 비밀(client secret)을 붙여 넣고 Enter: ")
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		secret = strings.TrimSpace(line)
+	}
+	g, err := lc.SetGoogleLogin(at.pos[2], secret, base)
+	check(err)
+	show(g)
 }
