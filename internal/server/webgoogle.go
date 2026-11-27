@@ -14,7 +14,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"html"
 	"net/http"
 	"net/url"
 	"os"
@@ -105,11 +104,15 @@ func (s *Server) WebUsers() []string {
 	return u
 }
 
-// SetWebUser 는 허용 목록에 넣거나(on) 뺀다.
+// SetWebUser 는 허용 목록에 넣거나(on) 뺀다. 구글은 이메일, 사내 SSO 는 "sso:<로그인 아이디>".
 func (s *Server) SetWebUser(email string, on bool) ([]string, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	if !strings.Contains(email, "@") {
-		return nil, &core.Error{Status: 400, Code: "bad_email", Message: "이메일 주소가 필요함"}
+	if id, sso := strings.CutPrefix(email, ssoPrefix); sso {
+		if !loginIDRe.MatchString(id) {
+			return nil, &core.Error{Status: 400, Code: "bad_user", Message: "sso: 뒤에 SSO 로그인 아이디가 필요함 (예: sso:duke.kimm)"}
+		}
+	} else if !strings.Contains(email, "@") {
+		return nil, &core.Error{Status: 400, Code: "bad_email", Message: "구글 이메일 주소 또는 sso:<SSO 아이디> 가 필요함"}
 	}
 	s.remote.mu.Lock()
 	defer s.remote.mu.Unlock()
@@ -196,19 +199,7 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		fail(email + " 은 등록되지 않은 계정입니다. 이 PC 에서 atalk remote web users add " + email + " 로 등록하세요.")
 		return
 	}
-	tok := randToken(32)
-	s.remote.mu.Lock()
-	s.loadWebSessions()
-	s.remote.web[hashToken(tok)] = time.Now().Add(webSessionTTL)
-	s.saveWebSessions()
-	s.remote.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: webCookie, Value: tok, Path: webCookiePath(r), MaxAge: int(webSessionTTL / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
-	// 구글에서 넘어온(다른 사이트에서 시작한) 이동이라 바로 "/" 로 넘기면 SameSite=Strict 쿠키가 실리지 않는다 → 이 페이지에서 다시 이동
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	_, _ = w.Write([]byte(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ATalk</title>` +
-		`<p style="font:16px system-ui;padding:24px">` + html.EscapeString(email) + ` 로 로그인했습니다. <a href="` + webPrefix(r) + `/">대화방으로</a></p><script>location.replace("` + webPrefix(r) + `/")</script>`))
+	s.webLoggedIn(w, r, email)
 }
 
 // googleExchange 는 인가 코드를 id_token 으로 바꾸고 확인된 이메일(소문자)을 돌려준다.

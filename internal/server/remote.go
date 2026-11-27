@@ -708,6 +708,26 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 		g, ok := s.googleConfig()
 		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "redirect_uri": g.RedirectURI(), "users": s.WebUsers()}, nil
 	})
+	ssoView := func() map[string]any {
+		c, ok := s.ssoConfig()
+		return map[string]any{"configured": ok, "url": c.URL, "base": c.Base, "name": c.Label(), "gateway": c.Gateway, "login": c.Base + "/login", "users": s.WebUsers()}
+	}
+	h("GET /admin/remote/sso", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return ssoView(), nil
+	})
+	h("PUT /admin/remote/sso", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if isRemoteWeb(r) {
+			return nil, localOnlyErr
+		}
+		var c SSOConfig
+		if err := readBody(r, &c); err != nil {
+			return nil, err
+		}
+		if err := s.SetSSO(c); err != nil {
+			return nil, err
+		}
+		return ssoView(), nil
+	})
 	h("POST /admin/remote/web/users", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		if isRemoteWeb(r) {
 			return nil, localOnlyErr
