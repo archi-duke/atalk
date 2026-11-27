@@ -9,17 +9,28 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unsafe"
 )
 
 var (
-	pEnumChildWindows = user32.NewProc("EnumChildWindows")
+	pEnumChildWindows   = user32.NewProc("EnumChildWindows")
+	pOpenInputDesktop   = user32.NewProc("OpenInputDesktop")
+	pCloseDesktop       = user32.NewProc("CloseDesktop")
+	pGetUserObjectInfoW = user32.NewProc("GetUserObjectInformationW")
 
 	// syscall.NewCallback 은 프로세스당 만들 수 있는 개수가 정해져 있어, 몇 초마다 부르는 곳에서는 한 번만 만든다.
 	promptMu    sync.Mutex
 	promptTops  []uintptr
+	promptVis   = map[uint32]bool{} // 일반 화면에 보이는 창을 가진 프로세스
 	promptTexts []string
 	promptTopCB = syscall.NewCallback(func(h, _ uintptr) uintptr {
-		if visible(h) && className(h) == "#32770" {
+		if !visible(h) {
+			return 1
+		}
+		var pid uint32
+		pGetWindowThreadProcID.Call(h, uintptr(unsafe.Pointer(&pid)))
+		promptVis[pid] = true
+		if className(h) == "#32770" {
 			promptTops = append(promptTops, h)
 		}
 		return 1
@@ -51,6 +62,7 @@ func SystemPrompts() []Prompt {
 	promptMu.Lock()
 	defer promptMu.Unlock()
 	promptTops = promptTops[:0]
+	clear(promptVis)
 	pEnumWindows.Call(promptTopCB, 0)
 	var out []Prompt
 	var all map[int]Proc
@@ -75,12 +87,21 @@ func SystemPrompts() []Prompt {
 		}
 		out = append(out, p)
 	}
-	// UAC 창은 보안 데스크톱에 떠서 창으로는 안 보인다 → 확인 창을 그리는 consent.exe 가 떠 있는지로 본다
+	// UAC 창은 보안 데스크톱에 떠서 창으로는 안 보인다 → 확인 창을 그리는 consent.exe 가 떠 있는지로 본다.
+	// 단 consent.exe 가 창을 띄우다 멈춘 채 남는 일이 있어 (원격 접속으로 화면이 바뀔 때 등), 보안 데스크톱이 실제로
+	// 떠 있거나 (기본 설정) consent.exe 창이 일반 화면에 보일 때만 (보안 데스크톱을 끈 설정) 알린다.
 	if all == nil {
 		all, _ = list()
 	}
+	desk := ""
 	for pid, pr := range all {
-		if strings.EqualFold(pr.Name, "consent.exe") {
+		if !strings.EqualFold(pr.Name, "consent.exe") {
+			continue
+		}
+		if desk == "" {
+			desk = inputDesktop()
+		}
+		if uacShown(desk, promptVis[uint32(pid)]) {
 			out = append(out, Prompt{ID: "uac-" + strconv.Itoa(pid), Kind: "uac", Title: "사용자 계정 컨트롤"})
 		}
 	}
@@ -96,4 +117,27 @@ func runningPath(all map[int]Proc, path string) int {
 		}
 	}
 	return 0
+}
+
+// inputDesktop 은 지금 입력을 받는 데스크톱 이름 ("Default" = 일반 화면).
+// 열 수 없으면 "" — UAC 보안 데스크톱(Winlogon)은 일반 프로그램이 열 수 없다.
+func inputDesktop() string {
+	h, _, _ := pOpenInputDesktop.Call(0, 0, 0x0001) // DESKTOP_READOBJECTS
+	if h == 0 {
+		return ""
+	}
+	defer pCloseDesktop.Call(h)
+	buf := make([]uint16, 64)
+	var need uint32
+	if r, _, _ := pGetUserObjectInfoW.Call(h, 2 /* UOI_NAME */, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)*2), uintptr(unsafe.Pointer(&need))); r == 0 {
+		return "Default"
+	}
+	return syscall.UTF16ToString(buf)
+}
+
+// uacShown: consent.exe 가 떠 있을 때 사람이 볼 수 있는 확인 창이 실제로 있는지.
+// 입력 데스크톱이 일반 화면이 아니면 ("" = 열 수 없음 포함) 보안 데스크톱이 떠 있는 것,
+// 일반 화면이면 consent.exe 창이 보여야 한다 (보안 데스크톱을 끈 설정). 둘 다 아니면 멈춰 남은 consent.exe.
+func uacShown(desk string, consentWindow bool) bool {
+	return !strings.EqualFold(desk, "Default") || consentWindow
 }
