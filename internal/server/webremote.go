@@ -162,6 +162,9 @@ func sameOrigin(r *http.Request) bool {
 	if o == "" {
 		return true
 	}
+	if o == "null" { // 출처를 숨기는 브라우저 설정·페이지 (Referrer-Policy no-referrer 등): Sec-Fetch-Site 로만 판단
+		return r.Header.Get("Sec-Fetch-Site") == "same-origin"
+	}
 	u, err := url.Parse(o)
 	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
@@ -226,7 +229,7 @@ func (s *Server) webLogin(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
 	page := strings.NewReplacer("{{MSG}}", html.EscapeString(msg), "{{CODE}}", html.EscapeString(code), "{{PC}}", html.EscapeString(s.Core.Machine().Name)).Replace(webLoginPage)
 	_, _ = w.Write([]byte(page))

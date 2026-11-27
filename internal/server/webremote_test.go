@@ -72,6 +72,30 @@ func TestRemoteWebLogin(t *testing.T) {
 		t.Fatalf("틀린 코드: %d %.200s", code, body)
 	}
 
+	// 브라우저가 출처를 null 로 보내도 (no-referrer) 같은 사이트 제출이면 로그인됨, 다른 사이트면 막음
+	nullLogin := func(code, site string) string {
+		t.Helper()
+		req, _ := http.NewRequest("POST", base+"/login", strings.NewReader(url.Values{"code": {code}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Origin", "null")
+		req.Header.Set("Sec-Fetch-Site", site)
+		resp, err := (&http.Client{Transport: hc.Transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.Status
+	}
+	nc, _ := lc.NewWebCode()
+	if st := nullLogin(nc.Code, "cross-site"); !strings.HasPrefix(st, "200") {
+		t.Fatalf("다른 사이트의 null 출처는 로그인 화면(오류)으로: %s", st)
+	}
+	nc, _ = lc.NewWebCode()
+	if st := nullLogin(nc.Code, "same-origin"); !strings.HasPrefix(st, "303") {
+		t.Fatalf("같은 사이트의 null 출처는 로그인돼야 함: %s", st)
+	}
+	lc.ClearWebLogins()
+
 	pc, err := lc.NewWebCode()
 	if err != nil {
 		t.Fatal(err)
