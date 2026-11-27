@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -169,6 +170,27 @@ func sameOrigin(r *http.Request) bool {
 	return err == nil && strings.EqualFold(u.Host, r.Host)
 }
 
+// webPrefix: 게이트웨이(리버스 프록시, 예: Caddy handle_path /atalk/*)가 경로 앞부분을 떼고 넘기면서
+// X-Forwarded-Prefix 로 알려 준 앞부분 (예: "/atalk"). 없거나 형식이 이상하면 "" (ATalk 이 "/" 에 있음).
+// 이 값은 화면 안의 주소·이동·쿠키 경로를 만드는 데만 쓴다 (권한과는 상관없음).
+func webPrefix(r *http.Request) string {
+	p := strings.TrimRight(r.Header.Get("X-Forwarded-Prefix"), "/")
+	if p == "" || !prefixRe.MatchString(p) {
+		return ""
+	}
+	return p
+}
+
+var prefixRe = regexp.MustCompile(`^(/[A-Za-z0-9._~-]+)+$`)
+
+// webCookiePath: 로그인 쿠키를 ATalk 경로에만 보내게 한다 (게이트웨이 뒤의 다른 앱에는 안 감).
+func webCookiePath(r *http.Request) string {
+	if p := webPrefix(r); p != "" {
+		return p
+	}
+	return "/"
+}
+
 // webOrAgent 는 원격 포트의 맨 앞 라우터: 에이전트 토큰 요청은 api 로, 로그인한 브라우저는 로컬 화면 라우터로.
 func (s *Server) webOrAgent(api http.Handler) http.Handler {
 	inner := s.routes()
@@ -193,8 +215,8 @@ func (s *Server) webOrAgent(api http.Handler) http.Handler {
 				if ck, err := r.Cookie(webCookie); err == nil {
 					s.dropWebSession(ck.Value)
 				}
-				http.SetCookie(w, &http.Cookie{Name: webCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				http.SetCookie(w, &http.Cookie{Name: webCookie, Value: "", Path: webCookiePath(r), MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+				http.Redirect(w, r, webPrefix(r)+"/login", http.StatusSeeOther)
 				return
 			}
 		}
@@ -207,7 +229,7 @@ func (s *Server) webOrAgent(api http.Handler) http.Handler {
 			return
 		}
 		if r.Method == http.MethodGet && r.URL.Path == "/" {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			http.Redirect(w, r, webPrefix(r)+"/login", http.StatusSeeOther)
 			return
 		}
 		api.ServeHTTP(w, r)
@@ -225,8 +247,8 @@ func (s *Server) webLogin(w http.ResponseWriter, r *http.Request) {
 				msg = e.Message
 			}
 		} else {
-			http.SetCookie(w, &http.Cookie{Name: webCookie, Value: tok, Path: "/", MaxAge: int(webSessionTTL / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
-			http.Redirect(w, r, "/", http.StatusSeeOther)
+			http.SetCookie(w, &http.Cookie{Name: webCookie, Value: tok, Path: webCookiePath(r), MaxAge: int(webSessionTTL / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+			http.Redirect(w, r, webPrefix(r)+"/", http.StatusSeeOther)
 			return
 		}
 	} else if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -241,7 +263,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, msg string) {
 	code := r.URL.Query().Get("code")
 	googleBtn, codeOpen := "", " open"
 	if _, ok := s.googleConfig(); ok {
-		googleBtn = `<a class="gbtn" href="/auth/google">Google 계정으로 로그인</a><p class="hint">이 PC 에 등록된 구글 계정만 들어올 수 있습니다.</p>`
+		googleBtn = `<a class="gbtn" href="` + webPrefix(r) + `/auth/google">Google 계정으로 로그인</a><p class="hint">이 PC 에 등록된 구글 계정만 들어올 수 있습니다.</p>`
 		if code == "" {
 			codeOpen = ""
 		}
@@ -250,7 +272,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, msg string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	page := strings.NewReplacer("{{MSG}}", html.EscapeString(msg), "{{CODE}}", html.EscapeString(code), "{{PC}}", html.EscapeString(s.Core.Machine().Name), "{{GOOGLE}}", googleBtn, "{{OPEN}}", codeOpen).Replace(webLoginPage)
+	page := strings.NewReplacer("{{MSG}}", html.EscapeString(msg), "{{CODE}}", html.EscapeString(code), "{{PC}}", html.EscapeString(s.Core.Machine().Name), "{{GOOGLE}}", googleBtn, "{{OPEN}}", codeOpen, "{{BASE}}", webPrefix(r)).Replace(webLoginPage)
 	_, _ = w.Write([]byte(page))
 }
 
@@ -270,7 +292,7 @@ button{margin-top:12px;width:100%;padding:10px;font:inherit;border:0;border-radi
 .hint{margin:8px 0 12px;font-size:13px}
 details{margin-top:8px}summary{cursor:pointer;font-size:14px;opacity:.8}
 </style></head><body>
-<form method="post" action="/login">
+<form method="post" action="{{BASE}}/login">
 <h1>ATalk — {{PC}}</h1>
 {{GOOGLE}}
 <details{{OPEN}}><summary>1회용 코드로 로그인</summary>

@@ -681,6 +681,10 @@ func (s *Server) routes() http.Handler {
 	})
 	h("GET /{$}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		w.Header().Set("content-type", "text/html; charset=utf-8")
+		if p := webPrefix(r); p != "" { // 게이트웨이 뒤 (예: /atalk): 화면의 "/…" 요청 앞에 붙일 경로를 알려 줌 (p 는 [A-Za-z0-9._~/-] 만)
+			_, _ = w.Write(bytes.Replace(viewerHTML, []byte("<!--ATALK_DATA-->"), []byte(`<script>window.ATALK_BASE="`+p+`";</script>`), 1))
+			return skip{}, nil
+		}
 		_, _ = w.Write(viewerHTML)
 		return skip{}, nil
 	})

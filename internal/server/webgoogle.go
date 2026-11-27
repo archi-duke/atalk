@@ -75,8 +75,8 @@ func (s *Server) SetGoogle(g GoogleConfig) error {
 		return nil
 	}
 	u, err := url.Parse(strings.TrimRight(g.Base, "/"))
-	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" {
-		return &core.Error{Status: 400, Code: "bad_base", Message: "base 는 https://도메인:포트 형식이어야 함 (예: https://archi-duke.ddns.net:44310)"}
+	if err != nil || u.Scheme != "https" || u.Host == "" || (u.Path != "" && !prefixRe.MatchString(u.Path)) || u.RawQuery != "" || u.Fragment != "" {
+		return &core.Error{Status: 400, Code: "bad_base", Message: "base 는 https://도메인[:포트][/경로] 형식이어야 함 (예: https://archi-duke.ddns.net:44310, 게이트웨이 뒤면 https://archi-duke.ddns.net/atalk)"}
 	}
 	if g.Callback != "" && (!strings.HasPrefix(g.Callback, "/") || g.Callback == "/" || g.Callback == "/login" || g.Callback == "/logout" || g.Callback == "/auth/google") {
 		return &core.Error{Status: 400, Code: "bad_callback", Message: "콜백 경로는 / 로 시작하는 경로여야 함 (예: /api/auth/callback/google)"}
@@ -141,16 +141,16 @@ func randToken(n int) string {
 func (s *Server) googleStart(w http.ResponseWriter, r *http.Request) {
 	g, ok := s.googleConfig()
 	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, webPrefix(r)+"/login", http.StatusSeeOther)
 		return
 	}
 	base, _ := url.Parse(g.Base)
-	if !strings.EqualFold(r.Host, base.Host) {
+	if !strings.EqualFold(r.Host, base.Host) || webPrefix(r) != base.Path { // 다른 주소·다른 경로(게이트웨이를 거치지 않음)로 왔으면 설정한 주소로
 		http.Redirect(w, r, g.Base+"/auth/google", http.StatusSeeOther)
 		return
 	}
 	state, nonce := randToken(24), randToken(24)
-	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: state + "." + nonce, Path: "/", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: state + "." + nonce, Path: webCookiePath(r), MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	q := url.Values{
 		"client_id":     {g.ClientID},
 		"redirect_uri":  {g.RedirectURI()},
@@ -172,7 +172,7 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ck, err := r.Cookie(oauthCookie)
-	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: "", Path: webCookiePath(r), MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	state, nonce, _ := strings.Cut(func() string {
 		if err != nil {
 			return ""
@@ -202,13 +202,13 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 	s.remote.web[hashToken(tok)] = time.Now().Add(webSessionTTL)
 	s.saveWebSessions()
 	s.remote.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: webCookie, Value: tok, Path: "/", MaxAge: int(webSessionTTL / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: webCookie, Value: tok, Path: webCookiePath(r), MaxAge: int(webSessionTTL / time.Second), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	// 구글에서 넘어온(다른 사이트에서 시작한) 이동이라 바로 "/" 로 넘기면 SameSite=Strict 쿠키가 실리지 않는다 → 이 페이지에서 다시 이동
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	_, _ = w.Write([]byte(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ATalk</title>` +
-		`<p style="font:16px system-ui;padding:24px">` + html.EscapeString(email) + ` 로 로그인했습니다. <a href="/">대화방으로</a></p><script>location.replace("/")</script>`))
+		`<p style="font:16px system-ui;padding:24px">` + html.EscapeString(email) + ` 로 로그인했습니다. <a href="` + webPrefix(r) + `/">대화방으로</a></p><script>location.replace("` + webPrefix(r) + `/")</script>`))
 }
 
 // googleExchange 는 인가 코드를 id_token 으로 바꾸고 확인된 이메일(소문자)을 돌려준다.

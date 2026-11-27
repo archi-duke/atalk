@@ -547,6 +547,15 @@
   </form>
 </dialog>
 <script>
+const BASE = window.ATALK_BASE || ""; // 게이트웨이 뒤 경로 (예: /atalk). 이 PC(127.0.0.1)에서는 ""
+if (BASE) { // "/…" 로 시작하는 요청 앞에 BASE 를 붙인다
+  const at = (u) => (typeof u === "string" && u[0] === "/" && u[1] !== "/" ? BASE + u : u);
+  const f0 = window.fetch.bind(window);
+  window.fetch = (u, o) => f0(at(u), o);
+  const E0 = window.EventSource;
+  window.EventSource = function (u, o) { return new E0(at(u), o); };
+  document.addEventListener("DOMContentLoaded", () => document.querySelectorAll('a[href^="/"]').forEach((a) => a.setAttribute("href", at(a.getAttribute("href")))));
+}
 const DATA = window.ATALK_DATA || null; // 내보낸 파일이면 데이터가 들어 있음
 if (DATA) document.documentElement.classList.add("static");
 const $ = (s) => document.querySelector(s);
@@ -948,7 +957,7 @@ function agentDetail(x) {
     kv("할 수 있는 일", (x.skills || []).length ? "<ul>" + x.skills.map((k) => "<li><b style=\"width:auto;color:var(--fg)\">" + esc(k.name) + "</b> <i>— " + esc(k.description) + "</i>" +
       ((k.tags || []).length ? ' <span class="tags">#' + k.tags.map(esc).join(" #") + "</span>" : "") + "</li>").join("") + "</ul>" : "") +
     kv("주의사항", (x.cautions || []).length ? "<ul>" + x.cautions.map((c) => "<li>⚠ " + esc(c) + "</li>").join("") + "</ul>" : "") +
-    (DATA ? "" : kv("A2A 카드", '<a href="/agents/' + encodeURIComponent(x.id) + '/agent-card.json" target="_blank" rel="noopener">agent-card.json</a>')) +
+    (DATA ? "" : kv("A2A 카드", '<a href="' + BASE + '/agents/' + encodeURIComponent(x.id) + '/agent-card.json" target="_blank" rel="noopener">agent-card.json</a>')) +
     kv("등록", esc(when(x.registered_at))) + kv("PID", x.local && x.pid ? String(x.pid) : "") + headlessDetail(x) +
     (DATA ? "" : '<div><b>아이콘</b><span><button data-icon-agent="' + esc(x.id) + '">아이콘 변경…</button></span></div>') + "</div>";
 }
@@ -1115,7 +1124,7 @@ function renderChat(scroll) {
   renderPresence(room, chat.logs || []);
   renderTyping();
   if (DATA) $("#menuWrap").style.display = "none";
-  else $("#export").href = "/rooms/" + encodeURIComponent(room.room_id) + "/export?download=1";
+  else $("#export").href = BASE + "/rooms/" + encodeURIComponent(room.room_id) + "/export?download=1";
 
   // 시점 선택: 사람 / 각 에이전트
   const ids = [...new Set(msgs.filter((m) => m.type !== "system").map((m) => m.from).concat(room.members.map((m) => m.agent)))];
@@ -1272,7 +1281,7 @@ function openIconEditor(opts) {
   $("#icoGrid").innerHTML = ICON_PRESETS.map((e) => '<button type="button" data-e="' + esc(e) + '">' + esc(e) + "</button>").join("");
   $("#icoGrid").querySelectorAll("button").forEach((b) => (b.onclick = () => { icoState.img = null; icoState.pick = null; $("#icoCrop").hidden = true; icoState.value = "emoji:" + b.dataset.e; icoPreview(); }));
   // 후보 이미지: 데몬에 들어 있는 SVG 를 고르면 128px 이미지로 바꿔 저장 (다른 PC 에서도 그대로 보이게)
-  $("#icoImgs").innerHTML = ICON_IMAGES.map((n) => '<button type="button" data-img="' + esc(n) + '" title="' + esc(n) + '"><img src="/icons/' + esc(n) + '.svg" alt=""></button>').join("");
+  $("#icoImgs").innerHTML = ICON_IMAGES.map((n) => '<button type="button" data-img="' + esc(n) + '" title="' + esc(n) + '"><img src="' + BASE + '/icons/' + esc(n) + '.svg" alt=""></button>').join("");
   $("#icoImgs").querySelectorAll("button").forEach((b) => (b.onclick = () => {
     const img = new Image();
     img.onload = () => {
@@ -1283,7 +1292,7 @@ function openIconEditor(opts) {
       icoState.img = null; $("#icoCrop").hidden = true; icoState.value = url; icoState.pick = b.dataset.img; icoPreview();
     };
     img.onerror = () => { $("#icoMsg").textContent = "후보 이미지를 읽지 못함"; };
-    img.src = "/icons/" + b.dataset.img + ".svg";
+    img.src = BASE + "/icons/" + b.dataset.img + ".svg";
   }));
   icoPreview();
   $("#iconDlg").showModal();
