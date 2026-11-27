@@ -88,6 +88,7 @@ const help = `atalk — 에이전트 대화방
   atalk remote on [--port 7421] | off | status       (호스트 PC) 원격 포트 열기/닫기, 상태와 연결된 에이전트
   atalk remote code                                   (호스트 PC) 참여 코드 발급 (한 번만, 10분)
   atalk remote revoke AGENT                           (호스트 PC) 원격 에이전트 연결 끊기
+  atalk remote web [logout]                           (호스트 PC) 브라우저로 원격 포트에서 이 PC 화면 쓰기: 1회용 로그인 코드 / 로그인 모두 끊기
   atalk remote lobby on|off | lobby kick AGENT        (호스트 PC) 대기실 받기 켜기/끄기, 대기실 카드 내보내기
   atalk connect https://PC:7421 [--code CODE]         (에이전트) 다른 PC 데몬에 연결 — 코드 없으면 대기실(그 PC 에서 초대하면 들어감)
   atalk disconnect                                    (에이전트) 원격 연결 끊기 (방에서 나오고 이 PC 데몬으로 돌아옴)
