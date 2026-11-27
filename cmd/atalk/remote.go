@@ -38,6 +38,21 @@ func runRemote(lc *client.Client, at args, out func(any, string)) {
 			lines = append(lines, "  atalk connect "+u+" --code "+pc.Code)
 		}
 		out(pc, strings.Join(lines, "\n"))
+	case "web":
+		if len(at.pos) > 1 && at.pos[1] == "logout" {
+			n, err := lc.ClearWebLogins()
+			check(err)
+			out(map[string]int{"logged_out": n}, fmt.Sprintf("웹 화면 로그인 %d개를 끊음", n))
+			return
+		}
+		pc, err := lc.NewWebCode()
+		check(err)
+		lines := []string{"웹 화면 로그인 코드 (한 번만 쓸 수 있음, 10분 뒤 만료):", "  " + pc.Code, "", "브라우저에서 열기 (자체 서명 인증서라 처음 한 번 경고가 뜸):"}
+		for _, u := range pc.URLs {
+			lines = append(lines, "  "+u+"?code="+pc.Code)
+		}
+		lines = append(lines, "  (공유기 밖에서는 공인 IP 주소 + 같은 포트, 포트 포워딩 필요)", "로그인은 30일 유지. 모두 끊기: atalk remote web logout")
+		out(pc, strings.Join(lines, "\n"))
 	case "revoke":
 		agent := at.arg(1, "AGENT")
 		check(lc.RevokeRemote(agent))
@@ -56,7 +71,7 @@ func runRemote(lc *client.Client, at args, out func(any, string)) {
 			fail("bad_arg", "atalk remote lobby on|off|kick AGENT")
 		}
 	default:
-		fail("bad_arg", "atalk remote on|off|status|code|revoke AGENT|lobby on|off|kick AGENT")
+		fail("bad_arg", "atalk remote on|off|status|code|web [logout]|revoke AGENT|lobby on|off|kick AGENT")
 	}
 }
 

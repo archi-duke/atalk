@@ -287,3 +287,18 @@ func (c *Client) SpawnRemote(card core.RegisterInput, cwd string) (*RemoteConn, 
 	}
 	return rc, out.Agent, nil
 }
+
+// NewWebCode 는 원격 포트 웹 화면의 1회용 로그인 코드를 받는다 (이 PC 의 데몬에서만).
+func (c *Client) NewWebCode() (pc PairCode, err error) {
+	err = c.call("POST", "/admin/remote/web", map[string]any{}, &pc, 0)
+	return
+}
+
+// ClearWebLogins 는 원격 포트 웹 화면의 로그인을 모두 끊는다. 끊은 개수.
+func (c *Client) ClearWebLogins() (int, error) {
+	var out struct {
+		N int `json:"logged_out"`
+	}
+	err := c.call("DELETE", "/admin/remote/web", nil, &out, 0)
+	return out.N, err
+}

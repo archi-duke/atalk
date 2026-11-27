@@ -60,6 +60,9 @@ type remoteState struct {
 	port  int
 	codes map[string]time.Time // 참여 코드 비밀값 → 만료 시각
 	fails []time.Time
+	// 웹 화면 로그인 (webremote.go)
+	webCodes map[string]time.Time // 웹 로그인 코드 → 만료 시각
+	web      map[string]time.Time // 로그인 쿠키의 sha256 → 만료 시각 (web_sessions.json)
 }
 
 type remoteSettings struct {
@@ -152,7 +155,7 @@ func (s *Server) StartRemote(port int) (int, error) {
 		return 0, err
 	}
 	srv := &http.Server{
-		Handler:           s.remoteHandler(),
+		Handler:           s.webOrAgent(s.remoteHandler()),
 		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
 		ReadHeaderTimeout: 10 * time.Second,
 		ErrorLog:          log.New(io.Discard, "", 0), // 인증서를 믿지 않는 클라이언트의 TLS 오류로 로그가 넘치지 않게
@@ -661,5 +664,26 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 	})
 	h("DELETE /admin/remote/agents/{id}", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return map[string]any{}, c.RevokeRemote(r.PathValue("id"))
+	})
+	// 웹 화면 로그인 코드 (webremote.go). 원격 포트로 로그인한 브라우저에서는 못 받는다 (이 PC 에서만).
+	h("POST /admin/remote/web", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		if isRemoteWeb(r) {
+			return nil, &core.Error{Status: 403, Code: "local_only", Message: "웹 로그인 코드는 이 PC 에서만 받을 수 있음"}
+		}
+		if s.RemotePort() == 0 {
+			return nil, &core.Error{Status: 409, Code: "remote_off", Message: "원격 포트가 꺼져 있음 (atalk remote on)"}
+		}
+		code, exp, err := s.NewWebCode()
+		if err != nil {
+			return nil, err
+		}
+		urls := []string{}
+		for _, a := range LocalAddrs() {
+			urls = append(urls, fmt.Sprintf("https://%s:%d/login", a, s.RemotePort()))
+		}
+		return map[string]any{"code": code, "expires_at": exp.UTC().Format(time.RFC3339), "urls": urls}, nil
+	})
+	h("DELETE /admin/remote/web", func(w http.ResponseWriter, r *http.Request) (any, error) {
+		return map[string]any{"logged_out": s.ClearWebSessions()}, nil
 	})
 }
