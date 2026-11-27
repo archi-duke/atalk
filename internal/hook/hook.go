@@ -137,6 +137,7 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 		}
 	case "stop":
 		echoTurnEnd(c, id, in)
+		refreshLocalPid(c, kind, in) // 원격 연결 세션: 이 PC 데몬의 카드 PID 를 지금 창으로 (대신 하트비트 대상이 되게)
 		if healthy {
 			out = stop(c, kind, in)
 			// 응답이 끝났으면 대기. 처리할 방 메시지가 있어 Claude 를 계속 일하게 하면(block) 작업 중 유지
@@ -162,6 +163,33 @@ func Run(kind, event string, stdin io.Reader, stdout io.Writer) {
 }
 
 func ptrBool(b bool) *bool { return &b }
+
+// refreshLocalPid: 다른 PC 데몬에 연결된 세션이면, 이 PC 데몬에 있는 카드의 PID 를 지금 창(프로세스)으로 고친다.
+// 원격 연결 세션은 훅이 원격 데몬에만 등록해서 이 PC 의 카드 PID 가 예전 것(되살리기 전 창)으로 남아 offline 이 되고,
+// 그러면 이 PC 데몬이 대신 보내는 하트비트(beatRemotes) 대상에서 빠진다. 대기 훅이 12시간 제한으로 끝나면
+// 하트비트가 끊겨 원격 데몬에서 자리 비움 → 자동 퇴장됐다. 이 PC 에 카드가 있을 때만 (새로 만들지 않음).
+func refreshLocalPid(c *client.Client, kind string, in Input) {
+	if !c.Remote() || Headless() {
+		return
+	}
+	pid := procs.FindAgentPID()
+	if pid <= 0 {
+		return
+	}
+	lc := client.New("")
+	if lc.Health() != nil {
+		return
+	}
+	a, err := lc.Agent(core.MakeAgentID(kind, in.SessionID))
+	if err != nil || (a.Pid != nil && *a.Pid == pid && a.Status != "offline") {
+		return
+	}
+	reg := core.RegisterInput{Kind: kind, SessionID: in.SessionID, Pid: &pid}
+	if in.Cwd != "" {
+		reg.Cwd = &in.Cwd
+	}
+	_, _ = lc.Register(reg)
+}
 
 // sendRe 는 셸 명령 안의 "atalk send" (atalk.exe·경로·따옴표, --as 옵션 허용).
 var sendRe = regexp.MustCompile(`atalk(?:\.exe)?["']?\s+(?:--as\s+\S+\s+)?send\b`)
@@ -246,6 +274,7 @@ func sessionStart(c *client.Client, kind string, in Input) any {
 	if err != nil {
 		return nil
 	}
+	refreshLocalPid(c, kind, in)
 	a := r.Agent
 	// atalk spawn 으로 연 창인데 띄운 에이전트가 다른 PC 의 데몬에 원격으로 연결돼 있으면, 이 세션도 그 데몬에 연결한다
 	// (그 데몬이 띄운 에이전트의 방에 바로 넣는다). 이후 훅·명령은 연결 정보를 보고 그 데몬을 쓴다.

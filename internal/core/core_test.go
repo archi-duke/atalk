@@ -1806,6 +1806,24 @@ func TestHeadlessRegister(t *testing.T) {
 	}
 }
 
+// 원격 연결 세션의 이 PC 카드: 예전 창 PID 로 offline 이 됐어도, 새 창 PID 로 다시 등록하면 살아난다 (대신 하트비트 대상)
+func TestReRegisterRevivesOfflineLocalCard(t *testing.T) {
+	e := newEnv(t)
+	c := e.core()
+	e.alive[100] = true
+	id := ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "rl", Cwd: s("D:/rl"), Pid: i(100)})).Agent.ID
+	delete(e.alive, 100)
+	check(t, c.Sweep())
+	if v := ok(c.GetAgent(id)); v.Status != "offline" {
+		t.Fatalf("예전 창이 꺼지면 offline: %+v", v)
+	}
+	e.alive[200] = true
+	ok(c.Register(RegisterInput{Kind: "claude-code", SessionID: "rl", Pid: i(200)}))
+	if v := ok(c.GetAgent(id)); v.Status == "offline" || v.Pid == nil || *v.Pid != 200 || !v.Local {
+		t.Fatalf("새 창 PID 로 다시 등록하면 살아나야 함: %+v", v)
+	}
+}
+
 // 띄운 세션 카드: 보관 기간을 따로 정하고(spawn_ttl_hours), 보관하지 않으면(spawn_keep=false) 꺼지는 대로 지운다.
 func TestSpawnedCardRetention(t *testing.T) {
 	e := newEnv(t)
