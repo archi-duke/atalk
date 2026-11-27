@@ -39,6 +39,8 @@ type GoogleConfig struct {
 	ClientID     string `json:"client_id"`
 	ClientSecret string `json:"client_secret"`
 	Base         string `json:"base"` // 예: https://archi-duke.ddns.net:44310 (구글에 등록한 리디렉션 URI 의 앞부분)
+	// Callback 은 구글이 돌려보낼 경로 (기본 /auth/google/callback). 구글 콘솔에 등록한 리디렉션 URI 와 맞춘다
+	Callback string `json:"callback,omitempty"`
 }
 
 func (s *Server) googleFile() string   { return filepath.Join(s.remoteDir, "google.json") }
@@ -49,6 +51,10 @@ func (s *Server) googleConfig() (GoogleConfig, bool) {
 	if s.remoteDir == "" {
 		return g, false
 	}
+	if c := s.gcfg.Load(); c != nil { // 요청마다 파일을 읽지 않게 (SetGoogle 이 비움)
+		return c.g, c.ok
+	}
+	defer func() { s.gcfg.Store(&googleCache{g, g.ClientID != "" && g.ClientSecret != "" && g.Base != ""}) }()
 	b, err := os.ReadFile(s.googleFile())
 	if err != nil || json.Unmarshal(b, &g) != nil || g.ClientID == "" || g.ClientSecret == "" || g.Base == "" {
 		return g, false
@@ -62,6 +68,7 @@ func (s *Server) SetGoogle(g GoogleConfig) error {
 		return &core.Error{Status: 409, Code: "remote_unavailable", Message: "원격 기능을 쓸 수 없음"}
 	}
 	if g.ClientID == "" {
+		s.gcfg.Store(nil)
 		if err := os.Remove(s.googleFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -71,6 +78,9 @@ func (s *Server) SetGoogle(g GoogleConfig) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "" {
 		return &core.Error{Status: 400, Code: "bad_base", Message: "base 는 https://도메인:포트 형식이어야 함 (예: https://archi-duke.ddns.net:44310)"}
 	}
+	if g.Callback != "" && (!strings.HasPrefix(g.Callback, "/") || g.Callback == "/" || g.Callback == "/login" || g.Callback == "/logout" || g.Callback == "/auth/google") {
+		return &core.Error{Status: 400, Code: "bad_callback", Message: "콜백 경로는 / 로 시작하는 경로여야 함 (예: /api/auth/callback/google)"}
+	}
 	if g.ClientSecret == "" {
 		return &core.Error{Status: 400, Code: "no_secret", Message: "보안 비밀(client secret)이 필요함"}
 	}
@@ -79,6 +89,7 @@ func (s *Server) SetGoogle(g GoogleConfig) error {
 		return err
 	}
 	b, _ := json.MarshalIndent(g, "", "  ")
+	defer s.gcfg.Store(nil)
 	return os.WriteFile(s.googleFile(), b, 0o600)
 }
 
@@ -139,10 +150,10 @@ func (s *Server) googleStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, nonce := randToken(24), randToken(24)
-	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: state + "." + nonce, Path: "/auth/google", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: state + "." + nonce, Path: "/", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	q := url.Values{
 		"client_id":     {g.ClientID},
-		"redirect_uri":  {g.Base + "/auth/google/callback"},
+		"redirect_uri":  {g.RedirectURI()},
 		"response_type": {"code"},
 		"scope":         {"openid email"},
 		"state":         {state},
@@ -161,7 +172,7 @@ func (s *Server) googleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ck, err := r.Cookie(oauthCookie)
-	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: "", Path: "/auth/google", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: oauthCookie, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	state, nonce, _ := strings.Cut(func() string {
 		if err != nil {
 			return ""
@@ -209,7 +220,7 @@ func googleExchange(g GoogleConfig, code, nonce string) (string, error) {
 		"code":          {code},
 		"client_id":     {g.ClientID},
 		"client_secret": {g.ClientSecret},
-		"redirect_uri":  {g.Base + "/auth/google/callback"},
+		"redirect_uri":  {g.RedirectURI()},
 		"grant_type":    {"authorization_code"},
 	})
 	if err != nil {
@@ -256,4 +267,31 @@ func googleExchange(g GoogleConfig, code, nonce string) (string, error) {
 		return "", errors.New("구글에서 확인된 이메일이 없습니다.")
 	}
 	return strings.ToLower(c.Email), nil
+}
+
+const defaultGoogleCallback = "/auth/google/callback"
+
+// CallbackPath 는 구글이 돌려보낼 경로.
+func (g GoogleConfig) CallbackPath() string {
+	if g.Callback == "" {
+		return defaultGoogleCallback
+	}
+	return g.Callback
+}
+
+// RedirectURI 는 구글 콘솔에 등록해야 하는 리디렉션 URI.
+func (g GoogleConfig) RedirectURI() string { return g.Base + g.CallbackPath() }
+
+// isGoogleCallback: 요청 경로가 구글 콜백인지 (기본 경로 또는 설정한 경로).
+func (s *Server) isGoogleCallback(path string) bool {
+	if path == defaultGoogleCallback {
+		return true
+	}
+	g, ok := s.googleConfig()
+	return ok && path == g.CallbackPath()
+}
+
+type googleCache struct {
+	g  GoogleConfig
+	ok bool
 }

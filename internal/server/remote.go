@@ -692,7 +692,7 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 	localOnlyErr := &core.Error{Status: 403, Code: "local_only", Message: "이 PC 에서만 바꿀 수 있음"}
 	h("GET /admin/remote/google", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		g, ok := s.googleConfig()
-		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "users": s.WebUsers()}, nil
+		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "redirect_uri": g.RedirectURI(), "users": s.WebUsers()}, nil
 	})
 	h("PUT /admin/remote/google", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		if isRemoteWeb(r) {
@@ -706,7 +706,7 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 			return nil, err
 		}
 		g, ok := s.googleConfig()
-		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "users": s.WebUsers()}, nil
+		return map[string]any{"configured": ok, "client_id": g.ClientID, "base": g.Base, "redirect_uri": g.RedirectURI(), "users": s.WebUsers()}, nil
 	})
 	h("POST /admin/remote/web/users", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		if isRemoteWeb(r) {

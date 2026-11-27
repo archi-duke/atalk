@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"atalk/internal/core"
@@ -54,13 +55,14 @@ type Server struct {
 	RestartPort int
 
 	remoteDir    string
-	remote       remoteState  // 원격 포트 (remote.go)
-	relayClients relayClients // 중계 (relay.go)
-	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
-	revive       claudeReviver   // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
-	prompts      promptWatch     // 이 PC 화면의 방화벽·관리자 권한 확인 창 알림 (os_prompts.go)
-	headless     headlessRunner  // 창 없이 도는 에이전트 (headless.go)
-	approvals    approvals       // 헤드리스 허가 요청 (approval.go)
+	remote       remoteState                 // 원격 포트 (remote.go)
+	relayClients relayClients                // 중계 (relay.go)
+	codex        CodexWaker                  // Codex 깨우기 (codex_watch.go)
+	revive       claudeReviver               // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
+	prompts      promptWatch                 // 이 PC 화면의 방화벽·관리자 권한 확인 창 알림 (os_prompts.go)
+	gcfg         atomic.Pointer[googleCache] // 구글 로그인 설정 (webgoogle.go, 파일에서 한 번 읽어 둠)
+	headless     headlessRunner              // 창 없이 도는 에이전트 (headless.go)
+	approvals    approvals                   // 헤드리스 허가 요청 (approval.go)
 }
 
 func New(opts Options) (*Server, error) {
