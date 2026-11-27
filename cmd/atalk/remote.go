@@ -220,7 +220,7 @@ func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
 	}
 	base := at.str("base")
 	if base == "" {
-		fail("bad_arg", "--base https://<도메인>:<원격포트> 가 필요함 (구글에 등록한 리디렉션 URI 의 앞부분)")
+		fail("bad_arg", "--base https://<도메인>:<원격포트> 가 필요함 (구글에 등록한 리디렉션 URI 의 앞부분, 게이트웨이 뒤면 https://<도메인>/atalk)")
 	}
 	var secret string
 	if f := at.str("secret-file"); f != "" {

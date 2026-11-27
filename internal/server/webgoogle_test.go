@@ -148,4 +148,28 @@ func TestGoogleLogin(t *testing.T) {
 	if u := srv.WebUsers(); len(u) != 1 || u[0] != "me@example.com" {
 		t.Fatalf("허용 목록: %v", u)
 	}
+
+	// 게이트웨이 뒤 경로: base 에 /atalk 을 넣으면 리디렉션 URI 도 그 아래. 게이트웨이를 거쳐(X-Forwarded-Prefix) 오면 바로 구글로
+	if err := srv.SetGoogle(GoogleConfig{ClientID: "cid", ClientSecret: "sec", Base: base + "/a b"}); err == nil {
+		t.Fatal("이상한 경로의 base 는 거절")
+	}
+	if err := srv.SetGoogle(GoogleConfig{ClientID: "cid", ClientSecret: "sec", Base: base + "/atalk/", Callback: "/api/auth/callback/google"}); err != nil {
+		t.Fatal(err)
+	}
+	if g, _ := srv.googleConfig(); g.RedirectURI() != base+"/atalk/api/auth/callback/google" {
+		t.Fatalf("리디렉션 URI: %s", g.RedirectURI())
+	}
+	req, _ = http.NewRequest("GET", base+"/auth/google", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/atalk")
+	resp, err := newClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if loc, _ := url.Parse(resp.Header.Get("Location")); loc.Query().Get("redirect_uri") != base+"/atalk/api/auth/callback/google" {
+		t.Fatalf("게이트웨이 경유 구글 이동: %s", resp.Header.Get("Location"))
+	}
+	if resp, _ := do(newClient(), base+"/auth/google"); resp.Header.Get("Location") != base+"/atalk/auth/google" {
+		t.Fatalf("게이트웨이 없이 오면 설정 주소로: %q", resp.Header.Get("Location"))
+	}
 }
