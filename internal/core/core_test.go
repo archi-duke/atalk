@@ -1952,3 +1952,25 @@ func TestSetDoing(t *testing.T) {
 		t.Fatalf("작업 끝: %+v", v)
 	}
 }
+
+// 시스템 확인 창 알림(HoldNeedInput): 일을 이어 가도 풀리지 않고, "" 로 풀면 그 뒤 일반 확인 요청은 다시 활동으로 풀린다.
+func TestHoldNeedInput(t *testing.T) {
+	c := newEnv(t).core()
+	a, _, _ := setup(t, c)
+	ok(c.CreateRoom(a, "r", "", 0))
+	check(t, c.HoldNeedInput(a, "방화벽 허용 창"))
+	check(t, c.SetActivity(a, true))
+	check(t, c.SetActivity(a, false))
+	if ok(c.GetAgent(a)).NeedsInput != "방화벽 허용 창" {
+		t.Fatal("일을 이어 가도 남아 있어야 함")
+	}
+	check(t, c.HoldNeedInput(a, ""))
+	if ok(c.GetAgent(a)).NeedsInput != "" {
+		t.Fatal("\"\" 로 풀려야 함")
+	}
+	check(t, c.SetNeedInput(a, "Bash 실행 허가"))
+	check(t, c.SetActivity(a, true))
+	if ok(c.GetAgent(a)).NeedsInput != "" {
+		t.Fatal("일반 확인 요청은 활동으로 풀려야 함")
+	}
+}

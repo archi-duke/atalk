@@ -63,6 +63,7 @@ type Atalk struct {
 	approvals map[string]bool   // 웹에서 [허용]/[거부]로 답할 수 있는 허가 요청이 있는 에이전트 (헤드리스, 메모리에만)
 	askSeq    map[string][2]any // 에이전트 → 마지막 확인 카드의 방·번호 (답을 카드에 남길 때)
 	asking    map[string]bool   // atalk ask 로 질문하고 답을 기다리는 에이전트 (일을 이어 가도 확인 필요 표시를 풀지 않음)
+	hold      map[string]bool   // 시스템 확인 창 알림: 일을 이어 가도 풀지 않고, 창이 닫혀 데몬이 풀 때까지 둔다 (server/os_prompts.go)
 	listenAt  map[string]time.Time // 메시지 대기 훅(Claude wait)이 마지막으로 확인한 시각 (메모리에만)
 	idleAt    map[string]time.Time // 일을 마친 시각 — 끝난 직후 대기 훅이 다시 걸리기 전까지는 알림 꺼짐으로 보지 않는다
 	busyAcked map[string]map[string]bool // 작업 중 자동 수신 확인을 이미 보낸 상대 (에이전트 → 보낸 이). 작업이 끝나면 비움
@@ -1908,7 +1909,7 @@ func (c *Atalk) setActivity(agent string, busy bool, doing *string) error {
 				c.emit(Event{Type: "doing", Data: map[string]any{"agent": agent, "doing": *doing}})
 			}
 		}
-		if _, ok := c.needInput[agent]; ok && !c.asking[agent] { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침). atalk ask 질문은 답이 올 때까지 둔다
+		if _, ok := c.needInput[agent]; ok && !c.asking[agent] && !c.hold[agent] { // 허가했거나 답했음 (일을 이어 가거나 응답을 마침). atalk ask 질문은 답이 올 때까지 둔다
 			delete(c.needInput, agent)
 			c.emit(Event{Type: "agent", Data: map[string]any{"agent": agent, "action": "need_input", "text": ""}})
 		}
@@ -1933,7 +1934,13 @@ func (c *Atalk) setActivity(agent string, busy bool, doing *string) error {
 
 // SetNeedInput 은 사람의 확인·답을 기다리는지 기록한다. 새로 기다리기 시작하면 그 내용을 방에 status 로 남긴다 (아무도 깨우지 않음).
 // 일을 다시 시작하거나(입력·도구·응답 끝) text 가 "" 이면 풀린다.
-func (c *Atalk) SetNeedInput(agent, text string) error {
+func (c *Atalk) SetNeedInput(agent, text string) error { return c.setNeedInput(agent, text, false) }
+
+// HoldNeedInput 은 SetNeedInput 과 같지만, 에이전트가 일을 이어 가도 풀리지 않는다 (text "" 로 풀 때까지).
+// 이 PC 화면의 방화벽·관리자 권한 창처럼 에이전트의 일과 상관없이 사람이 눌러야 하는 것에 쓴다.
+func (c *Atalk) HoldNeedInput(agent, text string) error { return c.setNeedInput(agent, text, true) }
+
+func (c *Atalk) setNeedInput(agent, text string, hold bool) error {
 	return c.guard(func() error {
 		if _, err := c.requireAgent(agent); err != nil {
 			return err
@@ -1941,6 +1948,14 @@ func (c *Atalk) SetNeedInput(agent, text string) error {
 		text = strings.TrimSpace(text)
 		if r := []rune(text); len(r) > 1500 {
 			text = string(r[:1500]) + "…"
+		}
+		if c.hold == nil {
+			c.hold = map[string]bool{}
+		}
+		if text == "" || !hold {
+			delete(c.hold, agent)
+		} else {
+			c.hold[agent] = true
 		}
 		if c.needInput[agent] == text {
 			return nil

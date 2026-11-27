@@ -40,6 +40,7 @@ func (s *Server) watchLobbies(stop <-chan struct{}) {
 		s.reviveClaude()
 		s.runHeadless()
 		s.Core.SweepListening() // 대기 훅이 끊긴 Claude 를 화면에 "알림 꺼짐" 으로
+		s.watchPrompts()        // 방화벽·관리자 권한 확인 창이 떴으면 🙋 로 알림
 		if time.Since(lastBeat) >= heartbeatEvery {
 			lastBeat = time.Now()
 			s.beatRemotes()

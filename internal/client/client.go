@@ -690,3 +690,8 @@ func (c *Client) Approval(agent, text string, question bool) (r ApprovalResult, 
 func (c *Client) Ask(id, question string, options []string) error {
 	return c.call("POST", "/agents/"+esc(id)+"/ask", map[string]any{"question": question, "options": options}, nil, 0)
 }
+
+// HoldNeedInput 은 NeedInput 과 같지만 에이전트가 일을 이어 가도 풀리지 않는다 (text "" 로 풀 때까지).
+func (c *Client) HoldNeedInput(id, text string) error {
+	return c.call("POST", "/agents/"+esc(id)+"/need-input", map[string]any{"text": text, "hold": true}, nil, 0)
+}
