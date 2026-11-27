@@ -336,3 +336,24 @@ func (c *Client) SetWebUser(email string, on bool) ([]string, error) {
 	}
 	return out.Users, err
 }
+
+// SSOLogin 은 사내 SSO 로그인 설정 (비밀 값은 없음).
+type SSOLogin struct {
+	Configured bool     `json:"configured"`
+	URL        string   `json:"url"`
+	Base       string   `json:"base"`
+	Name       string   `json:"name"`
+	Login      string   `json:"login"`
+	Users      []string `json:"users"`
+}
+
+func (c *Client) SSOLogin() (s SSOLogin, err error) {
+	err = c.call("GET", "/admin/remote/sso", nil, &s, 0)
+	return
+}
+
+// SetSSOLogin 은 사내 SSO 로그인 설정을 저장한다 (url 이 "" 이면 끔).
+func (c *Client) SetSSOLogin(url, base, name string) (s SSOLogin, err error) {
+	err = c.call("PUT", "/admin/remote/sso", map[string]any{"url": url, "base": base, "name": name}, &s, 0)
+	return
+}

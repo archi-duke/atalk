@@ -210,6 +210,12 @@ func (s *Server) webOrAgent(api http.Handler) http.Handler {
 		case "/auth/google":
 			s.googleStart(w, r)
 			return
+		case "/auth/sso":
+			s.ssoStart(w, r)
+			return
+		case ssoCallback:
+			s.ssoCallbackHandler(w, r)
+			return
 		case "/logout":
 			if r.Method == http.MethodPost && sameOrigin(r) {
 				if ck, err := r.Cookie(webCookie); err == nil {
@@ -260,10 +266,19 @@ func (s *Server) webLogin(w http.ResponseWriter, r *http.Request) {
 
 // loginPage 는 로그인 화면 (구글 로그인이 설정돼 있으면 구글 버튼이 먼저, 코드 로그인은 접어 둠).
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, msg string) {
-	code := r.URL.Query().Get("code")
+	code := ""
+	if r.URL.Path == "/login" { // 구글·SSO 콜백의 ?code= 는 1회용 로그인 코드가 아님
+		code = r.URL.Query().Get("code")
+	}
 	googleBtn, codeOpen := "", " open"
+	if c, ok := s.ssoConfig(); ok {
+		googleBtn += `<a class="gbtn" href="` + webPrefix(r) + `/auth/sso">` + html.EscapeString(c.Label()) + `로 로그인</a>`
+	}
 	if _, ok := s.googleConfig(); ok {
-		googleBtn = `<a class="gbtn" href="` + webPrefix(r) + `/auth/google">Google 계정으로 로그인</a><p class="hint">이 PC 에 등록된 구글 계정만 들어올 수 있습니다.</p>`
+		googleBtn += `<a class="gbtn" href="` + webPrefix(r) + `/auth/google">Google 계정으로 로그인</a>`
+	}
+	if googleBtn != "" {
+		googleBtn += `<p class="hint">이 PC 에 등록된 사용자만 들어올 수 있습니다.</p>`
 		if code == "" {
 			codeOpen = ""
 		}
@@ -288,7 +303,7 @@ h1{font-size:20px;margin:0 0 4px}p{margin:0 0 16px;opacity:.8;font-size:14px}
 input{width:100%;box-sizing:border-box;padding:10px;font:inherit;letter-spacing:2px;text-transform:uppercase;border:1px solid var(--line);border-radius:8px;background:transparent;color:inherit}
 button{margin-top:12px;width:100%;padding:10px;font:inherit;border:0;border-radius:8px;background:var(--acc);color:#fff;cursor:pointer}
 .err{color:var(--err);font-size:14px;margin-top:10px}
-.gbtn{display:block;text-align:center;padding:10px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600}
+.gbtn{display:block;text-align:center;padding:10px;border-radius:8px;background:var(--acc);color:#fff;text-decoration:none;font-weight:600;margin-bottom:8px}
 .hint{margin:8px 0 12px;font-size:13px}
 details{margin-top:8px}summary{cursor:pointer;font-size:14px;opacity:.8}
 </style></head><body>

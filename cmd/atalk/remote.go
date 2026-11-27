@@ -50,6 +50,10 @@ func runRemote(lc *client.Client, at args, out func(any, string)) {
 			runWebGoogle(lc, at, out)
 			return
 		}
+		if len(at.pos) > 1 && at.pos[1] == "sso" {
+			runWebSSO(lc, at, out)
+			return
+		}
 		if len(at.pos) > 1 && at.pos[1] == "users" {
 			if len(at.pos) > 3 && (at.pos[2] == "add" || at.pos[2] == "remove") {
 				_, err := lc.SetWebUser(at.pos[3], at.pos[2] == "add")
@@ -59,9 +63,9 @@ func runRemote(lc *client.Client, at args, out func(any, string)) {
 			}
 			g, err := lc.GoogleLogin()
 			check(err)
-			text := "구글 로그인 허용 계정: (없음)"
+			text := "웹 로그인 허용 사용자: (없음)  — 구글 이메일 또는 sso:<SSO 아이디>"
 			if len(g.Users) > 0 {
-				text = "구글 로그인 허용 계정:\n  " + strings.Join(g.Users, "\n  ")
+				text = "웹 로그인 허용 사용자 (구글 이메일 / sso:SSO 아이디):\n  " + strings.Join(g.Users, "\n  ")
 			}
 			out(g.Users, text)
 			return
@@ -235,4 +239,45 @@ func runWebGoogle(lc *client.Client, at args, out func(any, string)) {
 	g, err := lc.SetGoogleLogin(at.pos[2], secret, base, at.str("callback"))
 	check(err)
 	show(g)
+}
+
+// runWebSSO: atalk remote web sso [SSO_URL --base URL [--name 이름] | off]
+// 사내 SSO (ADFS/MobilAve 계약): 클라이언트 등록·보안 비밀 없이 SSO 주소와 이 화면의 바깥 주소만 둔다.
+func runWebSSO(lc *client.Client, at args, out func(any, string)) {
+	show := func(s client.SSOLogin) {
+		if !s.Configured {
+			out(s, "사내 SSO 로그인: 꺼짐\n켜기: atalk remote web sso <SSO 주소> --base https://<도메인>[/경로] [--name 버튼이름]\n허용: atalk remote web users add sso:<SSO 아이디>")
+			return
+		}
+		var ids []string
+		for _, u := range s.Users {
+			if strings.HasPrefix(u, "sso:") {
+				ids = append(ids, strings.TrimPrefix(u, "sso:"))
+			}
+		}
+		users := "(없음 — atalk remote web users add sso:아이디)"
+		if len(ids) > 0 {
+			users = strings.Join(ids, ", ")
+		}
+		out(s, "사내 SSO 로그인: 켜짐 ("+s.Name+")\n  주소: "+s.Login+"\n  SSO: "+s.URL+"\n  허용 아이디: "+users)
+	}
+	if len(at.pos) < 3 {
+		s, err := lc.SSOLogin()
+		check(err)
+		show(s)
+		return
+	}
+	if at.pos[2] == "off" {
+		s, err := lc.SetSSOLogin("", "", "")
+		check(err)
+		show(s)
+		return
+	}
+	base := at.str("base")
+	if base == "" {
+		fail("bad_arg", "--base https://<도메인>[:포트][/경로] 가 필요함 (이 화면의 바깥 주소, 예: https://archi-duke.ddns.net/atalk)")
+	}
+	s, err := lc.SetSSOLogin(at.pos[2], base, at.str("name"))
+	check(err)
+	show(s)
 }
