@@ -26,6 +26,7 @@ import (
 const (
 	reviveQuiet    = 10 * time.Minute // 대화 기록이 이만큼 조용해야 (사람이 그 창을 쓰는 중이 아님)
 	reviveMsgAge   = 30 * time.Second // 메시지가 이만큼 기다렸는데도 전달되지 않았을 때 (대기 훅이 막 다시 걸리는 중일 수 있음)
+	reviveInvAge   = 5 * time.Second  // 초대는 더 빨리 (사람이 초대하고 기다리는 중)
 	reviveCooldown = 10 * time.Minute // 한 세션을 연달아 되살리지 않게
 	reviveMaxText  = 8000             // 명령줄로 넘기는 알림 최대 길이
 )
@@ -244,14 +245,14 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 	return true, nil
 }
 
-// oldInvites: 이 에이전트에게 온 대기 중 초대 중 reviveMsgAge 넘게 처리되지 않은 것 (대기 훅이 막 다시 걸리는 중일 수 있으므로).
+// oldInvites: 이 에이전트에게 온 대기 중 초대 중 reviveInvAge 넘게 처리되지 않은 것 (대기 훅이 막 다시 걸리는 중일 수 있으므로).
 func oldInvites(c *client.Client, id string) (out []core.PendingInvite) {
 	p, err := c.Pending(id)
 	if err != nil {
 		return nil
 	}
 	for _, i := range p.Invites {
-		if t, err := time.Parse(time.RFC3339Nano, i.At); err == nil && time.Since(t) >= reviveMsgAge {
+		if t, err := time.Parse(time.RFC3339Nano, i.At); err == nil && time.Since(t) >= reviveInvAge {
 			out = append(out, i)
 		}
 	}
