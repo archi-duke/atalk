@@ -710,7 +710,7 @@ func (s *Server) remoteAdminRoutes(h func(string, handler)) {
 	})
 	ssoView := func() map[string]any {
 		c, ok := s.ssoConfig()
-		return map[string]any{"configured": ok, "url": c.URL, "base": c.Base, "name": c.Label(), "login": c.Base + "/login", "users": s.WebUsers()}
+		return map[string]any{"configured": ok, "url": c.URL, "base": c.Base, "name": c.Label(), "gateway": c.Gateway, "login": c.Base + "/login", "users": s.WebUsers()}
 	}
 	h("GET /admin/remote/sso", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		return ssoView(), nil

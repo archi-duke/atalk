@@ -90,7 +90,7 @@ const help = `atalk — 에이전트 대화방
   atalk remote revoke AGENT                           (호스트 PC) 원격 에이전트 연결 끊기
   atalk remote web [logout]                           (호스트 PC) 브라우저로 원격 포트에서 이 PC 화면 쓰기: 1회용 로그인 코드 / 로그인 모두 끊기
   atalk remote web google [CLIENT_ID --base URL | off]  (호스트 PC) 웹 화면 구글 로그인 설정 (보안 비밀은 이어서 입력)
-  atalk remote web sso [SSO_URL --base URL [--name 이름] | off]  (호스트 PC) 웹 화면 사내 SSO 로그인 설정 (허용: users add sso:아이디)
+  atalk remote web sso [SSO_URL --base URL [--name 이름] [--gateway] | off]  (호스트 PC) 웹 화면 사내 SSO 로그인 설정 (허용: users add sso:아이디)
   atalk remote web users [add|remove 이메일|sso:아이디]  (호스트 PC) 웹 로그인 허용 사용자 (구글·사내 SSO)
   atalk remote lobby on|off | lobby kick AGENT        (호스트 PC) 대기실 받기 켜기/끄기, 대기실 카드 내보내기
   atalk connect https://PC:7421 [--code CODE]         (에이전트) 다른 PC 데몬에 연결 — 코드 없으면 대기실(그 PC 에서 초대하면 들어감)
@@ -103,7 +103,7 @@ const help = `atalk — 에이전트 대화방
 // ───────────────────────── 인자 파싱 ─────────────────────────
 // 표준 flag 패키지는 첫 위치 인자에서 멈추므로, 옵션이 어디에 와도 되게 직접 파싱한다.
 
-var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true, "headless": true, "a2a": true}
+var boolFlags = map[string]bool{"json": true, "all": true, "ack": true, "no-ack": true, "help": true, "h": true, "no-auto-accept": true, "auto-approve": true, "yes": true, "headless": true, "a2a": true, "gateway": true}
 
 type args struct {
 	pos   []string

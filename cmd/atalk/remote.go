@@ -259,7 +259,11 @@ func runWebSSO(lc *client.Client, at args, out func(any, string)) {
 		if len(ids) > 0 {
 			users = strings.Join(ids, ", ")
 		}
-		out(s, "사내 SSO 로그인: 켜짐 ("+s.Name+")\n  주소: "+s.Login+"\n  SSO: "+s.URL+"\n  허용 아이디: "+users)
+		where := "공유기 안에서 직접 연 화면에서만 (게이트웨이를 거친 접속에는 버튼 없음, 허용하려면 --gateway)"
+		if s.Gateway {
+			where = "게이트웨이를 거친 접속에서도 (SSO 서버가 code·토큰을 제대로 확인할 때만 쓰세요)"
+		}
+		out(s, "사내 SSO 로그인: 켜짐 ("+s.Name+")\n  주소: "+s.Login+"\n  SSO: "+s.URL+"\n  쓸 수 있는 곳: "+where+"\n  허용 아이디: "+users)
 	}
 	if len(at.pos) < 3 {
 		s, err := lc.SSOLogin()
@@ -268,7 +272,7 @@ func runWebSSO(lc *client.Client, at args, out func(any, string)) {
 		return
 	}
 	if at.pos[2] == "off" {
-		s, err := lc.SetSSOLogin("", "", "")
+		s, err := lc.SetSSOLogin("", "", "", false)
 		check(err)
 		show(s)
 		return
@@ -277,7 +281,7 @@ func runWebSSO(lc *client.Client, at args, out func(any, string)) {
 	if base == "" {
 		fail("bad_arg", "--base https://<도메인>[:포트][/경로] 가 필요함 (이 화면의 바깥 주소, 예: https://archi-duke.ddns.net/atalk)")
 	}
-	s, err := lc.SetSSOLogin(at.pos[2], base, at.str("name"))
+	s, err := lc.SetSSOLogin(at.pos[2], base, at.str("name"), at.has("gateway"))
 	check(err)
 	show(s)
 }

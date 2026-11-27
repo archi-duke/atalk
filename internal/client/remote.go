@@ -343,6 +343,7 @@ type SSOLogin struct {
 	URL        string   `json:"url"`
 	Base       string   `json:"base"`
 	Name       string   `json:"name"`
+	Gateway    bool     `json:"gateway"`
 	Login      string   `json:"login"`
 	Users      []string `json:"users"`
 }
@@ -353,7 +354,7 @@ func (c *Client) SSOLogin() (s SSOLogin, err error) {
 }
 
 // SetSSOLogin 은 사내 SSO 로그인 설정을 저장한다 (url 이 "" 이면 끔).
-func (c *Client) SetSSOLogin(url, base, name string) (s SSOLogin, err error) {
-	err = c.call("PUT", "/admin/remote/sso", map[string]any{"url": url, "base": base, "name": name}, &s, 0)
+func (c *Client) SetSSOLogin(url, base, name string, gateway bool) (s SSOLogin, err error) {
+	err = c.call("PUT", "/admin/remote/sso", map[string]any{"url": url, "base": base, "name": name, "gateway": gateway}, &s, 0)
 	return
 }

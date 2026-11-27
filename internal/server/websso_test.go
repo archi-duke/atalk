@@ -144,8 +144,26 @@ func TestSSOLogin(t *testing.T) {
 		t.Fatalf("구글 이메일 항목으로 SSO 로그인은 안 됨: %.300s", body)
 	}
 
-	// 게이트웨이 경로 아래 (/atalk): SSO 에 넘기는 돌아올 주소에 /atalk 이 들어가고 로그인됨
-	if err := srv.SetSSO(SSOConfig{URL: sso.URL, Base: base + "/atalk", Name: "MobilAve SSO"}); err != nil {
+	// 게이트웨이를 거친 접속은 기본으로 SSO 를 막음: 버튼 없음, 콜백을 직접 불러도 (아무 code 나 받는 목이어도) 로그인 안 됨
+	if err := srv.SetSSO(SSOConfig{URL: sso.URL, Base: base + "/atalk"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, body := do(newClient(), base+"/login", "/atalk"); strings.Contains(body, "/auth/sso") {
+		t.Fatal("게이트웨이 경유 로그인 화면에는 SSO 버튼이 없어야 함")
+	}
+	hcG := newClient()
+	if resp, _ := do(hcG, base+"/auth/sso", "/atalk"); strings.Contains(resp.Header.Get("Location"), "ADFSLogin") {
+		t.Fatal("게이트웨이 경유 /auth/sso 는 SSO 로 보내지 않아야 함")
+	}
+	if _, body := do(hcG, base+ssoCallback+"?state=x&code=c-duke.kimm", "/atalk"); !strings.Contains(body, "쓸 수 없습니다") {
+		t.Fatalf("게이트웨이 경유 콜백: %.300s", body)
+	}
+	if resp, _ := do(hcG, base+"/agents", "/atalk"); resp.StatusCode == 200 {
+		t.Fatal("게이트웨이 경유 SSO 로 들어오면 안 됨")
+	}
+
+	// --gateway 로 허용하면 게이트웨이 경로 아래 (/atalk) 에서도: 돌아올 주소에 /atalk 이 들어가고 로그인됨
+	if err := srv.SetSSO(SSOConfig{URL: sso.URL, Base: base + "/atalk", Name: "MobilAve SSO", Gateway: true}); err != nil {
 		t.Fatal(err)
 	}
 	hc3 := newClient()

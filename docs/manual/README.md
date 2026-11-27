@@ -519,7 +519,8 @@ atalk remote web sso off                      # 끄기
 - 흐름: **사내 SSO로 로그인** 버튼 → SSO `/Account/ADFSLogin` → `<base>/auth/sso/callback` 으로 돌아옴 → 이 PC 의 데몬이 SSO 에 직접 `/Account/exchange` (code → sessionToken), `/Account/introspect` (→ `loginid`) 로 확인 → 허용 목록에 `sso:<loginid>` 가 있으면 로그인 (30일).
 - 로그인 위조는 state 쿠키로 막고, code 교환·확인은 브라우저가 아니라 데몬이 합니다. 허용 목록에서 구글 이메일과 SSO 아이디는 섞이지 않습니다.
 - 구글과 함께 켜 두면 로그인 화면에 버튼이 둘 다 보입니다.
-- 시험용 목(Mock ADFS SSO)은 `introspect` 가 아무 토큰에나 `active` 를 돌려주는 관대 모드일 수 있습니다. 실제 SSO 로 바꾸면 그 서버가 확인합니다.
+- **기본으로 공유기 안에서 직접 연 화면에서만** 쓸 수 있습니다 (예: `https://192.168.219.108:44310/login`). 게이트웨이(Caddy)를 거친 바깥 접속에는 SSO 버튼이 없고 콜백도 받지 않습니다. 바깥에서도 쓰려면 `--gateway` 를 붙입니다. **SSO 서버가 code·토큰을 제대로 확인할 때만** 그렇게 하세요.
+- ⚠️ 시험용 목(Mock ADFS SSO, 관대 모드)은 **아무 code·토큰이나 받아 주고** `user=` 로 사용자를 고를 수 있습니다. 목을 쓰는 동안 그 SSO 로그인은 사실상 인증이 없으니, 목에는 `--gateway` 를 쓰지 말고 시험이 끝나면 `atalk remote web sso off` 로 끄세요.
 
 #### 게이트웨이 뒤에 두기 (`https://도메인/atalk`, 443 하나로 여러 앱)
 

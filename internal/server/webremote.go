@@ -271,7 +271,7 @@ func (s *Server) loginPage(w http.ResponseWriter, r *http.Request, msg string) {
 		code = r.URL.Query().Get("code")
 	}
 	googleBtn, codeOpen := "", " open"
-	if c, ok := s.ssoConfig(); ok {
+	if c, ok := s.ssoFor(r); ok {
 		googleBtn += `<a class="gbtn" href="` + webPrefix(r) + `/auth/sso">` + html.EscapeString(c.Label()) + `로 로그인</a>`
 	}
 	if _, ok := s.googleConfig(); ok {

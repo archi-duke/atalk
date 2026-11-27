@@ -41,6 +41,9 @@ type SSOConfig struct {
 	URL  string `json:"url"`            // SSO 서버, 예: http://192.168.219.106:8443
 	Base string `json:"base"`           // 이 화면의 바깥 주소, 예: https://archi-duke.ddns.net/atalk
 	Name string `json:"name,omitempty"` // 로그인 버튼 이름 (기본 "사내 SSO")
+	// Gateway: 게이트웨이(리버스 프록시)를 거쳐 온 요청에도 SSO 로그인을 허용. 기본은 꺼짐 — 공유기 안에서 직접 연 화면에서만.
+	// (시험용 목처럼 아무 code·토큰이나 받아 주는 SSO 를 인터넷에 열린 게이트웨이 뒤에서 켜면 누구나 들어올 수 있으므로)
+	Gateway bool `json:"gateway,omitempty"`
 }
 
 // Label 은 로그인 버튼에 보일 이름.
@@ -52,6 +55,21 @@ func (c SSOConfig) Label() string {
 }
 
 func (s *Server) ssoFile() string { return filepath.Join(s.remoteDir, "sso.json") }
+
+// viaGateway: 게이트웨이(Caddy 등)를 거쳐 온 요청인지 (게이트웨이는 X-Forwarded-For 를 붙임). 직접 연 사람이 이 헤더를 넣으면
+// 자기 SSO 버튼만 사라질 뿐이라 안전한 쪽으로 틀린다.
+func viaGateway(r *http.Request) bool {
+	return r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Forwarded-Prefix") != ""
+}
+
+// ssoFor 는 이 요청에 SSO 로그인을 쓸 수 있으면 설정을 돌려준다.
+func (s *Server) ssoFor(r *http.Request) (SSOConfig, bool) {
+	c, ok := s.ssoConfig()
+	if !ok || (viaGateway(r) && !c.Gateway) {
+		return c, false
+	}
+	return c, true
+}
 
 // ssoConfig 는 설정을 읽는다 (없으면 ok=false).
 func (s *Server) ssoConfig() (SSOConfig, bool) {
@@ -95,7 +113,7 @@ func (s *Server) SetSSO(c SSOConfig) error {
 
 // ssoStart: /auth/sso — SSO 로그인 화면으로. 설정한 주소가 아닌 곳으로 왔으면 그 주소로 먼저 옮긴다 (쿠키는 주소마다 따로).
 func (s *Server) ssoStart(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.ssoConfig()
+	c, ok := s.ssoFor(r)
 	if !ok {
 		http.Redirect(w, r, webPrefix(r)+"/login", http.StatusSeeOther)
 		return
@@ -114,9 +132,9 @@ func (s *Server) ssoStart(w http.ResponseWriter, r *http.Request) {
 // ssoCallbackHandler: SSO 에서 돌아옴 → code 를 sessionToken 으로 바꾸고 loginid 확인 → 허용 목록이면 로그인.
 func (s *Server) ssoCallbackHandler(w http.ResponseWriter, r *http.Request) {
 	fail := func(msg string) { s.loginPage(w, r, msg) }
-	c, ok := s.ssoConfig()
+	c, ok := s.ssoFor(r)
 	if !ok {
-		fail("사내 SSO 로그인이 설정되지 않았습니다.")
+		fail("사내 SSO 로그인을 여기서는 쓸 수 없습니다 (설정되지 않았거나, 게이트웨이를 거친 접속).")
 		return
 	}
 	ck, err := r.Cookie(ssoCookie)
