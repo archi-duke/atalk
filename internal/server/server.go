@@ -58,6 +58,7 @@ type Server struct {
 	relayClients relayClients // 중계 (relay.go)
 	codex        CodexWaker      // Codex 깨우기 (codex_watch.go)
 	revive       claudeReviver   // 대기가 끊긴 Claude 되살리기 (claude_revive.go)
+	prompts      promptWatch     // 이 PC 화면의 방화벽·관리자 권한 확인 창 알림 (os_prompts.go)
 	headless     headlessRunner  // 창 없이 도는 에이전트 (headless.go)
 	approvals    approvals       // 헤드리스 허가 요청 (approval.go)
 }
@@ -379,9 +380,13 @@ func (s *Server) routes() http.Handler {
 	h("POST /agents/{id}/need-input", func(w http.ResponseWriter, r *http.Request) (any, error) {
 		var b struct {
 			Text string `json:"text"`
+			Hold bool   `json:"hold,omitempty"` // 일을 이어 가도 풀지 않음 (시스템 확인 창 알림)
 		}
 		if err := readBody(r, &b); err != nil {
 			return nil, err
+		}
+		if b.Hold {
+			return map[string]any{}, c.HoldNeedInput(r.PathValue("id"), b.Text)
 		}
 		return map[string]any{}, c.SetNeedInput(r.PathValue("id"), b.Text)
 	})
