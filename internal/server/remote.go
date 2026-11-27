@@ -39,6 +39,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,10 @@ import (
 
 // DefaultRemotePort 는 원격 포트 기본값.
 const DefaultRemotePort = 7421
+
+// remoteListenHost 는 원격 포트가 듣는 주소 ("" = 모든 네트워크). 테스트는 127.0.0.1 로 바꿔
+// Windows 방화벽 허용 창이 테스트할 때마다(테스트 실행 파일 경로가 매번 달라짐) 뜨지 않게 한다 (main_test.go).
+var remoteListenHost = ""
 
 const (
 	pairCodeTTL  = 10 * time.Minute
@@ -150,7 +155,7 @@ func (s *Server) StartRemote(port int) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("인증서를 만들 수 없음: %w", err)
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	ln, err := net.Listen("tcp", net.JoinHostPort(remoteListenHost, strconv.Itoa(port)))
 	if err != nil {
 		return 0, err
 	}
