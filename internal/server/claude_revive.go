@@ -8,6 +8,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -30,8 +31,19 @@ const (
 )
 
 type claudeReviver struct {
-	mu   sync.Mutex
-	last map[string]time.Time
+	mu      sync.Mutex
+	last    map[string]time.Time
+	invited map[string]bool // 이미 그 초대로 되살린 것 (답하지 않은 초대로 10분마다 다시 열지 않게)
+}
+
+// freshInvites: 아직 그 초대로 되살리지 않은 오래된 초대. r.mu 를 잡고 부른다.
+func (r *claudeReviver) freshInvites(c *client.Client, id string) (out []core.PendingInvite) {
+	for _, i := range oldInvites(c, id) {
+		if !r.invited[id+"\n"+i.Room+"\n"+i.At] {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // waitHookAlive 는 이 세션의 메시지 대기 훅(atalk hook claude-code wait)이 살아 있는지. 대기 훅이 쓰는 표식 파일의 PID 로 본다.
@@ -125,8 +137,14 @@ func (s *Server) reviveClaude() {
 		} else {
 			c = client.New("")
 		}
-		if v.Busy || v.NeedsInput != "" || v.Room == nil || v.Status == "offline" {
+		if v.Busy || v.NeedsInput != "" || v.Status == "offline" {
 			continue
+		}
+		s.revive.mu.Lock()
+		noInvite := v.Room == nil && len(s.revive.freshInvites(c, v.ID)) == 0
+		s.revive.mu.Unlock()
+		if noInvite {
+			continue // 방 밖: 초대가 와 있을 때만 (방장이 다시 초대했는데 대기 훅이 끊겨 수락하지 못하는 경우)
 		}
 		if ok, err := s.revive.check(c, v); err != nil {
 			log.Printf("claude 되살리기 실패 (%s): %v", v.ID, err)
@@ -160,7 +178,11 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 			oldest = t
 		}
 	}
-	if len(forMe) == 0 || oldest.IsZero() || time.Since(oldest) < reviveMsgAge {
+	if r.invited == nil {
+		r.invited = map[string]bool{}
+	}
+	invites := r.freshInvites(c, v.ID)
+	if (len(forMe) == 0 || oldest.IsZero() || time.Since(oldest) < reviveMsgAge) && len(invites) == 0 {
 		return false, nil
 	}
 	tp := claudeTranscript(v.SessionID)
@@ -185,11 +207,25 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 	if st, err := os.Stat(*v.Cwd); err != nil || !st.IsDir() {
 		return false, nil
 	}
-	room := *v.Room
+	room := ""
+	if v.Room != nil {
+		room = *v.Room
+	}
 	if u.Room != nil {
 		room = *u.Room
 	}
-	text := c.Notice(room, forMe, nil, false)
+	var text string
+	if len(forMe) > 0 && room != "" {
+		text = c.Notice(room, forMe, nil, false)
+	}
+	for _, i := range invites {
+		how := "사용자에게 알리고, 사용자가 원하면"
+		if strings.HasSuffix(i.By, "(사람)") {
+			how = "내 사용자가 화면에서 보낸 초대이므로 바로"
+		}
+		text += fmt.Sprintf("\n[ATalk 초대] %s %q (보낸 이 %s) — %s `atalk accept %s`", i.Room, i.Title, i.By, how, i.Room)
+	}
+	text = strings.TrimSpace(text)
 	if rs := []rune(text); len(rs) > reviveMaxText {
 		text = string(rs[:reviveMaxText]) + "\n… (길어서 줄임: atalk unread 로 전체를 보세요)"
 	}
@@ -199,6 +235,25 @@ func (r *claudeReviver) check(c *client.Client, v core.AgentView) (bool, error) 
 	if err := procs.LaunchTerminal(*v.Cwd, []string{"claude", "--resume", v.SessionID, text}); err != nil {
 		return false, err
 	}
-	_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
+	if len(forMe) > 0 && room != "" {
+		_ = c.Delivered(v.ID, room, client.ForMeSeqs(forMe))
+	}
+	for _, i := range invites {
+		r.invited[v.ID+"\n"+i.Room+"\n"+i.At] = true
+	}
 	return true, nil
+}
+
+// oldInvites: 이 에이전트에게 온 대기 중 초대 중 reviveMsgAge 넘게 처리되지 않은 것 (대기 훅이 막 다시 걸리는 중일 수 있으므로).
+func oldInvites(c *client.Client, id string) (out []core.PendingInvite) {
+	p, err := c.Pending(id)
+	if err != nil {
+		return nil
+	}
+	for _, i := range p.Invites {
+		if t, err := time.Parse(time.RFC3339Nano, i.At); err == nil && time.Since(t) >= reviveMsgAge {
+			out = append(out, i)
+		}
+	}
+	return out
 }
