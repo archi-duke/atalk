@@ -207,6 +207,8 @@
   .chat-head .purpose { font-size:12px; color:var(--fg); opacity:.8; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:default; }
   .chat-head h2, .chat-head .sub { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chat-head select { max-width:40%; }
+  .chat-head .notes-tg { display:flex; align-items:center; gap:4px; font-size:12px; color:var(--muted); white-space:nowrap; cursor:pointer; user-select:none; }
+  .chat-head .notes-tg input { margin:0; cursor:pointer; }
   .chat-head select, .chat-head .btn { border:1px solid var(--line); background:var(--panel); border-radius:8px; padding:4px 8px; font-size:12px; cursor:pointer; text-decoration:none; color:var(--fg); }
   .members { display:none; padding:8px 16px; background:var(--panel); border-bottom:1px solid var(--line); font-size:12px; color:var(--muted); }
   .members.open { display:block; }
@@ -381,6 +383,7 @@
     <div class="chat-head" id="head" hidden>
       <button class="back" id="back" aria-label="뒤로">‹</button>
       <div class="grow"><h2 id="title"></h2><div class="sub" id="sub"></div><div class="purpose" id="purpose" hidden></div></div>
+      <label class="notes-tg" title="에이전트가 작업 중간에 쓴 말(📝 작업 메모)을 보이거나 감춥니다"><input type="checkbox" id="showNotes"> 작업 메모 보기</label>
       <select id="view" title="누구의 시점으로 볼지 (오른쪽 말풍선)"></select>
       <div class="menu-wrap" id="menuWrap"><button class="btn" id="menuBtn" title="방 메뉴" aria-haspopup="true">⋯</button>
         <div class="menu" id="menu" hidden>
@@ -550,6 +553,7 @@ const TYPE_KO = { task: "작업 요청", result: "결과", status: "상태" };
 let openAgent = null; // 에이전트 탭에서 펼친 카드
 let tab = "rooms", selected = null, agents = {}, rooms = [], previews = {}, roomLogs = {};
 let viewer = localGet("atalk.viewer") || "human";
+let showNotes = localGet("atalk.notes") !== "0"; // 작업 메모 보기 (기본: 보임)
 
 function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
 function localSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
@@ -1125,12 +1129,15 @@ function renderChat(scroll) {
   // (작업 중 표시·처리 기록 하나가 바뀔 때마다 메시지 수백 개를 통째로 다시 그리면 그동안 입력이 멈춘다)
   const keys = [], htmls = [];
   const push = (k, h) => { keys.push(k); htmls.push(h); };
+  // 작업 메모 감추기 (방 위 "작업 메모 보기" 체크): 감추면 말풍선 묶음·날짜 구분도 남은 메시지로만
+  const isNote = (m) => !!(m.echo && !m.human && m.reply_to && sentTo.has(m.from + "|" + m.reply_to));
+  const shown = showNotes ? msgs : msgs.filter((m) => !isNote(m));
   let lastDay = "";
-  msgs.forEach((m, i) => {
+  shown.forEach((m, i, arr) => {
     const dk = dayKey(m.ts);
     if (dk !== lastDay) { push("d" + dk, '<div class="day"><span>' + esc(dayLabel(m.ts)) + "</span></div>"); lastDay = dk; }
     if (m.type === "system") { push("s" + m.seq, '<div class="sys"><span>' + esc(clean(m.body)) + "</span></div>"); return; }
-    const prev = msgs[i - 1], next = msgs[i + 1];
+    const prev = arr[i - 1], next = arr[i + 1];
     const same = (a, b) => a && b && a.type !== "system" && b.type !== "system" && a.from === b.from && (a.human || "") === (b.human || "") &&
       dayKey(a.ts) === dayKey(b.ts) && hhmm(a.ts) === hhmm(b.ts);
     const first = !same(prev, m), lastInGroup = !same(m, next);
@@ -1144,7 +1151,7 @@ function renderChat(scroll) {
     } else if ((m.to || []).length) {
       inner += '<span class="chip status"><span class="to" style="margin:0">→ ' + m.to.map((t) => esc(nameOf(t))).join(", ") + "</span></span>";
     }
-    const note = !!(m.echo && !m.human && m.reply_to && sentTo.has(m.from + "|" + m.reply_to));
+    const note = isNote(m);
     const q = m.reply_to && !note ? bySeq[m.reply_to] : null;
     if (note) inner += '<span class="note-t" title="에이전트가 작업 중간에 쓴 말 (CLI 기록). 길면 눌러서 펼치거나 접습니다">📝 작업 메모</span>';
     if (q) inner += '<span class="quote" data-seq="' + q.seq + '"><b>' + (q.human ? esc(q.human) + "@" : "") + esc(nameOf(q.from)) + "</b> " + esc(clean(q.body).replace(/\s+/g, " ").slice(0, 90)) + "</span>";
@@ -1618,6 +1625,8 @@ $("#compose").onsubmit = async (e) => {
 };
 
 $("#view").onchange = (e) => { viewer = e.target.value; localSet("atalk.viewer", viewer); renderChat(false); };
+$("#showNotes").checked = showNotes;
+$("#showNotes").onchange = (e) => { showNotes = e.target.checked; localSet("atalk.notes", showNotes ? "1" : "0"); renderChat(false); };
 
 // ───────── 설정 ─────────
 const dlg = $("#settings");
