@@ -352,12 +352,18 @@
   .send-err:empty { display:none; }
 
   @media (max-width: 760px) {
-    .app { grid-template-columns:1fr; }
+    .app { grid-template-columns:minmax(0, 1fr); }
+    section { min-width:0; }
     .split { display:none; }
     .app.chatting aside { display:none; }
     .app:not(.chatting) section { display:none; }
     .chat-head .back { display:block; }
     .static .chat-head .back { display:none; }
+    /* 좁은 화면: 1줄 = 뒤로·방 제목, 2줄 = 작업 메모 보기·시점·방 메뉴 (오른쪽 정렬) — 겹치지 않게 */
+    .chat-head { flex-wrap:wrap; row-gap:6px; padding:8px 12px; }
+    .chat-head .grow { flex:1 1 calc(100% - 40px); }
+    .chat-head .notes-tg { margin-left:auto; }
+    .chat-head select { max-width:55%; }
     .col { max-width:82%; }
   }
 </style>
